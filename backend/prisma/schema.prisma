@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String         @id @default(cuid())
+  email        String         @unique
+  name         String
+  password     String
+  role         String         @default("member")
+  avatar       String?
+  departmentId String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  department      Department?       @relation(fields: [departmentId], references: [id])
+  ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  workspaces      WorkspaceUser[]
+  groups          UserGroup[]
+  createdTasks    Task[]            @relation("TaskCreator")
+  assignedTasks   Task[]            @relation("TaskAssignee")
+  comments        Comment[]
+  chatMessages    ChatMessage[]
+  documents       Document[]
+  notifications   Notification[]
+
+  @@index([email])
+  @@index([departmentId])
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  users       WorkspaceUser[]
+  departments Department[]
+  groups      Group[]
+  boards      Board[]
+  documents   Document[]
+
+  @@index([ownerId])
+}
+
+model WorkspaceUser {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  joinedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  workspaceId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  users     User[]
+
+  @@index([workspaceId])
+}
+
+model Group {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  workspaceId String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  users     UserGroup[]
+
+  @@index([workspaceId])
+}
+
+model UserGroup {
+  id        String   @id @default(cuid())
+  userId    String
+  groupId   String
+  joinedAt  DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+  @@index([userId])
+  @@index([groupId])
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  workspaceId String
+  viewMode    String   @default("kanban")
+  visibility  Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace  Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  columns    BoardColumn[]
+  taskFields TaskField[]
+  taskTypes  TaskType[]
+  tasks      Task[]
+
+  @@index([workspaceId])
+}
+
+model BoardColumn {
+  id          String   @id @default(cuid())
+  boardId     String
+  name        String
+  description String?
+  position    Int
+  autoAssign  Json?
+  visibility  Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@index([boardId])
+  @@index([position])
+}
+
+model TaskField {
+  id       String  @id @default(cuid())
+  boardId  String
+  name     String
+  type     String
+  required Boolean @default(false)
+  options  Json?
+  position Int
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([boardId])
+  @@index([position])
+}
+
+model TaskType {
+  id      String @id @default(cuid())
+  boardId String
+  name    String
+  color   String
+  icon    String?
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@index([boardId])
+}
+
+model Task {
+  id           String   @id @default(cuid())
+  boardId      String
+  columnId     String
+  typeId       String
+  title        String
+  description  String?
+  assigneeId   String?
+  createdBy    String
+  customFields Json     @default("{}")
+  attachments  Json     @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  board        Board           @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  column       BoardColumn     @relation(fields: [columnId], references: [id])
+  type         TaskType        @relation(fields: [typeId], references: [id])
+  creator      User            @relation("TaskCreator", fields: [createdBy], references: [id])
+  assignee     User?           @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  comments     Comment[]
+  chatMessages ChatMessage[]
+
+  @@index([boardId])
+  @@index([columnId])
+  @@index([typeId])
+  @@index([assigneeId])
+  @@index([createdBy])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  taskId    String
+  type      String
+  content   String
+  sender    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  size        Int
+  path        String
+  uploadedBy  String
+  workspaceId String
+  visibility  Json     @default("{}")
+  uploadedAt  DateTime @default(now())
+
+  uploader  User      @relation(fields: [uploadedBy], references: [id])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([uploadedBy])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  message   String
+  userId    String
+  relatedId String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
