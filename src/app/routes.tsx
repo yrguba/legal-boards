@@ -1,0 +1,60 @@
+import { createBrowserRouter, Navigate } from 'react-router';
+import { Layout } from './components/Layout';
+import { Login } from './pages/Login';
+import { Boards } from './pages/Boards';
+import { Board } from './pages/Board';
+import { Task } from './pages/Task';
+import { Employees } from './pages/Employees';
+import { Documents } from './pages/Documents';
+import { Settings } from './pages/Settings';
+import { useApp } from './store/AppContext';
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useApp();
+  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+export const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: <Login />,
+  },
+  {
+    path: '/',
+    element: (
+      <ProtectedRoute>
+        <Layout />
+      </ProtectedRoute>
+    ),
+    children: [
+      {
+        index: true,
+        element: <Boards />,
+      },
+      {
+        path: 'board/:boardId',
+        element: <Board />,
+      },
+      {
+        path: 'task/:taskId',
+        element: <Task />,
+      },
+      {
+        path: 'employees',
+        element: <Employees />,
+      },
+      {
+        path: 'documents',
+        element: <Documents />,
+      },
+      {
+        path: 'settings',
+        element: <Settings />,
+      },
+    ],
+  },
+  {
+    path: '*',
+    element: <Navigate to="/" replace />,
+  },
+]);
