@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { users, departments, groups } from '../store/mockData';
 import { useApp } from '../store/AppContext';
+import { useEmployees } from '../store/EmployeesContext';
 import { Plus, Users as UsersIcon, Building, UserPlus, Edit, Settings } from 'lucide-react';
 import { CreateDepartmentModal } from '../components/CreateDepartmentModal';
 import { CreateGroupModal } from '../components/CreateGroupModal';
+import { CreateEmployeeModal } from '../components/CreateEmployeeModal';
 import { EditEmployeeModal } from '../components/EditEmployeeModal';
 import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMembersModal';
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
@@ -13,9 +14,11 @@ type ViewMode = 'all' | 'departments' | 'groups';
 
 export function Employees() {
   const { currentWorkspace } = useApp();
+  const { users, departments, groups, createDepartment, createGroup, updateUser, updateDepartmentMembers, updateGroupMembers } = useEmployees();
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [isDepartmentModalOpen, setIsDepartmentModalOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+  const [isCreateEmployeeModalOpen, setIsCreateEmployeeModalOpen] = useState(false);
   const [isEditEmployeeModalOpen, setIsEditEmployeeModalOpen] = useState(false);
   const [isManageDepartmentMembersModalOpen, setIsManageDepartmentMembersModalOpen] = useState(false);
   const [isManageGroupMembersModalOpen, setIsManageGroupMembersModalOpen] = useState(false);
@@ -23,16 +26,22 @@ export function Employees() {
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
 
-  const handleCreateDepartment = (data: { name: string; description: string }) => {
-    console.log('Creating department:', data);
+  const handleCreateDepartment = async (data: { name: string; description: string }) => {
+    if (!currentWorkspace) return;
+    await createDepartment({ ...data, workspaceId: currentWorkspace.id });
+    setIsDepartmentModalOpen(false);
   };
 
-  const handleCreateGroup = (data: { name: string; description: string; memberIds: string[] }) => {
-    console.log('Creating group:', data);
+  const handleCreateGroup = async (data: { name: string; description: string; memberIds: string[] }) => {
+    if (!currentWorkspace) return;
+    await createGroup({ ...data, workspaceId: currentWorkspace.id });
+    setIsGroupModalOpen(false);
   };
 
-  const handleEditEmployee = (userId: string, data: { role: UserRole; departmentId?: string; groupIds: string[] }) => {
-    console.log('Editing employee:', userId, data);
+  const handleEditEmployee = async (userId: string, data: { role: UserRole; departmentId?: string; groupIds: string[] }) => {
+    await updateUser(userId, data);
+    setIsEditEmployeeModalOpen(false);
+    setSelectedEmployee(null);
   };
 
   const openEditEmployee = (user: User) => {
@@ -50,12 +59,16 @@ export function Employees() {
     setIsManageGroupMembersModalOpen(true);
   };
 
-  const handleManageDepartmentMembers = (departmentId: string, memberIds: string[]) => {
-    console.log('Managing department members:', departmentId, memberIds);
+  const handleManageDepartmentMembers = async (departmentId: string, memberIds: string[]) => {
+    await updateDepartmentMembers(departmentId, memberIds);
+    setIsManageDepartmentMembersModalOpen(false);
+    setSelectedDepartment(null);
   };
 
-  const handleManageGroupMembers = (groupId: string, memberIds: string[]) => {
-    console.log('Managing group members:', groupId, memberIds);
+  const handleManageGroupMembers = async (groupId: string, memberIds: string[]) => {
+    await updateGroupMembers(groupId, memberIds);
+    setIsManageGroupMembersModalOpen(false);
+    setSelectedGroup(null);
   };
 
   const workspaceDepartments = departments.filter(
@@ -107,7 +120,10 @@ export function Employees() {
             Управление пользователями, отделами и группами
           </p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors">
+        <button
+          onClick={() => setIsCreateEmployeeModalOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors"
+        >
           <UserPlus className="w-4 h-4" />
           Добавить сотрудника
         </button>
@@ -312,6 +328,11 @@ export function Employees() {
         isOpen={isGroupModalOpen}
         onClose={() => setIsGroupModalOpen(false)}
         onSubmit={handleCreateGroup}
+      />
+
+      <CreateEmployeeModal
+        isOpen={isCreateEmployeeModalOpen}
+        onClose={() => setIsCreateEmployeeModalOpen(false)}
       />
 
       <EditEmployeeModal

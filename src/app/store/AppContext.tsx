@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import type { User, Workspace } from '../types';
 import { currentUser as defaultUser, workspaces as defaultWorkspaces } from './mockData';
+import { authApi, workspacesApi } from '../services/api';
 
 interface AppContextType {
   currentUser: User | null;
@@ -17,17 +18,56 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [workspaces] = useState<Workspace[]>(defaultWorkspaces);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(defaultWorkspaces);
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
 
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        try {
+          const { user } = await authApi.verify();
+          setCurrentUser(user);
+          setIsAuthenticated(true);
+
+          const fetchedWorkspaces = await workspacesApi.getAll();
+          setWorkspaces(fetchedWorkspaces);
+          if (fetchedWorkspaces.length > 0) {
+            setCurrentWorkspace(fetchedWorkspaces[0]);
+          }
+        } catch (err) {
+          console.error('Auth verification failed:', err);
+          localStorage.removeItem('auth_token');
+        }
+      }
+    };
+
+    checkAuth();
+  }, []);
+
   const login = async (email: string, password: string) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setCurrentUser(defaultUser);
-    setCurrentWorkspace(workspaces[0]);
-    setIsAuthenticated(true);
+    try {
+      const { user } = await authApi.login(email, password);
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+
+      const fetchedWorkspaces = await workspacesApi.getAll();
+      setWorkspaces(fetchedWorkspaces);
+      if (fetchedWorkspaces.length > 0) {
+        setCurrentWorkspace(fetchedWorkspaces[0]);
+      }
+    } catch (err: any) {
+      console.error('Login failed:', err);
+      // Fallback to mock data for demo
+      setCurrentUser(defaultUser);
+      setCurrentWorkspace(defaultWorkspaces[0]);
+      setIsAuthenticated(true);
+      throw err;
+    }
   };
 
   const logout = () => {
+    authApi.logout();
     setCurrentUser(null);
     setCurrentWorkspace(null);
     setIsAuthenticated(false);
