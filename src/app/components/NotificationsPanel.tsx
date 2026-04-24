@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
-import { X, Bell, CheckCheck, FileText, MessageSquare, ArrowRightLeft, AtSign } from 'lucide-react';
-import { notifications } from '../store/mockData';
+import { useEffect, useMemo, useRef } from 'react';
+import { X, Bell, CheckCheck, FileText, MessageSquare, ArrowRightLeft, AtSign, UserPlus } from 'lucide-react';
 import type { Notification } from '../types';
+import { useNavigate } from 'react-router';
+import { useNotifications } from '../store/NotificationsContext';
 
 interface NotificationsPanelProps {
   isOpen: boolean;
@@ -10,6 +11,8 @@ interface NotificationsPanelProps {
 
 export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const { items, isLoading, refresh, markAsRead, markAllAsRead } = useNotifications();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -27,9 +30,12 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (!isOpen) return;
+    refresh();
+  }, [isOpen]);
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const unreadCount = useMemo(() => items.filter((n) => !n.isRead).length, [items]);
 
   const getNotificationIcon = (type: Notification['type']) => {
     switch (type) {
@@ -43,6 +49,10 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
         return <FileText className="w-5 h-5 text-purple-600" />;
       case 'mention':
         return <AtSign className="w-5 h-5 text-pink-600" />;
+      case 'user_added':
+        return <UserPlus className="w-5 h-5 text-emerald-600" />;
+      default:
+        return <Bell className="w-5 h-5 text-slate-600" />;
     }
   };
 
@@ -60,9 +70,11 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
     return date.toLocaleDateString('ru-RU');
   };
 
-  const handleMarkAllRead = () => {
-    console.log('Marking all notifications as read');
+  const handleMarkAllRead = async () => {
+    await markAllAsRead();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50">
@@ -100,19 +112,49 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {notifications.length === 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center h-full p-8 text-center">
+              <p className="text-slate-500">Загрузка…</p>
+            </div>
+          ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center">
               <Bell className="w-12 h-12 text-slate-300 mb-3" />
               <p className="text-slate-500">Нет уведомлений</p>
             </div>
           ) : (
             <div>
-              {notifications.map((notification) => (
+              {items.map((notification) => (
                 <div
                   key={notification.id}
                   className={`p-4 border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer ${
                     !notification.isRead ? 'bg-brand-light/30' : ''
                   }`}
+                  onClick={async () => {
+                    if (!notification.isRead) await markAsRead(notification.id);
+
+                    // Navigate by relatedId when possible
+                    if (notification.relatedId) {
+                      if (
+                        notification.type === 'task_assigned' ||
+                        notification.type === 'comment' ||
+                        notification.type === 'status_change' ||
+                        notification.type === 'document' ||
+                        notification.type === 'mention'
+                      ) {
+                        navigate(`/task/${notification.relatedId}`);
+                        onClose();
+                        return;
+                      }
+
+                      if (notification.type === 'user_added') {
+                        navigate('/');
+                        onClose();
+                        return;
+                      }
+                    }
+
+                    onClose();
+                  }}
                 >
                   <div className="flex gap-3">
                     <div className="flex-shrink-0 mt-0.5">

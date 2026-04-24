@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { broadcast } from '../index';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -161,6 +162,22 @@ router.post('/:id/users', async (req: AuthRequest, res) => {
         workspaceId: req.params.id,
         userId: user.id,
       },
+    });
+
+    const notification = await prisma.notification.create({
+      data: {
+        type: 'user_added',
+        title: 'Добавление в пространство',
+        message: `Вас добавили в рабочее пространство "${workspace.name}"`,
+        userId: user.id,
+        relatedId: workspace.id,
+      },
+    });
+
+    broadcast({
+      type: 'notification',
+      userId: user.id,
+      notification,
     });
 
     res.json(workspaceUser);

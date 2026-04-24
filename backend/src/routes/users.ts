@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, authorize } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
+import { broadcast } from '../index';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -135,6 +136,27 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
       });
 
       return { user: { ...user, groupIds: groups.map((g) => g.groupId) } };
+    });
+
+    const ws = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, name: true },
+    });
+
+    const notification = await prisma.notification.create({
+      data: {
+        type: 'user_added',
+        title: 'Добро пожаловать',
+        message: `Вас добавили в рабочее пространство "${ws?.name || 'пространство'}"`,
+        userId: result.user.id,
+        relatedId: workspaceId,
+      },
+    });
+
+    broadcast({
+      type: 'notification',
+      userId: result.user.id,
+      notification,
     });
 
     res.json({ ...result.user, initialPassword: plainPassword });

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
-import { notifications } from '../store/mockData';
+import { useNotifications } from '../store/NotificationsContext';
 
 export function Layout() {
   const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace } = useApp();
@@ -22,13 +22,14 @@ export function Layout() {
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const { unreadCount, toast } = useNotifications();
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_collapsed');
     if (saved === '1') setIsSidebarCollapsed(true);
   }, []);
+
+  // notifications handled globally
 
   const toggleSidebar = () => {
     setIsSidebarCollapsed((prev) => {
@@ -185,8 +186,19 @@ export function Layout() {
 
       <NotificationsPanel
         isOpen={showNotifications}
-        onClose={() => setShowNotifications(false)}
+        onClose={async () => {
+          setShowNotifications(false);
+        }}
       />
+
+      {toast ? (
+        <div className="fixed bottom-4 right-4 z-50 w-full max-w-sm">
+          <div className="rounded-lg border border-slate-200 bg-white shadow-lg p-4">
+            <div className="text-sm font-medium text-slate-900">{toast.title}</div>
+            <div className="mt-1 text-sm text-slate-600">{toast.message}</div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

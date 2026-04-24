@@ -8,6 +8,32 @@ const prisma = new PrismaClient();
 
 router.use(authenticate);
 
+async function createAndBroadcastNotification(args: {
+  type: string;
+  title: string;
+  message: string;
+  userId: string;
+  relatedId?: string;
+}) {
+  const notification = await prisma.notification.create({
+    data: {
+      type: args.type,
+      title: args.title,
+      message: args.message,
+      userId: args.userId,
+      relatedId: args.relatedId,
+    },
+  });
+
+  broadcast({
+    type: 'notification',
+    userId: args.userId,
+    notification,
+  });
+
+  return notification;
+}
+
 router.get('/board/:boardId', async (req: AuthRequest, res) => {
   try {
     const tasks = await prisma.task.findMany({
@@ -104,24 +130,12 @@ router.post('/', async (req: AuthRequest, res) => {
     });
 
     if (assigneeId && assigneeId !== req.userId) {
-      await prisma.notification.create({
-        data: {
-          type: 'task_assigned',
-          title: 'Новая задача',
-          message: `Вам назначена задача "${title}"`,
-          userId: assigneeId,
-          relatedId: task.id,
-        },
-      });
-
-      broadcast({
-        type: 'notification',
+      await createAndBroadcastNotification({
+        type: 'task_assigned',
+        title: 'Назначена задача',
+        message: `Вам назначена задача "${title}"`,
         userId: assigneeId,
-        notification: {
-          type: 'task_assigned',
-          title: 'Новая задача',
-          message: `Вам назначена задача "${title}"`,
-        },
+        relatedId: task.id,
       });
     }
 
@@ -160,20 +174,92 @@ router.put('/:id', async (req: AuthRequest, res) => {
     });
 
     if (oldTask && oldTask.columnId !== columnId) {
-      const column = await prisma.boardColumn.findUnique({
-        where: { id: columnId },
-      });
+      const [fromColumn, toColumn] = await Promise.all([
+        oldTask.columnId
+          ? prisma.boardColumn.findUnique({
+              where: { id: oldTask.columnId },
+              select: { name: true },
+            })
+          : Promise.resolve(null),
+        prisma.boardColumn.findUnique({
+          where: { id: columnId },
+          select: { name: true },
+        }),
+      ]);
 
-      if (column && oldTask.assigneeId) {
-        await prisma.notification.create({
-          data: {
-            type: 'status_change',
-            title: 'Изменение статуса',
-            message: `Задача "${task.title}" перемещена в статус "${column.name}"`,
-            userId: oldTask.assigneeId,
-            relatedId: task.id,
-          },
+      const notifyUserId = task.assigneeId || oldTask.assigneeId;
+      if (toColumn && notifyUserId && notifyUserId !== req.userId) {
+        await createAndBroadcastNotification({
+          type: 'status_change',
+          title: 'Изменение статуса',
+          message: `Статус задачи "${task.title}": "${fromColumn?.name || '—'}" → "${toColumn.name}"`,
+          userId: notifyUserId,
+          relatedId: task.id,
         });
+      }
+    }
+
+    if (oldTask && oldTask.typeId !== typeId) {
+      const notifyUserId = task.assigneeId;
+      if (notifyUserId && notifyUserId !== req.userId) {
+        const [fromType, toType] = await Promise.all([
+          oldTask.typeId
+            ? prisma.taskType.findUnique({
+                where: { id: oldTask.typeId },
+                select: { name: true },
+              })
+            : Promise.resolve(null),
+          typeId
+            ? prisma.taskType.findUnique({
+                where: { id: typeId },
+                select: { name: true },
+              })
+            : Promise.resolve(null),
+        ]);
+        await createAndBroadcastNotification({
+          type: 'status_change',
+          title: 'Изменение типа',
+          message: `Тип задачи "${task.title}": "${fromType?.name || '—'}" → "${toType?.name || '—'}"`,
+          userId: notifyUserId,
+          relatedId: task.id,
+        });
+      }
+    }
+
+    if (oldTask && oldTask.assigneeId !== assigneeId) {
+      if (assigneeId && assigneeId !== req.userId) {
+        await createAndBroadcastNotification({
+          type: 'task_assigned',
+          title: 'Новая задача',
+          message: `Вам назначена задача "${task.title}"`,
+          userId: assigneeId,
+          relatedId: task.id,
+        });
+      }
+    }
+
+    if (oldTask) {
+      const oldArr = Array.isArray(oldTask.attachments) ? (oldTask.attachments as any[]) : [];
+      const newArr = Array.isArray(task.attachments) ? (task.attachments as any[]) : [];
+      const changed =
+        oldArr.length !== newArr.length ||
+        oldArr.some((x) => !newArr.includes(x)) ||
+        newArr.some((x) => !oldArr.includes(x));
+      if (changed) {
+        const notifyUserId = task.assigneeId;
+        if (notifyUserId && notifyUserId !== req.userId) {
+          const actor = await prisma.user.findUnique({
+            where: { id: req.userId! },
+            select: { name: true },
+          });
+          await createAndBroadcastNotification({
+            type: 'document',
+            title: 'Обновлены вложения',
+            message: `${actor?.name || 'Пользователь'} обновил(а) вложения к задаче "${task.title}"`,
+            userId: notifyUserId,
+            relatedId: task.id,
+          });
+        }
       }
     }
 
@@ -220,14 +306,16 @@ router.post('/:id/comments', async (req: AuthRequest, res) => {
     });
 
     if (task && task.assigneeId && task.assigneeId !== req.userId) {
-      await prisma.notification.create({
-        data: {
-          type: 'comment',
-          title: 'Новый комментарий',
-          message: `Новый комментарий к задаче "${task.title}"`,
-          userId: task.assigneeId,
-          relatedId: req.params.id,
-        },
+      const actor = await prisma.user.findUnique({
+        where: { id: req.userId! },
+        select: { name: true },
+      });
+      await createAndBroadcastNotification({
+        type: 'comment',
+        title: 'Новый комментарий',
+        message: `${actor?.name || 'Пользователь'} оставил(а) комментарий к задаче "${task.title}"`,
+        userId: task.assigneeId,
+        relatedId: req.params.id,
       });
     }
 

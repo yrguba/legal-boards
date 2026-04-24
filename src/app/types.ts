@@ -132,7 +132,7 @@ export interface ChatMessage {
 
 export interface Notification {
   id: string;
-  type: 'task_assigned' | 'comment' | 'status_change' | 'document' | 'mention';
+  type: 'task_assigned' | 'comment' | 'status_change' | 'document' | 'mention' | 'user_added';
   title: string;
   message: string;
   userId: string;
