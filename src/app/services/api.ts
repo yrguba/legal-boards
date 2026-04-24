@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5004/api';
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -67,8 +67,19 @@ export const usersApi = {
     return fetchApi<any[]>('/users');
   },
 
+  async getByWorkspace(workspaceId: string) {
+    return fetchApi<any[]>(`/users/workspace/${workspaceId}`);
+  },
+
   async getById(id: string) {
     return fetchApi<any>(`/users/${id}`);
+  },
+
+  async create(data: any) {
+    return fetchApi<any>('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   async update(id: string, data: any) {
@@ -218,6 +229,20 @@ export const boardsApi = {
   async delete(id: string) {
     return fetchApi<void>(`/boards/${id}`, { method: 'DELETE' });
   },
+
+  async moveTasks(boardId: string, fromColumnId: string, toColumnId: string) {
+    return fetchApi<{ moved: number }>(`/boards/${boardId}/columns/${fromColumnId}/move-tasks`, {
+      method: 'POST',
+      body: JSON.stringify({ toColumnId }),
+    });
+  },
+
+  async moveTasksType(boardId: string, fromTypeId: string, toTypeId: string) {
+    return fetchApi<{ moved: number }>(`/boards/${boardId}/types/${fromTypeId}/move-tasks`, {
+      method: 'POST',
+      body: JSON.stringify({ toTypeId }),
+    });
+  },
 };
 
 // Tasks API
@@ -265,8 +290,11 @@ export const tasksApi = {
 
 // Documents API
 export const documentsApi = {
-  async getByWorkspace(workspaceId: string) {
-    return fetchApi<any[]>(`/documents/workspace/${workspaceId}`);
+  async getByWorkspace(workspaceId: string, opts?: { taskId?: string }) {
+    const params = new URLSearchParams();
+    if (opts?.taskId) params.set('taskId', opts.taskId);
+    const qs = params.toString();
+    return fetchApi<any[]>(`/documents/workspace/${workspaceId}${qs ? `?${qs}` : ''}`);
   },
 
   async upload(file: File, workspaceId: string, visibility: any) {
@@ -278,9 +306,7 @@ export const documentsApi = {
     const token = localStorage.getItem('auth_token');
     const response = await fetch(`${API_URL}/documents/upload`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: formData,
     });
 

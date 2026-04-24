@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import type { User, Workspace } from '../types';
-import { currentUser as defaultUser, workspaces as defaultWorkspaces } from './mockData';
+import { workspaces as defaultWorkspaces } from './mockData';
 import { authApi, workspacesApi } from '../services/api';
 
 interface AppContextType {
@@ -30,11 +30,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setCurrentUser(user);
           setIsAuthenticated(true);
 
-          const fetchedWorkspaces = await workspacesApi.getAll();
-          setWorkspaces(fetchedWorkspaces);
-          if (fetchedWorkspaces.length > 0) {
-            setCurrentWorkspace(fetchedWorkspaces[0]);
+          let fetchedWorkspaces = await workspacesApi.getAll();
+          if (fetchedWorkspaces.length === 0) {
+            await workspacesApi.create({
+              name: 'Моё рабочее пространство',
+              description: 'Автоматически создано при первом входе',
+            });
+            fetchedWorkspaces = await workspacesApi.getAll();
           }
+
+          setWorkspaces(fetchedWorkspaces);
+          if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
         } catch (err) {
           console.error('Auth verification failed:', err);
           localStorage.removeItem('auth_token');
@@ -51,17 +57,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCurrentUser(user);
       setIsAuthenticated(true);
 
-      const fetchedWorkspaces = await workspacesApi.getAll();
-      setWorkspaces(fetchedWorkspaces);
-      if (fetchedWorkspaces.length > 0) {
-        setCurrentWorkspace(fetchedWorkspaces[0]);
+      let fetchedWorkspaces = await workspacesApi.getAll();
+      if (fetchedWorkspaces.length === 0) {
+        await workspacesApi.create({
+          name: 'Моё рабочее пространство',
+          description: 'Автоматически создано при первом входе',
+        });
+        fetchedWorkspaces = await workspacesApi.getAll();
       }
+
+      setWorkspaces(fetchedWorkspaces);
+      if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
     } catch (err: any) {
       console.error('Login failed:', err);
-      // Fallback to mock data for demo
-      setCurrentUser(defaultUser);
-      setCurrentWorkspace(defaultWorkspaces[0]);
-      setIsAuthenticated(true);
       throw err;
     }
   };

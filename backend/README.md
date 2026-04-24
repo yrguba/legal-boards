@@ -26,9 +26,9 @@ cp .env.example .env
 
 3. Настройте переменные окружения в `.env`:
 ```
-DATABASE_URL="postgresql://user:password@localhost:5432/legalboards"
+DATABASE_URL="postgresql://user:password@localhost:5432/legalboards?schema=public"
 JWT_SECRET="your-secret-key"
-PORT=3001
+PORT=5004
 ```
 
 4. Создайте базу данных и выполните миграции:

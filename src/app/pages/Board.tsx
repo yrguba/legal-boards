@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router';
-import { boards, tasks as initialTasks, users, taskTypes } from '../store/mockData';
+import { boardsApi, tasksApi, usersApi } from '../services/api';
+import type { Board as BoardType, Task as TaskType, User as UserType } from '../types';
 import {
   Plus,
   LayoutGrid,
@@ -24,6 +25,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { CreateTaskModal } from '../components/CreateTaskModal';
 
 interface DroppableColumnProps {
   column: any;
@@ -31,6 +33,7 @@ interface DroppableColumnProps {
   getTaskTypeName: (typeId: string) => string;
   getTaskTypeColor: (typeId: string) => string;
   getAssigneeName: (userId?: string) => string;
+  onCreateTask: (columnId: string) => void;
 }
 
 function DroppableColumn({
@@ -39,6 +42,7 @@ function DroppableColumn({
   getTaskTypeName,
   getTaskTypeColor,
   getAssigneeName,
+  onCreateTask,
 }: DroppableColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -82,7 +86,10 @@ function DroppableColumn({
           )}
         </div>
 
-        <button className="mt-4 w-full flex items-center justify-center gap-2 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors">
+        <button
+          onClick={() => onCreateTask(column.id)}
+          className="mt-4 w-full flex items-center justify-center gap-2 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors"
+        >
           <Plus className="w-4 h-4" />
           Добавить задачу
         </button>
@@ -177,10 +184,15 @@ function TaskCard({ task, getTaskTypeName, getTaskTypeColor, getAssigneeName }: 
 
 export function Board() {
   const { boardId } = useParams();
-  const board = boards.find((b) => b.id === boardId);
-  const [viewMode, setViewMode] = useState<'kanban' | 'list'>(board?.viewMode || 'kanban');
-  const [tasks, setTasks] = useState(initialTasks.filter((t) => t.boardId === boardId));
+  const [board, setBoard] = useState<BoardType | null>(null);
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+  const [tasks, setTasks] = useState<TaskType[]>([]);
+  const [users, setUsers] = useState<UserType[]>([]);
   const [activeTask, setActiveTask] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [createTaskColumnId, setCreateTaskColumnId] = useState<string>('');
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -190,7 +202,63 @@ export function Board() {
     })
   );
 
+  useEffect(() => {
+    const idOrCode = boardId;
+    if (!idOrCode) return;
+
+    let cancelled = false;
+    const load = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [b, allUsers] = await Promise.all([boardsApi.getById(idOrCode), usersApi.getAll()]);
+        if (cancelled) return;
+        setBoard(b);
+        setViewMode((b.viewMode as 'kanban' | 'list') || 'kanban');
+        setUsers(allUsers);
+
+        const boardTasks = await tasksApi.getByBoard(b.id);
+        if (!cancelled) setTasks(boardTasks);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Не удалось загрузить доску');
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
+
   const boardTasks = tasks;
+
+  const taskTypes = useMemo(() => board?.taskTypes || [], [board?.taskTypes]);
+  const columns = useMemo(() => board?.columns || [], [board?.columns]);
+
+  if (isLoading) {
+    return (
+      <div className="p-6">
+        <div className="bg-white rounded-lg border border-slate-200 p-12 text-center">
+          <div className="text-sm text-slate-600">Загрузка доски…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-slate-900">Доска не найдена</h2>
+        </div>
+      </div>
+    );
+  }
 
   if (!board) {
     return (
@@ -217,6 +285,35 @@ export function Board() {
   const getAssigneeName = (userId?: string) => {
     if (!userId) return 'Не назначено';
     return users.find((u) => u.id === userId)?.name || 'Неизвестно';
+  };
+
+  const openCreateTask = (columnId: string) => {
+    setCreateTaskColumnId(columnId);
+    setIsCreateTaskOpen(true);
+  };
+
+  const handleCreateTask = async (data: {
+    title: string;
+    description?: string;
+    typeId: string;
+    assigneeId?: string;
+    customFields: Record<string, any>;
+  }) => {
+    if (!board) throw new Error('Доска не загружена');
+    if (!createTaskColumnId) throw new Error('Не выбрана колонка');
+
+    const created = await tasksApi.create({
+      boardId: board.id,
+      columnId: createTaskColumnId,
+      typeId: data.typeId,
+      title: data.title,
+      description: data.description,
+      assigneeId: data.assigneeId,
+      customFields: data.customFields,
+      attachments: [],
+    });
+
+    setTasks((prev) => [created, ...prev]);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -263,20 +360,7 @@ export function Board() {
     if (!activeTask) return;
 
     try {
-      const response = await fetch(`/api/tasks/${activeTaskId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          columnId: activeTask.columnId,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update task');
-      }
+      await tasksApi.update(activeTaskId, { columnId: activeTask.columnId });
     } catch (error) {
       console.error('Error updating task column:', error);
       const overId = over.id as string;
@@ -347,7 +431,7 @@ export function Board() {
             onDragEnd={handleDragEnd}
           >
             <div className="flex gap-4 h-full">
-              {board.columns.map((column) => {
+              {columns.map((column) => {
                 const columnTasks = getTasksByColumn(column.id);
                 return (
                   <DroppableColumn
@@ -357,6 +441,7 @@ export function Board() {
                     getTaskTypeName={getTaskTypeName}
                     getTaskTypeColor={getTaskTypeColor}
                     getAssigneeName={getAssigneeName}
+                    onCreateTask={openCreateTask}
                   />
                 );
               })}
@@ -405,7 +490,7 @@ export function Board() {
               </thead>
               <tbody>
                 {boardTasks.map((task) => {
-                  const column = board.columns.find((c) => c.id === task.columnId);
+                  const column = columns.find((c) => c.id === task.columnId);
                   return (
                     <tr
                       key={task.id}
@@ -448,6 +533,17 @@ export function Board() {
           </div>
         )}
       </div>
+
+      {board && (
+        <CreateTaskModal
+          isOpen={isCreateTaskOpen}
+          onClose={() => setIsCreateTaskOpen(false)}
+          board={board}
+          columnId={createTaskColumnId}
+          users={users}
+          onSubmit={handleCreateTask}
+        />
+      )}
     </div>
   );
 }

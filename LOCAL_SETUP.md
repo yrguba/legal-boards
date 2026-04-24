@@ -36,7 +36,7 @@ GRANT ALL PRIVILEGES ON DATABASE legalboards TO legaluser;
 ## 3. Настройка Backend
 
 ```bash
-cd server
+cd backend
 
 # Установите зависимости
 pnpm install
@@ -45,11 +45,11 @@ pnpm install
 cp .env.example .env
 ```
 
-Отредактируйте `server/.env`:
+Отредактируйте `backend/.env`:
 ```env
 DATABASE_URL="postgresql://legaluser:yourpassword@localhost:5432/legalboards?schema=public"
 JWT_SECRET="your-random-secret-key-here-change-this"
-PORT=3001
+PORT=5004
 NODE_ENV=development
 UPLOAD_DIR=./uploads
 ```
@@ -69,7 +69,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-Backend будет работать на **http://localhost:3001**
+Backend будет работать на **http://localhost:5004**
 
 ## 4. Настройка Frontend
 
@@ -100,7 +100,7 @@ Frontend будет работать на **http://localhost:5173**
 Или зарегистрируйте нового пользователя через API:
 
 ```bash
-curl -X POST http://localhost:3001/api/auth/register \
+curl -X POST http://localhost:5004/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@legalboards.com",
@@ -117,7 +117,7 @@ curl -X POST http://localhost:3001/api/auth/register \
 ## Структура запущенного проекта
 
 ```
-Terminal 1: Backend (http://localhost:3001)
+Terminal 1: Backend (http://localhost:5004)
 Terminal 2: Frontend (http://localhost:5173)
 PostgreSQL: База данных (localhost:5432)
 ```
@@ -126,7 +126,7 @@ PostgreSQL: База данных (localhost:5432)
 
 ### Backend:
 ```bash
-cd server
+cd backend
 pnpm dev              # Запуск в режиме разработки
 pnpm build            # Сборка для production
 pnpm start            # Запуск production версии
@@ -144,22 +144,22 @@ pnpm build            # Сборка для production
 
 ### Ошибка подключения к БД
 - Проверьте что PostgreSQL запущен: `pg_isready`
-- Проверьте DATABASE_URL в `server/.env`
+- Проверьте DATABASE_URL в `backend/.env`
 - Проверьте что БД создана: `psql -l | grep legalboards`
 
 ### Ошибка миграций Prisma
 ```bash
-cd server
+cd backend
 pnpm db:push  # Пересоздаст схему БД
 ```
 
 ### Порт занят
-- Backend: измените PORT в `server/.env`
+- Backend: измените PORT в `backend/.env`
 - Frontend: измените в `vite.config.ts`
 
 ### Ошибка CORS
-- Убедитесь что backend запущен на порту 3001
-- Проверьте настройки cors в `server/src/index.ts`
+- Убедитесь что backend запущен на порту 5004
+- Проверьте настройки cors в `backend/src/index.ts`
 
 ### node_modules не установлены
 ```bash
@@ -167,13 +167,13 @@ pnpm db:push  # Пересоздаст схему БД
 pnpm install
 
 # Backend
-cd server
+cd backend
 pnpm install
 ```
 
 ## Проверка что всё работает
 
-1. **Backend API:** http://localhost:3001/api/auth/verify (должен вернуть ошибку 401)
+1. **Backend API:** http://localhost:5004/api/auth/verify (должен вернуть ошибку 401)
 2. **Frontend:** http://localhost:5173 (должна открыться страница входа)
 3. **База данных:** `psql legalboards -c "SELECT version();"` (должна вывести версию PostgreSQL)
 

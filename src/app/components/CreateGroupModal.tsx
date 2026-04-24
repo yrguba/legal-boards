@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { users } from '../store/mockData';
 import { useApp } from '../store/AppContext';
+import { useEmployees } from '../store/EmployeesContext';
 
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -11,6 +11,7 @@ interface CreateGroupModalProps {
 
 export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModalProps) {
   const { currentWorkspace } = useApp();
+  const { users } = useEmployees();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);

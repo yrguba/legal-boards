@@ -50,7 +50,7 @@ pnpm prisma:migrate
 pnpm dev
 ```
 
-Backend будет доступен на `http://localhost:3001`
+Backend будет доступен на `http://localhost:5004`
 
 ### Frontend
 

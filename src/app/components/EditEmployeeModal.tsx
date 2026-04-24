@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { User, UserRole } from '../types';
-import { departments, groups } from '../store/mockData';
 import { useApp } from '../store/AppContext';
+import { useEmployees } from '../store/EmployeesContext';
 
 interface EditEmployeeModalProps {
   isOpen: boolean;
@@ -13,6 +13,7 @@ interface EditEmployeeModalProps {
 
 export function EditEmployeeModal({ isOpen, onClose, onSubmit, employee }: EditEmployeeModalProps) {
   const { currentWorkspace } = useApp();
+  const { departments, groups } = useEmployees();
   const [role, setRole] = useState<UserRole>('member');
   const [departmentId, setDepartmentId] = useState<string>('');
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);

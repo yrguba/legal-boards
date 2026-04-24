@@ -1,5 +1,5 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { Briefcase } from 'lucide-react';
 
@@ -9,19 +9,21 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const { login, isAuthenticated } = useApp();
   const navigate = useNavigate();
+  const location = useLocation() as any;
+  const from = location?.state?.from || '/';
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/', { replace: true });
+      navigate(from, { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, from]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       await login(email, password);
-      navigate('/');
+      navigate(from);
     } catch (error) {
       console.error('Login failed:', error);
     } finally {
@@ -82,7 +84,7 @@ export function Login() {
           </form>
 
           <p className="text-xs text-slate-500 text-center mt-6">
-            Для демонстрации используйте любой email и пароль
+            Используйте ваши реальные учетные данные
           </p>
         </div>
       </div>

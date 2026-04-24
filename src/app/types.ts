@@ -68,7 +68,7 @@ export interface BoardColumn {
 export interface TaskField {
   id: string;
   name: string;
-  type: 'text' | 'textarea' | 'select' | 'multiselect' | 'date' | 'user' | 'file';
+  type: 'text' | 'textarea' | 'select' | 'date';
   required: boolean;
   options?: string[];
   position: number;
@@ -83,9 +83,11 @@ export interface TaskType {
 
 export interface Board {
   id: string;
+  code: string;
   name: string;
   description?: string;
   workspaceId: string;
+  attachmentsEnabled?: boolean;
   visibility: {
     departmentIds?: string[];
     groupIds?: string[];

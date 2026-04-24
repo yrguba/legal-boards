@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
 import { WebSocketServer } from 'ws';
 import http from 'http';
 import authRoutes from './routes/auth';
@@ -12,11 +13,13 @@ import groupRoutes from './routes/groups';
 import documentRoutes from './routes/documents';
 import notificationRoutes from './routes/notifications';
 
+dotenv.config();
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 5004;
 
 app.use(cors());
 app.use(express.json());

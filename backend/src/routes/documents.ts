@@ -27,8 +27,23 @@ router.use(authenticate);
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
+    const taskId = typeof req.query.taskId === 'string' ? req.query.taskId : undefined;
+
     const documents = await prisma.document.findMany({
-      where: { workspaceId: req.params.workspaceId },
+      where: taskId
+        ? {
+            workspaceId: req.params.workspaceId,
+            OR: [
+              { visibility: { path: ['type'], equals: 'workspace' } },
+              {
+                AND: [
+                  { visibility: { path: ['type'], equals: 'task' } },
+                  { visibility: { path: ['taskId'], equals: taskId } },
+                ],
+              },
+            ],
+          }
+        : { workspaceId: req.params.workspaceId },
       include: {
         uploader: {
           select: { id: true, name: true, email: true },
@@ -128,9 +143,26 @@ router.delete('/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
 
-    await prisma.document.delete({
-      where: { id: req.params.id },
+    const docId = req.params.id;
+
+    const tasksWithDoc = await prisma.task.findMany({
+      where: { attachments: { array_contains: [docId] } },
+      select: { id: true, attachments: true },
     });
+
+    await prisma.$transaction([
+      ...tasksWithDoc.map((t) => {
+        const arr = Array.isArray(t.attachments) ? (t.attachments as any[]) : [];
+        const next = arr.filter((x) => x !== docId);
+        return prisma.task.update({
+          where: { id: t.id },
+          data: { attachments: next },
+        });
+      }),
+      prisma.document.delete({
+        where: { id: docId },
+      }),
+    ]);
 
     res.json({ message: 'Документ удален' });
   } catch (error) {

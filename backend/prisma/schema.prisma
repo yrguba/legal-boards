@@ -109,11 +109,13 @@ model UserGroup {
 
 model Board {
   id          String   @id @default(cuid())
+  code        String   @unique
   name        String
   description String?
   workspaceId String
   viewMode    String   @default("kanban")
   visibility  Json     @default("{}")
+  attachmentsEnabled Boolean @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

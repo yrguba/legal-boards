@@ -19,11 +19,13 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
     departmentId: '',
     groupIds: [] as string[],
   });
+  const [createdPassword, setCreatedPassword] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const workspaceDepartments = departments.filter(d => d.workspaceId === currentWorkspace?.id);
   const workspaceGroups = groups.filter(g => g.workspaceId === currentWorkspace?.id);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.name.trim() || !formData.email.trim()) {
@@ -31,22 +33,33 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
       return;
     }
 
-    createUser({
-      name: formData.name,
-      email: formData.email,
-      role: formData.role,
-      departmentId: formData.departmentId || undefined,
-      groupIds: formData.groupIds,
-    });
+    if (!currentWorkspace) {
+      setSubmitError('Не выбрано рабочее пространство');
+      return;
+    }
 
-    setFormData({
-      name: '',
-      email: '',
-      role: 'member',
-      departmentId: '',
-      groupIds: [],
-    });
-    onClose();
+    setSubmitError(null);
+    try {
+      const res = await createUser({
+        name: formData.name,
+        email: formData.email,
+        role: formData.role,
+        workspaceId: currentWorkspace.id,
+        departmentId: formData.departmentId || undefined,
+        groupIds: formData.groupIds,
+      });
+
+      setCreatedPassword(res?.initialPassword || null);
+      setFormData({
+        name: '',
+        email: '',
+        role: 'member',
+        departmentId: '',
+        groupIds: [],
+      });
+    } catch (e: any) {
+      setSubmitError(e?.message || 'Не удалось добавить сотрудника');
+    }
   };
 
   const toggleGroup = (groupId: string) => {
@@ -74,6 +87,21 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
         </div>
 
         <form onSubmit={handleSubmit}>
+          {submitError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {submitError}
+            </div>
+          )}
+
+          {createdPassword && (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              Пароль для входа: <span className="font-medium">{createdPassword}</span>
+              <div className="text-xs text-slate-500 mt-1">
+                Сохраните пароль и передайте сотруднику. Он отображается только один раз.
+              </div>
+            </div>
+          )}
+
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">

@@ -1,11 +1,148 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, authorize } from '../middleware/auth';
+import bcrypt from 'bcryptjs';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(authenticate);
+
+router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, ownerId: true },
+    });
+
+    if (!workspace) {
+      return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+    }
+
+    // Only members can see users in workspace
+    const isMember = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.userId! } },
+      select: { id: true },
+    });
+    if (!isMember && workspace.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const memberships = await prisma.workspaceUser.findMany({
+      where: { workspaceId },
+      select: { userId: true },
+    });
+
+    const userIds = Array.from(new Set([workspace.ownerId, ...memberships.map((m) => m.userId)]));
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        avatar: true,
+        departmentId: true,
+        createdAt: true,
+      },
+    });
+
+    const usersWithGroups = await Promise.all(
+      users.map(async (user) => {
+        const groups = await prisma.userGroup.findMany({
+          where: { userId: user.id },
+          select: { groupId: true },
+        });
+        return { ...user, groupIds: groups.map((g) => g.groupId) };
+      })
+    );
+
+    res.json(usersWithGroups);
+  } catch (error) {
+    console.error('Get workspace users error:', error);
+    res.status(500).json({ error: 'Ошибка получения пользователей' });
+  }
+});
+
+router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+  try {
+    const { email, name, role = 'member', workspaceId, departmentId, groupIds, password } = req.body;
+
+    if (!email || !name || !workspaceId) {
+      return res.status(400).json({ error: 'email, name и workspaceId обязательны' });
+    }
+
+    // Ensure caller is owner or member (admin/manager already checked) of workspace
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { ownerId: true },
+    });
+    if (!workspace) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+
+    const isMember = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.userId! } },
+      select: { id: true },
+    });
+    if (!isMember && workspace.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const plainPassword: string =
+      typeof password === 'string' && password.trim()
+        ? password.trim()
+        : Math.random().toString(36).slice(2, 10);
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          name,
+          password: hashedPassword,
+          role,
+          departmentId: departmentId || null,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          avatar: true,
+          departmentId: true,
+          createdAt: true,
+        },
+      });
+
+      await tx.workspaceUser.create({
+        data: {
+          workspaceId,
+          userId: user.id,
+        },
+      });
+
+      if (Array.isArray(groupIds) && groupIds.length > 0) {
+        await tx.userGroup.createMany({
+          data: groupIds.map((groupId: string) => ({ userId: user.id, groupId })),
+        });
+      }
+
+      const groups = await tx.userGroup.findMany({
+        where: { userId: user.id },
+        select: { groupId: true },
+      });
+
+      return { user: { ...user, groupIds: groups.map((g) => g.groupId) } };
+    });
+
+    res.json({ ...result.user, initialPassword: plainPassword });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Ошибка создания пользователя' });
+  }
+});
 
 router.get('/', async (req: AuthRequest, res) => {
   try {

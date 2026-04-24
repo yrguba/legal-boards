@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useEmployees } from '../store/EmployeesContext';
 import { Plus, Users as UsersIcon, Building, UserPlus, Edit, Settings } from 'lucide-react';
@@ -9,8 +9,72 @@ import { EditEmployeeModal } from '../components/EditEmployeeModal';
 import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMembersModal';
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
 import type { User, UserRole, Department, Group } from '../types';
+import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 
 type ViewMode = 'all' | 'departments' | 'groups';
+
+function DraggableEmployee({ user, from }: { user: User; from: { kind: 'dept' | 'group' | 'none'; id?: string } }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useDraggable({
+    id: user.id,
+    data: { userId: user.id, from },
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-grab active:cursor-grabbing"
+      {...attributes}
+      {...listeners}
+    >
+      <div className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
+        <span className="text-xs font-medium text-brand">{user.name.charAt(0)}</span>
+      </div>
+      <div className="min-w-0">
+        <div className="text-sm text-slate-900 truncate">{user.name}</div>
+        <div className="text-xs text-slate-500 truncate">{user.email}</div>
+      </div>
+    </div>
+  );
+}
+
+function DroppableBox({
+  id,
+  title,
+  subtitle,
+  children,
+}: {
+  id: string;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const { isOver, setNodeRef } = useDroppable({ id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`bg-white rounded-lg border p-5 transition-colors ${
+        isOver ? 'border-brand ring-2 ring-brand/20' : 'border-slate-200'
+      }`}
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="min-w-0">
+          <h3 className="font-medium text-slate-900 truncate">{title}</h3>
+          {subtitle && <p className="text-sm text-slate-600 mt-1">{subtitle}</p>}
+        </div>
+      </div>
+      <div className="space-y-1 max-h-72 overflow-y-auto">{children}</div>
+    </div>
+  );
+}
 
 export function Employees() {
   const { currentWorkspace } = useApp();
@@ -25,6 +89,9 @@ export function Employees() {
   const [selectedEmployee, setSelectedEmployee] = useState<User | null>(null);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [dndError, setDndError] = useState<string | null>(null);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const handleCreateDepartment = async (data: { name: string; description: string }) => {
     if (!currentWorkspace) return;
@@ -75,6 +142,8 @@ export function Employees() {
     (d) => d.workspaceId === currentWorkspace?.id
   );
   const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
+  const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  const departmentById = useMemo(() => new Map(departments.map((d) => [d.id, d])), [departments]);
 
   const getUserDepartment = (userId: string) => {
     const user = users.find((u) => u.id === userId);
@@ -109,6 +178,62 @@ export function Employees() {
 
   const getDepartmentMembers = (deptId: string) => {
     return users.filter((u) => u.departmentId === deptId).length;
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    setDndError(null);
+    const over = event.over;
+    const active = event.active;
+    if (!over) return;
+
+    const userId = String(active.id);
+    const user = users.find((u) => u.id === userId);
+    if (!user) return;
+
+    const data: any = active.data?.current;
+    const from = data?.from as { kind: 'dept' | 'group' | 'none'; id?: string } | undefined;
+    const overId = String(over.id);
+
+    try {
+      if (overId.startsWith('dept:')) {
+        const deptId = overId.replace('dept:', '');
+        const nextDeptId = deptId === 'none' ? undefined : deptId;
+        if (user.departmentId === nextDeptId) return;
+        await updateUser(user.id, { departmentId: nextDeptId });
+        return;
+      }
+
+      if (overId.startsWith('group:')) {
+        const targetGroupId = overId.replace('group:', '');
+        const currentIds = user.groupIds || [];
+        const fromGroupId = from?.kind === 'group' ? from.id : undefined;
+
+        let nextIds = currentIds;
+
+        if (targetGroupId === 'none') {
+          // Removing from the source group. If dragged from "no group", nothing to do.
+          if (!fromGroupId) return;
+          nextIds = currentIds.filter((id) => id !== fromGroupId);
+        } else {
+          // move if dragged from a group; otherwise just add
+          nextIds = currentIds;
+          if (!nextIds.includes(targetGroupId)) nextIds = [...nextIds, targetGroupId];
+          if (fromGroupId && fromGroupId !== targetGroupId) {
+            nextIds = nextIds.filter((id) => id !== fromGroupId);
+          }
+        }
+
+        // No-op
+        const a = [...currentIds].sort().join(',');
+        const b = [...nextIds].sort().join(',');
+        if (a === b) return;
+
+        await updateUser(user.id, { groupIds: nextIds });
+        return;
+      }
+    } catch (e: any) {
+      setDndError(e?.message || 'Не удалось переместить сотрудника');
+    }
   };
 
   return (
@@ -161,6 +286,12 @@ export function Employees() {
           Группы
         </button>
       </div>
+
+      {dndError && (
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {dndError}
+        </div>
+      )}
 
       {viewMode === 'all' && (
         <div className="bg-white rounded-lg border border-slate-200">
@@ -242,35 +373,41 @@ export function Employees() {
               Создать отдел
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {workspaceDepartments.map((dept) => (
-              <div
-                key={dept.id}
-                className="bg-white rounded-lg border border-slate-200 p-5 hover:border-brand hover:shadow-md transition-all"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Building className="w-5 h-5 text-brand" />
-                    <h3 className="font-medium text-slate-900">{dept.name}</h3>
-                  </div>
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <DroppableBox id="dept:none" title="Без отдела" subtitle="Перетащите сюда, чтобы убрать отдел">
+                {users
+                  .filter((u) => !u.departmentId)
+                  .map((u) => (
+                    <DraggableEmployee key={u.id} user={u} from={{ kind: 'dept', id: 'none' }} />
+                  ))}
+              </DroppableBox>
+
+              {workspaceDepartments.map((dept) => (
+                <div key={dept.id} className="relative">
+                  <DroppableBox id={`dept:${dept.id}`} title={dept.name} subtitle={dept.description}>
+                    {users
+                      .filter((u) => u.departmentId === dept.id)
+                      .map((u) => (
+                        <DraggableEmployee key={u.id} user={u} from={{ kind: 'dept', id: dept.id }} />
+                      ))}
+                    {users.filter((u) => u.departmentId === dept.id).length === 0 && (
+                      <div className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded">
+                        Перетащите сотрудника сюда
+                      </div>
+                    )}
+                  </DroppableBox>
                   <button
                     onClick={() => openManageDepartmentMembers(dept)}
-                    className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                    className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
                     title="Управление участниками"
                   >
                     <Settings className="w-4 h-4" />
                   </button>
                 </div>
-                {dept.description && (
-                  <p className="text-sm text-slate-600 mb-3">{dept.description}</p>
-                )}
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <UsersIcon className="w-4 h-4" />
-                  <span>{getDepartmentMembers(dept.id)} сотрудников</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </DndContext>
         </div>
       )}
 
@@ -286,35 +423,50 @@ export function Employees() {
               Создать группу
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {workspaceGroups.map((group) => (
-              <div
-                key={group.id}
-                className="bg-white rounded-lg border border-slate-200 p-5 hover:border-brand hover:shadow-md transition-all"
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <DroppableBox
+                id="group:none"
+                title="Без группы"
+                subtitle="Перетаскивайте отсюда в группы или сюда из группы, чтобы убрать"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <UsersIcon className="w-5 h-5 text-green-600" />
-                    <h3 className="font-medium text-slate-900">{group.name}</h3>
+                {users
+                  .filter((u) => !u.groupIds || u.groupIds.length === 0)
+                  .map((u) => (
+                    <DraggableEmployee key={u.id} user={u} from={{ kind: 'none' }} />
+                  ))}
+                {users.filter((u) => !u.groupIds || u.groupIds.length === 0).length === 0 && (
+                  <div className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded">
+                    Все сотрудники уже в группах
                   </div>
+                )}
+              </DroppableBox>
+
+              {workspaceGroups.map((group) => (
+                <div key={group.id} className="relative">
+                  <DroppableBox id={`group:${group.id}`} title={group.name} subtitle={group.description}>
+                    {users
+                      .filter((u) => (u.groupIds || []).includes(group.id))
+                      .map((u) => (
+                        <DraggableEmployee key={u.id} user={u} from={{ kind: 'group', id: group.id }} />
+                      ))}
+                    {users.filter((u) => (u.groupIds || []).includes(group.id)).length === 0 && (
+                      <div className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded">
+                        Перетащите сотрудника сюда
+                      </div>
+                    )}
+                  </DroppableBox>
                   <button
                     onClick={() => openManageGroupMembers(group)}
-                    className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                    className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
                     title="Управление участниками"
                   >
                     <Settings className="w-4 h-4" />
                   </button>
                 </div>
-                {group.description && (
-                  <p className="text-sm text-slate-600 mb-3">{group.description}</p>
-                )}
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <UsersIcon className="w-4 h-4" />
-                  <span>{getGroupMembers(group.id)} участников</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </DndContext>
         </div>
       )}
 

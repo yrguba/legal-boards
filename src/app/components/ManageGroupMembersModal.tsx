@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { users } from '../store/mockData';
 import type { Group } from '../types';
+import { useEmployees } from '../store/EmployeesContext';
 
 interface ManageGroupMembersModalProps {
   isOpen: boolean;
@@ -17,6 +17,7 @@ export function ManageGroupMembersModal({
   group,
 }: ManageGroupMembersModalProps) {
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const { users } = useEmployees();
 
   useEffect(() => {
     if (group) {

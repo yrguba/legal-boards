@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { users } from '../store/mockData';
 import type { Department } from '../types';
+import { useEmployees } from '../store/EmployeesContext';
 
 interface ManageDepartmentMembersModalProps {
   isOpen: boolean;
@@ -17,13 +17,14 @@ export function ManageDepartmentMembersModal({
   department,
 }: ManageDepartmentMembersModalProps) {
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const { users } = useEmployees();
 
   useEffect(() => {
     if (department) {
       const currentMembers = users.filter((u) => u.departmentId === department.id).map((u) => u.id);
       setSelectedMembers(currentMembers);
     }
-  }, [department]);
+  }, [department, users]);
 
   if (!isOpen || !department) return null;
 

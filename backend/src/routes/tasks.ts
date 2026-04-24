@@ -134,7 +134,7 @@ router.post('/', async (req: AuthRequest, res) => {
 
 router.put('/:id', async (req: AuthRequest, res) => {
   try {
-    const { columnId, title, description, assigneeId, customFields, attachments } = req.body;
+    const { columnId, typeId, title, description, assigneeId, customFields, attachments } = req.body;
 
     const oldTask = await prisma.task.findUnique({
       where: { id: req.params.id },
@@ -144,6 +144,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       where: { id: req.params.id },
       data: {
         columnId,
+        typeId,
         title,
         description,
         assigneeId,

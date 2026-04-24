@@ -12,13 +12,16 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
     const groups = await prisma.group.findMany({
       where: { workspaceId: req.params.workspaceId },
       include: {
-        _count: {
-          select: { users: true },
-        },
+        users: { select: { userId: true } },
       },
     });
 
-    res.json(groups);
+    res.json(
+      groups.map((g) => ({
+        ...g,
+        memberIds: g.users.map((u) => u.userId),
+      }))
+    );
   } catch (error) {
     console.error('Get groups error:', error);
     res.status(500).json({ error: 'Ошибка получения групп' });
