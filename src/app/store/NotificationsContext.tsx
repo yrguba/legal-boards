@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Notification } from '../types';
 import { notificationsApi } from '../services/api';
@@ -26,7 +26,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     if (!isAuthenticated) return;
     setIsLoading(true);
     try {
@@ -36,19 +36,19 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [isAuthenticated]);
 
-  const markAsRead = async (id: string) => {
+  const markAsRead = useCallback(async (id: string) => {
     await notificationsApi.markAsRead(id);
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
     setUnreadCount((c) => Math.max(0, c - 1));
-  };
+  }, []);
 
-  const markAllAsRead = async () => {
+  const markAllAsRead = useCallback(async () => {
     await notificationsApi.markAllAsRead();
     setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
     setUnreadCount(0);
-  };
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -64,10 +64,20 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     if (!isAuthenticated || !currentUser?.id) return;
 
     const apiUrl: string = import.meta.env.VITE_API_URL || 'http://localhost:5004/api';
-    const base = apiUrl.replace(/\/api\/?$/, '');
-    const wsUrl = base.replace(/^http/, 'ws');
+    let wsUrl: string;
+    if (apiUrl.startsWith('/')) {
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      wsUrl = `${proto}://${window.location.host}`;
+    } else {
+      const base = apiUrl.replace(/\/api\/?$/, '');
+      wsUrl = base.replace(/^http/, 'ws');
+    }
 
     const ws = new WebSocket(wsUrl);
+    ws.onerror = () => {
+      // keep silent in UI, but useful for debugging
+      console.warn('WebSocket error (notifications)', wsUrl);
+    };
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
@@ -105,7 +115,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       markAsRead,
       markAllAsRead,
     }),
-    [items, unreadCount, isLoading, toast]
+    [items, unreadCount, isLoading, toast, refresh, markAsRead, markAllAsRead]
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
