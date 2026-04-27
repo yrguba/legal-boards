@@ -70,3 +70,7 @@ Frontend будет доступен на `http://localhost:5173`
 ## Лицензия
 
 MIT
+
+curl -X POST http://localhost:5004/api/auth/register \
+-H "Content-Type: application/json" \
+-d '{"email":"lime.evt@gmail.com","password":"25072013","name":"Юрий","role":"admin"}'

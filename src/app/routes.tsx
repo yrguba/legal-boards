@@ -7,6 +7,9 @@ import { Task } from './pages/Task';
 import { Employees } from './pages/Employees';
 import { Documents } from './pages/Documents';
 import { Settings } from './pages/Settings';
+import { Chat } from './pages/Chat';
+import { Calendar } from './pages/Calendar';
+import { Workspaces } from './pages/Workspaces';
 import { useApp } from './store/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -51,6 +54,18 @@ export const router = createBrowserRouter([
       {
         path: 'documents',
         element: <Documents />,
+      },
+      {
+        path: 'chat',
+        element: <Chat />,
+      },
+      {
+        path: 'calendar',
+        element: <Calendar />,
+      },
+      {
+        path: 'workspaces',
+        element: <Workspaces />,
       },
       {
         path: 'settings',

@@ -11,6 +11,8 @@ interface AppContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   switchWorkspace: (workspaceId: string) => void;
+  /** Перезагрузить список с сервера; при переданном id выбрать это пространство */
+  refreshWorkspaces: (selectWorkspaceId?: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -88,6 +90,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshWorkspaces = async (selectWorkspaceId?: string) => {
+    const list = await workspacesApi.getAll();
+    setWorkspaces(list);
+    setCurrentWorkspace((prev) => {
+      if (selectWorkspaceId) {
+        const w = list.find((x) => x.id === selectWorkspaceId);
+        if (w) return w;
+      }
+      if (prev) {
+        const still = list.find((x) => x.id === prev.id);
+        if (still) return still;
+      }
+      return list[0] ?? null;
+    });
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -98,6 +116,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         switchWorkspace,
+        refreshWorkspaces,
       }}
     >
       {children}

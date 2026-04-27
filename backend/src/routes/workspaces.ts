@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { broadcast } from '../index';
+import { ensureChannelForNewWorkspace } from '../utils/workspaceChatChannels';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -47,6 +48,8 @@ router.post('/', async (req: AuthRequest, res) => {
         ownerId: req.userId!,
       },
     });
+
+    await ensureChannelForNewWorkspace(prisma, workspace.id, workspace.name);
 
     res.json(workspace);
   } catch (error) {
@@ -100,6 +103,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
       where: { id: req.params.id },
       data: { name, description },
     });
+
+    await ensureChannelForNewWorkspace(prisma, updated.id, updated.name);
 
     res.json(updated);
   } catch (error) {

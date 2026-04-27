@@ -25,8 +25,14 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Неизвестная ошибка' }));
-    throw new ApiError(response.status, error.error || 'Ошибка запроса');
+    const error = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      details?: string;
+    };
+    const base = error.error || 'Ошибка запроса';
+    const msg =
+      error.details && typeof error.details === 'string' ? `${base} (${error.details})` : base;
+    throw new ApiError(response.status, msg);
   }
 
   return response.json();
@@ -286,15 +292,141 @@ export const tasksApi = {
       body: JSON.stringify({ type, content, sender }),
     });
   },
+
+  async addClientInteraction(
+    taskId: string,
+    data: { kind: string; title: string; details?: string; occurredAt?: string },
+  ) {
+    return fetchApi<any>(`/tasks/${taskId}/client-interactions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async uploadAttachment(taskId: string, file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/tasks/${taskId}/attachments`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Ошибка загрузки' }));
+      throw new ApiError(response.status, error.error);
+    }
+    return response.json();
+  },
+
+  async deleteAttachment(taskId: string, attachmentId: string) {
+    return fetchApi<void>(`/tasks/${taskId}/attachments/${attachmentId}`, { method: 'DELETE' });
+  },
 };
 
-// Documents API
+// Чаты пространства / отдела / группы
+export const workspaceChatsApi = {
+  async listChannels(workspaceId: string) {
+    return fetchApi<
+      {
+        id: string;
+        channelKey: string;
+        scope: string;
+        title: string;
+        departmentId: string | null;
+        groupId: string | null;
+        createdAt: string;
+      }[]
+    >(`/workspace-chats/workspace/${workspaceId}/channels`);
+  },
+
+  async getMessages(channelId: string, before?: string) {
+    const q = before ? `?before=${encodeURIComponent(before)}` : '';
+    return fetchApi<{
+      messages: {
+        id: string;
+        content: string;
+        createdAt: string;
+        user: { id: string; name: string; avatar: string | null; email: string };
+      }[];
+      hasMore: boolean;
+    }>(`/workspace-chats/channels/${channelId}/messages${q}`);
+  },
+
+  async postMessage(channelId: string, content: string) {
+    return fetchApi<{
+      id: string;
+      content: string;
+      createdAt: string;
+      user: { id: string; name: string; avatar: string | null; email: string };
+    }>(`/workspace-chats/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  },
+};
+
+export type CalendarEventDto = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  description: string | null;
+  startAt: string;
+  endAt: string;
+  createdById: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: { id: string; name: string; email: string; avatar: string | null };
+  attendeeUserIds: string[];
+  attendees: { id: string; name: string; email: string; avatar: string | null }[];
+};
+
+// События календаря пространства
+export const calendarEventsApi = {
+  async listByWorkspace(workspaceId: string, fromIso: string, toIso: string) {
+    const q = `?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`;
+    return fetchApi<CalendarEventDto[]>(`/calendar-events/workspace/${workspaceId}${q}`);
+  },
+
+  async create(data: {
+    workspaceId: string;
+    title: string;
+    description?: string | null;
+    startAt: string;
+    endAt: string;
+    attendeeIds: string[];
+  }) {
+    return fetchApi<CalendarEventDto>('/calendar-events', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async update(
+    id: string,
+    data: {
+      title?: string;
+      description?: string | null;
+      startAt?: string;
+      endAt?: string;
+      attendeeIds?: string[];
+    },
+  ) {
+    return fetchApi<CalendarEventDto>(`/calendar-events/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async remove(id: string) {
+    return fetchApi<{ ok: boolean }>(`/calendar-events/${id}`, { method: 'DELETE' });
+  },
+};
+
+// Documents API (глобальная библиотека пространства, не вложения задач)
 export const documentsApi = {
-  async getByWorkspace(workspaceId: string, opts?: { taskId?: string }) {
-    const params = new URLSearchParams();
-    if (opts?.taskId) params.set('taskId', opts.taskId);
-    const qs = params.toString();
-    return fetchApi<any[]>(`/documents/workspace/${workspaceId}${qs ? `?${qs}` : ''}`);
+  async getByWorkspace(workspaceId: string) {
+    return fetchApi<any[]>(`/documents/workspace/${workspaceId}`);
   },
 
   async upload(file: File, workspaceId: string, visibility: any) {

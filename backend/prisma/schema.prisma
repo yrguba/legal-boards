@@ -24,10 +24,15 @@ model User {
   groups          UserGroup[]
   createdTasks    Task[]            @relation("TaskCreator")
   assignedTasks   Task[]            @relation("TaskAssignee")
-  comments        Comment[]
-  chatMessages    ChatMessage[]
-  documents       Document[]
-  notifications   Notification[]
+  comments                 Comment[]
+  chatMessages             ChatMessage[]
+  taskClientInteractions   TaskClientInteraction[]
+  taskAttachments         TaskAttachment[]
+  documents                Document[]
+  workspaceChatMessages    WorkspaceChatMessage[]
+  notifications            Notification[]
+  calendarEventsCreated    CalendarEvent[]           @relation("CalendarEventCreator")
+  calendarEventAttendees   CalendarEventAttendee[]
 
   @@index([email])
   @@index([departmentId])
@@ -47,6 +52,8 @@ model Workspace {
   groups      Group[]
   boards      Board[]
   documents   Document[]
+  chatChannels WorkspaceChatChannel[]
+  calendarEvents CalendarEvent[]
 
   @@index([ownerId])
 }
@@ -75,6 +82,7 @@ model Department {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   users     User[]
+  chatChannels WorkspaceChatChannel[]
 
   @@index([workspaceId])
 }
@@ -89,6 +97,7 @@ model Group {
 
   workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   users     UserGroup[]
+  chatChannels WorkspaceChatChannel[]
 
   @@index([workspaceId])
 }
@@ -184,7 +193,6 @@ model Task {
   assigneeId   String?
   createdBy    String
   customFields Json     @default("{}")
-  attachments  Json     @default("[]")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -193,8 +201,10 @@ model Task {
   type         TaskType        @relation(fields: [typeId], references: [id])
   creator      User            @relation("TaskCreator", fields: [createdBy], references: [id])
   assignee     User?           @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  comments     Comment[]
-  chatMessages ChatMessage[]
+  comments             Comment[]
+  chatMessages         ChatMessage[]
+  clientInteractions   TaskClientInteraction[]
+  taskAttachments      TaskAttachment[]
 
   @@index([boardId])
   @@index([columnId])
@@ -234,6 +244,41 @@ model ChatMessage {
   @@index([userId])
 }
 
+model TaskClientInteraction {
+  id         String   @id @default(cuid())
+  taskId     String
+  userId     String
+  kind       String
+  title      String
+  details    String?
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([occurredAt])
+}
+
+// Task-scoped file rows (separate from workspace Document)
+model TaskAttachment {
+  id         String   @id @default(cuid())
+  taskId     String
+  name       String
+  type       String
+  size       Int
+  path       String
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  task     Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader User @relation(fields: [uploadedBy], references: [id])
+
+  @@index([taskId])
+  @@index([uploadedBy])
+}
+
 model Document {
   id          String   @id @default(cuid())
   name        String
@@ -267,4 +312,70 @@ model Notification {
   @@index([userId])
   @@index([isRead])
   @@index([createdAt])
+}
+
+// Чаты пространства / отдела / группы (отдельно от чата внутри задачи)
+model WorkspaceChatChannel {
+  id           String   @id @default(cuid())
+  channelKey   String   @unique
+  workspaceId  String
+  scope        String
+  departmentId String?
+  groupId      String?
+  title        String
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  group      Group?      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  messages   WorkspaceChatMessage[]
+
+  @@index([workspaceId])
+  @@index([departmentId])
+  @@index([groupId])
+}
+
+model WorkspaceChatMessage {
+  id        String   @id @default(cuid())
+  channelId String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  channel WorkspaceChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, createdAt])
+  @@index([userId])
+}
+
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  title       String
+  description String?
+  startAt     DateTime
+  endAt       DateTime
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("CalendarEventCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  attendees CalendarEventAttendee[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, startAt])
+}
+
+model CalendarEventAttendee {
+  id      String @id @default(cuid())
+  eventId String
+  userId  String
+
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([userId])
 }

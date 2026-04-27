@@ -310,7 +310,6 @@ export function Board() {
       description: data.description,
       assigneeId: data.assigneeId,
       customFields: data.customFields,
-      attachments: [],
     });
 
     setTasks((prev) => [created, ...prev]);

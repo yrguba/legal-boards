@@ -139,7 +139,6 @@ export const tasks: Task[] = [
     createdAt: '2026-04-20T09:00:00Z',
     updatedAt: '2026-04-20T09:00:00Z',
     customFields: { priority: 'Высокий', deadline: '2026-04-25' },
-    attachments: [],
   },
   {
     id: 'task-2',
@@ -153,7 +152,6 @@ export const tasks: Task[] = [
     createdAt: '2026-04-18T10:30:00Z',
     updatedAt: '2026-04-22T14:20:00Z',
     customFields: { priority: 'Критический', deadline: '2026-04-24' },
-    attachments: ['contract.pdf', 'evidence.docx'],
   },
   {
     id: 'task-3',
@@ -167,7 +165,6 @@ export const tasks: Task[] = [
     createdAt: '2026-04-19T11:00:00Z',
     updatedAt: '2026-04-23T08:15:00Z',
     customFields: { priority: 'Средний', deadline: '2026-04-30' },
-    attachments: [],
   },
   {
     id: 'task-4',
@@ -181,7 +178,6 @@ export const tasks: Task[] = [
     createdAt: '2026-04-17T15:00:00Z',
     updatedAt: '2026-04-23T09:00:00Z',
     customFields: { priority: 'Средний' },
-    attachments: ['lease_agreement.pdf'],
   },
   {
     id: 'task-5',
@@ -195,7 +191,6 @@ export const tasks: Task[] = [
     createdAt: '2026-04-15T09:30:00Z',
     updatedAt: '2026-04-22T16:45:00Z',
     customFields: { priority: 'Низкий' },
-    attachments: [],
   },
 ];
 

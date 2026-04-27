@@ -98,6 +98,17 @@ export interface Board {
   viewMode: 'kanban' | 'list';
 }
 
+export interface TaskAttachment {
+  id: string;
+  taskId: string;
+  name: string;
+  type: string;
+  size: number;
+  path: string;
+  uploadedBy: string;
+  createdAt: string;
+}
+
 export interface Task {
   id: string;
   boardId: string;
@@ -110,7 +121,8 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   customFields: Record<string, any>;
-  attachments: string[];
+  /** Вложения только этой задачи (не глобальные Document) */
+  taskAttachments?: TaskAttachment[];
 }
 
 export interface Comment {
@@ -124,10 +136,24 @@ export interface Comment {
 export interface ChatMessage {
   id: string;
   taskId: string;
-  type: 'client' | 'assistant';
+  type: 'client' | 'assistant' | string;
   content: string;
   sender: string;
+  userId?: string;
   createdAt: string;
+  user?: { id: string; name: string; avatar?: string | null };
+}
+
+export interface TaskClientInteraction {
+  id: string;
+  taskId: string;
+  userId: string;
+  kind: string;
+  title: string;
+  details?: string | null;
+  occurredAt: string;
+  createdAt: string;
+  user?: { id: string; name: string; avatar?: string | null };
 }
 
 export interface Notification {

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { Building2, Users, Shield, Bell } from 'lucide-react';
 
@@ -70,36 +71,23 @@ export function Settings() {
         <div className="flex-1">
           {activeTab === 'workspace' && (
             <div className="bg-white rounded-lg border border-slate-200 p-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">
-                Рабочее пространство
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Название
-                  </label>
-                  <input
-                    type="text"
-                    defaultValue={currentWorkspace?.name}
-                    className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Описание
-                  </label>
-                  <textarea
-                    defaultValue={currentWorkspace?.description}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
-                  />
-                </div>
-                <div className="pt-4">
-                  <button className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors">
-                    Сохранить изменения
-                  </button>
-                </div>
-              </div>
+              <h2 className="text-lg font-semibold text-slate-900 mb-2">Рабочее пространство</h2>
+              <p className="text-sm text-slate-600 mb-4">
+                Сейчас выбрано:{' '}
+                <span className="font-medium text-slate-900">{currentWorkspace?.name || '—'}</span>
+                {currentWorkspace?.description ? (
+                  <span className="block mt-2 text-slate-600">{currentWorkspace.description}</span>
+                ) : null}
+              </p>
+              <p className="text-sm text-slate-600 mb-4">
+                Создание новых пространств, переименование и удаление доступны на отдельной странице.
+              </p>
+              <Link
+                to="/workspaces"
+                className="inline-flex items-center px-4 py-2 bg-brand text-white text-sm font-medium rounded hover:bg-brand-hover transition-colors"
+              >
+                Открыть «Пространства»
+              </Link>
             </div>
           )}
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, authorize } from '../middleware/auth';
+import { ensureChannelForNewGroup } from '../utils/workspaceChatChannels';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -94,6 +95,8 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
       },
     });
 
+    await ensureChannelForNewGroup(prisma, workspaceId, group.id, group.name);
+
     res.json(group);
   } catch (error) {
     console.error('Create group error:', error);
@@ -109,6 +112,8 @@ router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) 
       where: { id: req.params.id },
       data: { name, description },
     });
+
+    await ensureChannelForNewGroup(prisma, group.workspaceId, group.id, group.name);
 
     res.json(group);
   } catch (error) {

@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react-router';
+import { Link, Outlet, NavLink, useNavigate } from 'react-router';
 import { useApp } from '../store/AppContext';
 import {
   LayoutDashboard,
@@ -11,6 +11,9 @@ import {
   Building2,
   Bell,
   PanelLeft,
+  Layers,
+  MessageCircle,
+  Calendar,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
@@ -54,6 +57,9 @@ export function Layout() {
       { to: '/', end: true, label: 'Доски', icon: LayoutDashboard },
       { to: '/employees', label: 'Сотрудники', icon: Users },
       { to: '/documents', label: 'Документы', icon: FileText },
+      { to: '/chat', label: 'Чат', icon: MessageCircle },
+      { to: '/calendar', label: 'Календарь', icon: Calendar },
+      { to: '/workspaces', label: 'Пространства', icon: Layers },
       { to: '/settings', label: 'Настройки', icon: Settings },
     ],
     []
@@ -148,7 +154,7 @@ export function Layout() {
               </button>
 
               {showWorkspaceMenu && (
-                <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded shadow-lg z-10">
+                <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded shadow-lg z-10 py-1">
                   {workspaces.map((ws) => (
                     <button
                       key={ws.id}
@@ -161,6 +167,15 @@ export function Layout() {
                       {ws.isOwner && <div className="text-xs text-slate-500 mt-0.5">Владелец</div>}
                     </button>
                   ))}
+                  <div className="border-t border-slate-200 mt-1 pt-1">
+                    <Link
+                      to="/workspaces"
+                      onClick={() => setShowWorkspaceMenu(false)}
+                      className="block px-3 py-2 text-sm text-brand hover:bg-slate-50"
+                    >
+                      Управление пространствами…
+                    </Link>
+                  </div>
                 </div>
               )}
             </div>

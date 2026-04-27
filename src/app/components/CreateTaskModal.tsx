@@ -150,10 +150,10 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
           </div>
 
           {taskFields.length > 0 && (
-            <div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="w-full">
+              <div className="flex w-full flex-col gap-4">
                 {taskFields.map((f) => (
-                  <div key={f.id} className="space-y-1">
+                  <div key={f.id} className="w-full space-y-1">
                     <label className="block text-sm font-medium text-slate-700">
                       {fieldLabel(f)}
                     </label>

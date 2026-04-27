@@ -1,20 +1,36 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { broadcast } from '../index';
+import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
+import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
+import {
+  assertWorkspaceMember,
+  canSeeDocument,
+  getUserDocumentAccess,
+  validateVisibilityPayload,
+} from '../utils/documentAccess';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, process.env.UPLOAD_DIR || './uploads');
+  destination: (_req, _file, cb) => {
+    const dir = getUploadsPath();
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      return cb(e as Error, dir);
+    }
+    cb(null, dir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    const ext = path.extname(decodeMultipartFilename(file.originalname));
+    cb(null, uniqueSuffix + ext);
   },
 });
 
@@ -27,23 +43,16 @@ router.use(authenticate);
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
-    const taskId = typeof req.query.taskId === 'string' ? req.query.taskId : undefined;
+    const workspaceId = req.params.workspaceId;
+
+    if (!(await assertWorkspaceMember(prisma, workspaceId, req.userId!, req.userRole))) {
+      return res.status(403).json({ error: 'Нет доступа к пространству' });
+    }
+
+    const access = await getUserDocumentAccess(prisma, req.userId!, workspaceId);
 
     const documents = await prisma.document.findMany({
-      where: taskId
-        ? {
-            workspaceId: req.params.workspaceId,
-            OR: [
-              { visibility: { path: ['type'], equals: 'workspace' } },
-              {
-                AND: [
-                  { visibility: { path: ['type'], equals: 'task' } },
-                  { visibility: { path: ['taskId'], equals: taskId } },
-                ],
-              },
-            ],
-          }
-        : { workspaceId: req.params.workspaceId },
+      where: { workspaceId },
       include: {
         uploader: {
           select: { id: true, name: true, email: true },
@@ -52,7 +61,9 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
       orderBy: { uploadedAt: 'desc' },
     });
 
-    res.json(documents);
+    const filtered = documents.filter((d) => canSeeDocument(d.visibility, d.uploadedBy, access));
+
+    res.json(filtered);
   } catch (error) {
     console.error('Get documents error:', error);
     res.status(500).json({ error: 'Ошибка получения документов' });
@@ -74,6 +85,16 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Документ не найден' });
     }
 
+    if (!(await assertWorkspaceMember(prisma, document.workspaceId, req.userId!, req.userRole))) {
+      return res.status(403).json({ error: 'Нет доступа' });
+    }
+
+    const access = await getUserDocumentAccess(prisma, req.userId!, document.workspaceId);
+
+    if (!canSeeDocument(document.visibility, document.uploadedBy, access)) {
+      return res.status(403).json({ error: 'Нет доступа к документу' });
+    }
+
     res.json(document);
   } catch (error) {
     console.error('Get document error:', error);
@@ -88,16 +109,37 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res) => {
     }
 
     const { workspaceId, visibility } = req.body;
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Укажите пространство' });
+    }
+    if (!(await assertWorkspaceMember(prisma, workspaceId, req.userId!, req.userRole))) {
+      return res.status(403).json({ error: 'Нет доступа к пространству' });
+    }
+
+    let visObj: Record<string, unknown> = { type: 'workspace' };
+    if (visibility) {
+      try {
+        visObj = typeof visibility === 'string' ? (JSON.parse(visibility) as Record<string, unknown>) : (visibility as Record<string, unknown>);
+      } catch {
+        return res.status(400).json({ error: 'Некорректные настройки доступа' });
+      }
+    }
+    const validated = await validateVisibilityPayload(prisma, workspaceId, visObj);
+    if (!validated.ok) {
+      return res.status(400).json({ error: validated.error });
+    }
+
+    const displayName = decodeMultipartFilename(req.file.originalname);
 
     const document = await prisma.document.create({
       data: {
-        name: req.file.originalname,
+        name: displayName,
         type: req.file.mimetype,
         size: req.file.size,
-        path: req.file.path,
+        path: toPublicUploadPath(req.file.path),
         uploadedBy: req.userId!,
         workspaceId,
-        visibility: visibility ? JSON.parse(visibility) : { type: 'workspace' },
+        visibility: visObj as Prisma.InputJsonValue,
       },
       include: {
         uploader: {
@@ -110,7 +152,7 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res) => {
       data: {
         type: 'document',
         title: 'Новый документ',
-        message: `Загружен новый документ "${req.file.originalname}"`,
+        message: `Загружен новый документ "${displayName}"`,
         userId: req.userId!,
         relatedId: document.id,
       },
@@ -145,24 +187,16 @@ router.delete('/:id', async (req: AuthRequest, res) => {
 
     const docId = req.params.id;
 
-    const tasksWithDoc = await prisma.task.findMany({
-      where: { attachments: { array_contains: [docId] } },
-      select: { id: true, attachments: true },
-    });
+    try {
+      const fp = path.join(getUploadsPath(), path.basename(document.path));
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    } catch {
+      /* ignore */
+    }
 
-    await prisma.$transaction([
-      ...tasksWithDoc.map((t) => {
-        const arr = Array.isArray(t.attachments) ? (t.attachments as any[]) : [];
-        const next = arr.filter((x) => x !== docId);
-        return prisma.task.update({
-          where: { id: t.id },
-          data: { attachments: next },
-        });
-      }),
-      prisma.document.delete({
-        where: { id: docId },
-      }),
-    ]);
+    await prisma.document.delete({
+      where: { id: docId },
+    });
 
     res.json({ message: 'Документ удален' });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, authorize } from '../middleware/auth';
+import { ensureChannelForNewDepartment } from '../utils/workspaceChatChannels';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -65,6 +66,8 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
       },
     });
 
+    await ensureChannelForNewDepartment(prisma, workspaceId, department.id, department.name);
+
     res.json(department);
   } catch (error) {
     console.error('Create department error:', error);
@@ -80,6 +83,13 @@ router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) 
       where: { id: req.params.id },
       data: { name, description },
     });
+
+    await ensureChannelForNewDepartment(
+      prisma,
+      department.workspaceId,
+      department.id,
+      department.name,
+    );
 
     res.json(department);
   } catch (error) {
