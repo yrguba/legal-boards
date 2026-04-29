@@ -14,6 +14,7 @@ import {
   Layers,
   MessageCircle,
   Calendar,
+  BookOpen,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
@@ -57,6 +58,7 @@ export function Layout() {
       { to: '/', end: true, label: 'Доски', icon: LayoutDashboard },
       { to: '/employees', label: 'Сотрудники', icon: Users },
       { to: '/documents', label: 'Документы', icon: FileText },
+      { to: '/knowledge', label: 'База знаний', icon: BookOpen },
       { to: '/chat', label: 'Чат', icon: MessageCircle },
       { to: '/calendar', label: 'Календарь', icon: Calendar },
       { to: '/workspaces', label: 'Пространства', icon: Layers },
@@ -194,7 +196,7 @@ export function Layout() {
             )}
           </button>
         </div>
-        <div className="flex-1 overflow-auto">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Outlet />
         </div>
       </main>

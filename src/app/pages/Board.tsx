@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router';
 import { boardsApi, tasksApi, usersApi } from '../services/api';
 import type { Board as BoardType, Task as TaskType, User as UserType } from '../types';
@@ -193,6 +193,22 @@ export function Board() {
   const [error, setError] = useState<string | null>(null);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [createTaskColumnId, setCreateTaskColumnId] = useState<string>('');
+  const [assigneeFilterIds, setAssigneeFilterIds] = useState<string[]>([]);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
+
+  const UNASSIGNED_FILTER = '__unassigned__';
+
+  useEffect(() => {
+    if (!filterPanelOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target as Node)) {
+        setFilterPanelOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [filterPanelOpen]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -234,6 +250,15 @@ export function Board() {
 
   const boardTasks = tasks;
 
+  const filteredTasks = useMemo(() => {
+    if (assigneeFilterIds.length === 0) return boardTasks;
+    return boardTasks.filter((t) => {
+      if (assigneeFilterIds.includes(UNASSIGNED_FILTER) && !t.assigneeId) return true;
+      if (t.assigneeId && assigneeFilterIds.includes(t.assigneeId)) return true;
+      return false;
+    });
+  }, [boardTasks, assigneeFilterIds]);
+
   const taskTypes = useMemo(() => board?.taskTypes || [], [board?.taskTypes]);
   const columns = useMemo(() => board?.columns || [], [board?.columns]);
 
@@ -271,7 +296,18 @@ export function Board() {
   }
 
   const getTasksByColumn = (columnId: string) => {
-    return boardTasks.filter((t) => t.columnId === columnId);
+    return filteredTasks.filter((t) => t.columnId === columnId);
+  };
+
+  const getCreatorName = (task: TaskType) => {
+    if (task.creator?.name) return task.creator.name;
+    return users.find((u) => u.id === task.createdBy)?.name ?? '—';
+  };
+
+  const toggleAssigneeFilter = (id: string) => {
+    setAssigneeFilterIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
   const getTaskTypeName = (typeId: string) => {
@@ -407,10 +443,63 @@ export function Board() {
               </button>
             </div>
 
-            <button className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded transition-colors">
-              <Filter className="w-4 h-4" />
-              Фильтр
-            </button>
+            <div className="relative" ref={filterPanelRef}>
+              <button
+                type="button"
+                onClick={() => setFilterPanelOpen((o) => !o)}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors ${
+                  assigneeFilterIds.length > 0
+                    ? 'bg-brand-light text-brand font-medium'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Filter className="w-4 h-4" />
+                Фильтр
+                {assigneeFilterIds.length > 0 ? (
+                  <span className="text-xs opacity-80">({assigneeFilterIds.length})</span>
+                ) : null}
+              </button>
+              {filterPanelOpen && (
+                <div className="absolute right-0 mt-2 w-72 rounded-lg border border-slate-200 bg-white shadow-lg z-50 p-3 max-h-80 overflow-y-auto">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                    Исполнитель
+                  </div>
+                  <label className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1">
+                    <input
+                      type="checkbox"
+                      checked={assigneeFilterIds.includes(UNASSIGNED_FILTER)}
+                      onChange={() => toggleAssigneeFilter(UNASSIGNED_FILTER)}
+                      className="rounded border-slate-300"
+                    />
+                    Без исполнителя
+                  </label>
+                  <div className="border-t border-slate-100 my-2" />
+                  {users.map((u) => (
+                    <label
+                      key={u.id}
+                      className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={assigneeFilterIds.includes(u.id)}
+                        onChange={() => toggleAssigneeFilter(u.id)}
+                        className="rounded border-slate-300"
+                      />
+                      {u.name}
+                    </label>
+                  ))}
+                  {assigneeFilterIds.length > 0 && (
+                    <button
+                      type="button"
+                      className="mt-3 w-full text-xs text-slate-600 hover:text-slate-900 py-1.5 border border-slate-200 rounded"
+                      onClick={() => setAssigneeFilterIds([])}
+                    >
+                      Сбросить фильтр
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             <button className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded transition-colors">
               <Settings className="w-4 h-4" />
@@ -467,6 +556,17 @@ export function Board() {
           </DndContext>
         ) : (
           <div className="bg-white rounded-lg border border-slate-200">
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-b border-slate-200">
+              <button
+                type="button"
+                disabled={!columns[0]}
+                onClick={() => columns[0] && openCreateTask(columns[0].id)}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand text-white rounded hover:bg-brand-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-4 h-4" />
+                Создать задачу
+              </button>
+            </div>
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200">
@@ -480,6 +580,9 @@ export function Board() {
                     Тип
                   </th>
                   <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
+                    Автор
+                  </th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
                     Исполнитель
                   </th>
                   <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
@@ -488,7 +591,7 @@ export function Board() {
                 </tr>
               </thead>
               <tbody>
-                {boardTasks.map((task) => {
+                {filteredTasks.map((task) => {
                   const column = columns.find((c) => c.id === task.columnId);
                   return (
                     <tr
@@ -513,6 +616,9 @@ export function Board() {
                         >
                           {getTaskTypeName(task.typeId)}
                         </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-slate-600">{getCreatorName(task)}</span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-sm text-slate-600">

@@ -10,6 +10,7 @@ import { Settings } from './pages/Settings';
 import { Chat } from './pages/Chat';
 import { Calendar } from './pages/Calendar';
 import { Workspaces } from './pages/Workspaces';
+import { Knowledge } from './pages/Knowledge';
 import { useApp } from './store/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -62,6 +63,14 @@ export const router = createBrowserRouter([
       {
         path: 'calendar',
         element: <Calendar />,
+      },
+      {
+        path: 'knowledge/:articleId',
+        element: <Knowledge />,
+      },
+      {
+        path: 'knowledge',
+        element: <Knowledge />,
       },
       {
         path: 'workspaces',

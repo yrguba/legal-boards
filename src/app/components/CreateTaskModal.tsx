@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Board, TaskField, TaskType, User } from '../types';
+import { useApp } from '../store/AppContext';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 
 interface CreateTaskModalProps {
@@ -29,7 +30,9 @@ function fieldLabel(field: TaskField) {
 }
 
 export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSubmit }: CreateTaskModalProps) {
+  const { currentUser } = useApp();
   const [typeId, setTypeId] = useState<string>(() => board.taskTypes?.[0]?.id || '');
+  const [assigneeId, setAssigneeId] = useState('');
   const [customFields, setCustomFields] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -55,10 +58,17 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
     return byName || null;
   }, [taskFields]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setAssigneeId('');
+    setTypeId(board.taskTypes?.[0]?.id || '');
+  }, [isOpen, columnId, board.taskTypes]);
+
   if (!isOpen) return null;
 
   const reset = () => {
     setTypeId(board.taskTypes?.[0]?.id || '');
+    setAssigneeId('');
     setCustomFields({});
     setError(null);
   };
@@ -106,7 +116,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
         title,
         description: description || undefined,
         typeId,
-        assigneeId: undefined,
+        assigneeId: assigneeId || undefined,
         customFields: restCustomFields,
       });
       handleClose();
@@ -144,6 +154,31 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
               {taskTypes.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Автор</label>
+            <input
+              readOnly
+              value={currentUser?.name ?? '—'}
+              className="w-full px-3 py-2 border border-slate-200 rounded bg-slate-50 text-slate-700 cursor-default"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Исполнитель</label>
+            <select
+              value={assigneeId}
+              onChange={(e) => setAssigneeId(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Не назначено</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
                 </option>
               ))}
             </select>

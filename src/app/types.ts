@@ -121,6 +121,9 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   customFields: Record<string, any>;
+  /** С сервера при загрузке списка задач доски */
+  creator?: { id: string; name: string; email?: string };
+  assignee?: { id: string; name: string; email?: string; avatar?: string | null };
   /** Вложения только этой задачи (не глобальные Document) */
   taskAttachments?: TaskAttachment[];
 }

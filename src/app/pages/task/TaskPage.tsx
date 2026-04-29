@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router';
 import { boardsApi, documentsApi, tasksApi, usersApi } from '../../services/api';
 import type { Board, Document, User } from '../../types';
@@ -17,8 +17,10 @@ import { TaskClientPanel } from './components/TaskClientPanel';
 import { TaskSidePanels } from './components/TaskSidePanels';
 import { TaskIconRail } from './components/TaskIconRail';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
+import { useApp } from '../../store/AppContext';
 
 export function TaskPage() {
+  const { currentUser } = useApp();
   const { taskId } = useParams();
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
@@ -59,6 +61,9 @@ export function TaskPage() {
   const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [previewDoc, setPreviewDoc] = useState<DocumentPreviewState | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [assistantOptimistic, setAssistantOptimistic] = useState<{ id: string; content: string } | null>(
+    null,
+  );
 
   const {
     apiBaseUrl,
@@ -75,6 +80,34 @@ export function TaskPage() {
     clientInteractionList,
     taskAttachments,
   } = useTaskDerived(task, board, users);
+
+  const assistantDisplayChat = useMemo(() => {
+    const list = [...assistantPanelChat];
+    if (assistantOptimistic) {
+      list.push({
+        id: assistantOptimistic.id,
+        type: 'assistant',
+        sender: 'user',
+        content: assistantOptimistic.content,
+        createdAt: new Date().toISOString(),
+        user: currentUser
+          ? { id: currentUser.id, name: currentUser.name, avatar: currentUser.avatar ?? null }
+          : { id: 'local', name: 'Вы', avatar: null },
+        _optimistic: true,
+      });
+    }
+    if (isPostingAssistant && assistantOptimistic) {
+      list.push({
+        id: '__assistant_pending__',
+        type: 'assistant',
+        sender: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+        _pendingLoader: true,
+      });
+    }
+    return list;
+  }, [assistantPanelChat, assistantOptimistic, isPostingAssistant, currentUser]);
 
   useEffect(() => {
     if (!taskId) return;
@@ -138,14 +171,28 @@ export function TaskPage() {
     if (!taskId) return;
     const text = assistantMessage.trim();
     if (!text) return;
+    const optimisticId = `optimistic-${crypto.randomUUID()}`;
+    setAssistantOptimistic({ id: optimisticId, content: text });
+    setAssistantMessage('');
     setIsPostingAssistant(true);
     setAssistantChatError(null);
     try {
-      const created = await tasksApi.addChatMessage(taskId, 'assistant', text, 'user');
-      setTask((prev) => (prev ? mergeChatMessage(prev, created) : prev));
-      setAssistantMessage('');
+      const { userMessage, assistantMessage } = await tasksApi.postAssistantChat(taskId, text);
+      setTask((prev) => {
+        if (!prev) return prev;
+        const withUser = mergeChatMessage(prev, userMessage as Record<string, unknown>);
+        return mergeChatMessage(withUser, assistantMessage as Record<string, unknown>);
+      });
+      setAssistantOptimistic(null);
     } catch (e: any) {
       setAssistantChatError(e?.message || 'Не удалось отправить');
+      setAssistantOptimistic(null);
+      try {
+        const fresh = (await tasksApi.getById(taskId)) as TaskRecord;
+        setTask(fresh);
+      } catch {
+        /* ignore reload errors */
+      }
     } finally {
       setIsPostingAssistant(false);
     }
@@ -275,10 +322,13 @@ export function TaskPage() {
     setSaveError(null);
     const validationError = validateTaskEdits(
       editTitle,
+      editDescription,
       editColumnId,
       editTypeId,
       editCustomFields,
       taskFields,
+      titleFieldId,
+      descriptionFieldId,
     );
     if (validationError) {
       setSaveError(validationError);
@@ -460,7 +510,7 @@ export function TaskPage() {
                   documentsLoading={documentsLoading}
                   documentsError={documentsError}
                   onPreviewDoc={setPreviewDoc}
-                  assistantPanelChat={assistantPanelChat}
+                  assistantPanelChat={assistantDisplayChat}
                   assistantChatError={assistantChatError}
                   commentText={commentText}
                   assistantMessage={assistantMessage}

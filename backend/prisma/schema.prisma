@@ -33,6 +33,7 @@ model User {
   notifications            Notification[]
   calendarEventsCreated    CalendarEvent[]           @relation("CalendarEventCreator")
   calendarEventAttendees   CalendarEventAttendee[]
+  knowledgeArticlesCreated KnowledgeArticle[]
 
   @@index([email])
   @@index([departmentId])
@@ -54,6 +55,7 @@ model Workspace {
   documents   Document[]
   chatChannels WorkspaceChatChannel[]
   calendarEvents CalendarEvent[]
+  knowledgeArticles KnowledgeArticle[]
 
   @@index([ownerId])
 }
@@ -378,4 +380,25 @@ model CalendarEventAttendee {
 
   @@unique([eventId, userId])
   @@index([userId])
+}
+
+/// Страница или раздел в базе знаний рабочего пространства (дерево: parent → children).
+model KnowledgeArticle {
+  id          String @id @default(cuid())
+  workspaceId String
+  parentId    String?
+  title       String
+  body        String @default("") @db.Text
+  position    Int    @default(0)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    KnowledgeArticle? @relation("KnowledgeTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  KnowledgeArticle[] @relation("KnowledgeTree")
+  creator   User                  @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([parentId])
 }

@@ -1,5 +1,4 @@
-import { Bot, MessageSquare, Send } from 'lucide-react';
-import { t } from '../taskPage.classes';
+import { Bot, Loader2, MessageSquare, Send } from 'lucide-react';
 import type { TaskSidePanelsProps, TaskPanelType } from '../types';
 import { formatDateTime } from '../utils/format';
 import { TaskDocumentsPanel } from './TaskDocumentsPanel';
@@ -25,20 +24,32 @@ function ChatFooter(p: {
         </div>
       ) : null}
       <div className="flex gap-2">
-        <input
-          type="text"
-          value={p.activePanel === 'comments' ? p.commentText : p.assistantMessage}
-          onChange={(e) =>
-            p.activePanel === 'comments' ? p.onCommentText(e.target.value) : p.onAssistantMessage(e.target.value)
-          }
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter') return;
-            if (p.activePanel === 'comments') void p.onPostComment();
-            else void p.onPostAssistant();
-          }}
-          placeholder={p.activePanel === 'comments' ? 'Написать комментарий…' : 'Сообщение ассистенту…'}
-          className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
-        />
+        {p.activePanel === 'comments' ? (
+          <input
+            type="text"
+            value={p.commentText}
+            onChange={(e) => p.onCommentText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              void p.onPostComment();
+            }}
+            placeholder="Написать комментарий…"
+            className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        ) : (
+          <textarea
+            value={p.assistantMessage}
+            onChange={(e) => p.onAssistantMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.shiftKey) return;
+              e.preventDefault();
+              void p.onPostAssistant();
+            }}
+            placeholder="Сообщение ассистенту… (Enter — отправить, Shift+Enter — новая строка)"
+            rows={2}
+            className="min-h-[44px] flex-1 resize-y rounded border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        )}
         <button
           type="button"
           onClick={() =>
@@ -108,26 +119,58 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
                 <p className="text-sm text-slate-500">Сообщений пока нет</p>
               </div>
             ) : (
-              p.assistantPanelChat.map((m: any) => (
-                <div key={m.id} className="rounded-lg border border-slate-200 bg-white p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-light">
-                      <span className="text-xs font-medium text-brand">
-                        {m.user?.name?.charAt(0) || 'U'}
-                      </span>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-slate-900">
-                        {m.user?.name || 'Пользователь'}
+              p.assistantPanelChat.map((m: any) => {
+                if (m._pendingLoader) {
+                  return (
+                    <div
+                      key={m.id}
+                      className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                    >
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200">
+                        <Bot className="h-4 w-4 text-slate-600" />
                       </div>
-                      <div className="text-xs text-slate-500">
-                        {m.createdAt ? formatDateTime(m.createdAt) : ''}
+                      <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-700">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-500" aria-hidden />
+                        <span className="truncate">Ассистент отвечает…</span>
                       </div>
                     </div>
+                  );
+                }
+
+                const isAi = m.sender === 'assistant';
+                const isOptimistic = Boolean(m._optimistic);
+                return (
+                  <div
+                    key={m.id}
+                    className={`rounded-lg border p-3 ${
+                      isAi ? 'border-slate-200 bg-slate-50' : 'border-slate-200 bg-white'
+                    } ${isOptimistic ? 'ring-1 ring-brand/25' : ''}`}
+                  >
+                    <div className="mb-2 flex items-center gap-2">
+                      {isAi ? (
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200">
+                          <Bot className="h-4 w-4 text-slate-600" />
+                        </div>
+                      ) : (
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-light">
+                          <span className="text-xs font-medium text-brand">
+                            {m.user?.name?.charAt(0) || 'U'}
+                          </span>
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900">
+                          {isAi ? 'Ассистент (Groq)' : m.user?.name || 'Вы'}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {m.createdAt ? formatDateTime(m.createdAt) : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm text-slate-700">{m.content}</div>
                   </div>
-                  <div className="whitespace-pre-wrap text-sm text-slate-700">{m.content}</div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}

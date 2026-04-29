@@ -8,6 +8,7 @@ import { broadcast } from '../index';
 import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
 import { assertUserCanAccessTask } from '../utils/taskAccess';
+import { completeChat } from '../services/groqAssistant';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -478,6 +479,111 @@ router.post('/:id/client-interactions', async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Create client interaction error:', error);
     return res.status(500).json({ error: 'Ошибка сохранения записи' });
+  }
+});
+
+router.post('/:id/chat/assistant', async (req: AuthRequest, res) => {
+  try {
+    const taskId = req.params.id;
+    const gate = await assertUserCanAccessTask(prisma, taskId, req.userId!, req.userRole);
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const raw = typeof req.body?.content === 'string' ? req.body.content : '';
+    const content = raw.trim();
+    if (!content) {
+      return res.status(400).json({ error: 'Введите сообщение' });
+    }
+
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { title: true, description: true },
+    });
+    if (!task) {
+      return res.status(404).json({ error: 'Задача не найдена' });
+    }
+
+    const userMessage = await prisma.chatMessage.create({
+      data: {
+        taskId,
+        type: 'assistant',
+        content,
+        sender: 'user',
+        userId: req.userId!,
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, avatar: true },
+        },
+      },
+    });
+
+    broadcast({
+      type: 'chat_message',
+      taskId,
+      message: userMessage,
+    });
+
+    const history = await prisma.chatMessage.findMany({
+      where: { taskId, type: 'assistant' },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const titlePart = task.title.replace(/\s+/g, ' ').trim().slice(0, 400);
+    const systemLines = [
+      'Ты помощник в юридической системе управления задачами (канбан). Отвечай кратко и по делу.',
+      `Контекст задачи: «${titlePart}».`,
+    ];
+    if (task.description?.trim()) {
+      const desc = task.description.replace(/\s+/g, ' ').trim().slice(0, 6000);
+      systemLines.push(`Описание задачи: ${desc}`);
+    }
+
+    const llmMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: systemLines.join('\n') },
+    ];
+
+    const historyWindow = history.length > 80 ? history.slice(-80) : history;
+    for (const m of historyWindow) {
+      const role = m.sender === 'assistant' ? 'assistant' : 'user';
+      llmMessages.push({ role, content: m.content });
+    }
+
+    let replyText: string;
+    try {
+      replyText = await completeChat(llmMessages);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Ошибка Groq';
+      console.error('Groq assistant error:', e);
+      return res.status(502).json({ error: msg });
+    }
+
+    const assistantMessage = await prisma.chatMessage.create({
+      data: {
+        taskId,
+        type: 'assistant',
+        content: replyText,
+        sender: 'assistant',
+        userId: req.userId!,
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, avatar: true },
+        },
+      },
+    });
+
+    broadcast({
+      type: 'chat_message',
+      taskId,
+      message: assistantMessage,
+    });
+
+    return res.json({ userMessage, assistantMessage });
+  } catch (error) {
+    console.error('Assistant chat error:', error);
+    return res.status(500).json({ error: 'Ошибка ассистента' });
   }
 });
 

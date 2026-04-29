@@ -293,6 +293,14 @@ export const tasksApi = {
     });
   },
 
+  /** Сообщение в чат ассистента: сохраняется запись пользователя, ответ генерируется через Groq. */
+  async postAssistantChat(taskId: string, content: string) {
+    return fetchApi<{ userMessage: unknown; assistantMessage: unknown }>(`/tasks/${taskId}/chat/assistant`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  },
+
   async addClientInteraction(
     taskId: string,
     data: { kind: string; title: string; details?: string; occurredAt?: string },
@@ -452,6 +460,77 @@ export const documentsApi = {
 
   async delete(id: string) {
     return fetchApi<void>(`/documents/${id}`, { method: 'DELETE' });
+  },
+};
+
+/** База знаний (страницы в дереве разделов). */
+export const knowledgeApi = {
+  async listByWorkspace(workspaceId: string) {
+    return fetchApi<
+      Array<{
+        id: string;
+        workspaceId: string;
+        parentId: string | null;
+        title: string;
+        body: string;
+        position: number;
+        createdById: string;
+        createdAt: string;
+        updatedAt: string;
+      }>
+    >(`/knowledge/workspaces/${workspaceId}/knowledge-articles`);
+  },
+
+  async getById(id: string) {
+    return fetchApi<{
+      id: string;
+      workspaceId: string;
+      parentId: string | null;
+      title: string;
+      body: string;
+      position: number;
+      createdById: string;
+      createdAt: string;
+      updatedAt: string;
+    }>(`/knowledge/knowledge-articles/${id}`);
+  },
+
+  async create(workspaceId: string, data: { title?: string; body?: string; parentId?: string | null }) {
+    return fetchApi<{
+      id: string;
+      workspaceId: string;
+      parentId: string | null;
+      title: string;
+      body: string;
+      position: number;
+      createdById: string;
+      createdAt: string;
+      updatedAt: string;
+    }>(`/knowledge/workspaces/${workspaceId}/knowledge-articles`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    });
+  },
+
+  async update(id: string, data: { title?: string; body?: string; parentId?: string | null }) {
+    return fetchApi<{
+      id: string;
+      workspaceId: string;
+      parentId: string | null;
+      title: string;
+      body: string;
+      position: number;
+      createdById: string;
+      createdAt: string;
+      updatedAt: string;
+    }>(`/knowledge/knowledge-articles/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async remove(id: string) {
+    return fetchApi<{ ok: boolean }>(`/knowledge/knowledge-articles/${id}`, { method: 'DELETE' });
   },
 };
 
