@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest, authorize } from '../middleware/auth';
+import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
 import { ensureChannelForNewGroup } from '../utils/workspaceChatChannels';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(authenticate);
+router.use(requireStaffUser);
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {

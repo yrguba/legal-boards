@@ -4,7 +4,7 @@ import { extractClientInfo } from '../utils/clientInfo';
 import { filterChatMessagesByType } from '../utils/chatMessages';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { getDescriptionFieldId, getSortedTaskFields, getTitleFieldId } from '../utils/taskFieldIds';
-import type { TaskRecord } from '../types';
+import type { ClientInfo, TaskRecord } from '../types';
 
 export function useTaskDerived(task: TaskRecord | null, board: Board | null, users: User[]) {
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
@@ -29,11 +29,44 @@ export function useTaskDerived(task: TaskRecord | null, board: Board | null, use
     : null;
   const column = task && board ? board.columns?.find((c) => c.id === task.columnId) : undefined;
 
-  const clientInfo = useMemo(
-    () =>
-      task ? extractClientInfo(task.customFields as any, taskFields) : { fullName: null, organization: null },
-    [task, taskFields],
-  );
+  const clientInfo = useMemo((): ClientInfo => {
+    const extracted = task
+      ? extractClientInfo(task.customFields as Record<string, unknown>, taskFields)
+      : ({
+          fullName: null,
+          organization: null,
+          email: null,
+          phone: null,
+          contactNotes: null,
+        } satisfies ClientInfo);
+
+    const lex = task?.lexClientProfile;
+
+    if (lex) {
+      const orgFromLex =
+        lex.clientKind === 'company' && lex.companyName?.trim() ? lex.companyName.trim() : null;
+      return {
+        fullName: extracted.fullName || (lex.name?.trim() ? lex.name.trim() : null),
+        organization: extracted.organization || orgFromLex,
+        email: lex.email ?? null,
+        phone: lex.phone?.trim() ? lex.phone.trim() : null,
+        contactNotes: lex.contactNotes?.trim() ? lex.contactNotes.trim() : null,
+      };
+    }
+
+    const creatorUser = task
+      ? ((task.creator as User | null | undefined) ??
+          (task.createdBy ? usersById.get(task.createdBy) : undefined))
+      : undefined;
+
+    return {
+      fullName: extracted.fullName,
+      organization: extracted.organization,
+      email: creatorUser?.email ?? extracted.email,
+      phone: extracted.phone,
+      contactNotes: extracted.contactNotes,
+    };
+  }, [task, taskFields, usersById]);
 
   const clientPanelChat = useMemo(
     () => filterChatMessagesByType(task?.chatMessages, 'client'),

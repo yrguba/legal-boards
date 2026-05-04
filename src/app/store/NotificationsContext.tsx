@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { Notification } from '../types';
 import { notificationsApi } from '../services/api';
 import { useApp } from './AppContext';
+import { getWsUrl } from '../utils/wsUrl';
 
 type Toast = { id: string; title: string; message: string };
 
@@ -63,15 +64,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated || !currentUser?.id) return;
 
-    const apiUrl: string = import.meta.env.VITE_API_URL || 'http://localhost:5004/api';
-    let wsUrl: string;
-    if (apiUrl.startsWith('/')) {
-      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      wsUrl = `${proto}://${window.location.host}`;
-    } else {
-      const base = apiUrl.replace(/\/api\/?$/, '');
-      wsUrl = base.replace(/^http/, 'ws');
-    }
+    const wsUrl = getWsUrl();
 
     const ws = new WebSocket(wsUrl);
     ws.onerror = () => {

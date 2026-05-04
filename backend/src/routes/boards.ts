@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import { workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -32,6 +33,20 @@ async function generateUniqueBoardCode(name: string) {
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
+    if (req.lexClientId) {
+      const link = await prisma.lexClientWorkspace.findUnique({
+        where: {
+          lexClientId_workspaceId: {
+            lexClientId: req.lexClientId,
+            workspaceId: req.params.workspaceId,
+          },
+        },
+      });
+      if (!link && !workspaceAllowsLexIntake(req.params.workspaceId)) {
+        return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+      }
+    }
+
     const boards = await prisma.board.findMany({
       where: { workspaceId: req.params.workspaceId },
       include: {
@@ -67,6 +82,20 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Доска не найдена' });
     }
 
+    if (req.lexClientId) {
+      const link = await prisma.lexClientWorkspace.findUnique({
+        where: {
+          lexClientId_workspaceId: {
+            lexClientId: req.lexClientId,
+            workspaceId: board.workspaceId,
+          },
+        },
+      });
+      if (!link && !workspaceAllowsLexIntake(board.workspaceId)) {
+        return res.status(403).json({ error: 'Нет доступа к этой доске' });
+      }
+    }
+
     res.json(board);
   } catch (error) {
     console.error('Get board error:', error);
@@ -74,7 +103,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/', async (req: AuthRequest, res) => {
+router.post('/', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const {
       code,
@@ -145,7 +174,7 @@ router.post('/', async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/:id', async (req: AuthRequest, res) => {
+router.put('/:id', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const {
       name,
@@ -161,7 +190,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     const boardId = req.params.id;
 
     const updatedBoard = await prisma.$transaction(async (tx) => {
-      const board = await tx.board.update({
+      await tx.board.update({
         where: { id: boardId },
         data: {
           ...(name !== undefined ? { name } : {}),
@@ -297,7 +326,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:boardId/columns/:columnId/move-tasks', async (req: AuthRequest, res) => {
+router.post('/:boardId/columns/:columnId/move-tasks', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const { toColumnId } = req.body as { toColumnId?: string };
     const { boardId, columnId } = req.params;
@@ -331,7 +360,7 @@ router.post('/:boardId/columns/:columnId/move-tasks', async (req: AuthRequest, r
   }
 });
 
-router.post('/:boardId/types/:typeId/move-tasks', async (req: AuthRequest, res) => {
+router.post('/:boardId/types/:typeId/move-tasks', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const { toTypeId } = req.body as { toTypeId?: string };
     const { boardId, typeId } = req.params;
@@ -364,7 +393,7 @@ router.post('/:boardId/types/:typeId/move-tasks', async (req: AuthRequest, res) 
   }
 });
 
-router.delete('/:id', async (req: AuthRequest, res) => {
+router.delete('/:id', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     await prisma.board.delete({
       where: { id: req.params.id },
@@ -377,7 +406,7 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/columns', async (req: AuthRequest, res) => {
+router.post('/:id/columns', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const { name, description, position, visibility, autoAssign } = req.body;
 
@@ -399,7 +428,7 @@ router.post('/:id/columns', async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/columns/:columnId', async (req: AuthRequest, res) => {
+router.put('/columns/:columnId', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const { name, description, position, visibility, autoAssign } = req.body;
 
@@ -415,7 +444,7 @@ router.put('/columns/:columnId', async (req: AuthRequest, res) => {
   }
 });
 
-router.delete('/columns/:columnId', async (req: AuthRequest, res) => {
+router.delete('/columns/:columnId', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     await prisma.boardColumn.delete({
       where: { id: req.params.columnId },

@@ -11,9 +11,16 @@ router.post('/register', async (req, res) => {
   try {
     const { email, password, name, role = 'member' } = req.body;
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const [existingUser, lexEmail] = await Promise.all([
+      prisma.user.findUnique({ where: { email } }),
+      prisma.lexClientUser.findUnique({ where: { email }, select: { id: true } }),
+    ]);
+
     if (existingUser) {
       return res.status(400).json({ error: 'Пользователь уже существует' });
+    }
+    if (lexEmail) {
+      return res.status(400).json({ error: 'Этот email зарегистрирован как клиент LEXPRO' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -87,7 +94,11 @@ router.post('/verify', async (req, res) => {
       return res.status(401).json({ error: 'Токен не предоставлен' });
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId?: string; lexClientId?: string };
+    if (decoded.lexClientId) {
+      return res.status(401).json({ error: 'Недействительный токен' });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
@@ -105,7 +116,7 @@ router.post('/verify', async (req, res) => {
     }
 
     res.json({ user });
-  } catch (error) {
+  } catch {
     res.status(401).json({ error: 'Недействительный токен' });
   }
 });

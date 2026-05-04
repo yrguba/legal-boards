@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
 import { assertWorkspaceMember, getUserDocumentAccess } from '../utils/documentAccess';
 import {
   ensureChannelsForWorkspace,
@@ -19,6 +19,7 @@ const SCOPE_ORDER: Record<string, number> = {
 };
 
 router.use(authenticate);
+router.use(requireStaffUser);
 
 router.get('/workspace/:workspaceId/channels', async (req: AuthRequest, res) => {
   try {

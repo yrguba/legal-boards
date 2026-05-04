@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import http from 'http';
 import { getUploadsPath } from './uploadsPath';
 import authRoutes from './routes/auth';
+import lexAuthRoutes from './routes/lexAuth';
 import workspaceRoutes from './routes/workspaces';
 import boardRoutes from './routes/boards';
 import taskRoutes from './routes/tasks';
@@ -17,12 +18,14 @@ import notificationRoutes from './routes/notifications';
 import workspaceChatRoutes from './routes/workspaceChats';
 import calendarEventRoutes from './routes/calendarEvents';
 import knowledgeArticleRoutes from './routes/knowledgeArticles';
+import { initRealtime } from './realtime';
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+initRealtime(wss);
 
 const PORT = process.env.PORT || 5004;
 
@@ -34,6 +37,9 @@ app.use(express.json());
 app.use('/uploads', express.static(uploadDir));
 
 app.use('/api/auth', authRoutes);
+/** LEXPRO: оба префикса — часть прокси отдаёт backend без ведущего `/api`. */
+app.use('/api/lex/auth', lexAuthRoutes);
+app.use('/lex/auth', lexAuthRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/boards', boardRoutes);
 app.use('/api/tasks', taskRoutes);
@@ -57,14 +63,6 @@ wss.on('connection', (ws) => {
     console.log('WebSocket client disconnected');
   });
 });
-
-export const broadcast = (data: any) => {
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1) {
-      client.send(JSON.stringify(data));
-    }
-  });
-};
 
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

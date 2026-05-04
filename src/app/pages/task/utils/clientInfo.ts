@@ -25,5 +25,5 @@ export function extractClientInfo(
       if (!fullName) fullName = val;
     }
   }
-  return { fullName, organization };
+  return { fullName, organization, email: null, phone: null, contactNotes: null };
 }

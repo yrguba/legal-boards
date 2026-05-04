@@ -3,8 +3,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
-import { authenticate, AuthRequest } from '../middleware/auth';
-import { broadcast } from '../index';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import { broadcast } from '../realtime';
 import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
 import {
@@ -27,7 +27,7 @@ const storage = multer.diskStorage({
     }
     cb(null, dir);
   },
-  filename: (req, file, cb) => {
+  filename: (_req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const ext = path.extname(decodeMultipartFilename(file.originalname));
     cb(null, uniqueSuffix + ext);
@@ -40,6 +40,7 @@ const upload = multer({
 });
 
 router.use(authenticate);
+router.use(requireStaffUser);
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {

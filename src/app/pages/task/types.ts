@@ -16,11 +16,23 @@ export type TaskRecord = Record<string, any> & {
   comments?: unknown[];
   chatMessages?: unknown[];
   clientInteractions?: unknown[];
+  lexClientProfile?: {
+    id: string;
+    name?: string;
+    email?: string;
+    clientKind?: string;
+    companyName?: string;
+    phone?: string;
+    contactNotes?: string;
+  } | null;
 };
 
 export type ClientInfo = {
   fullName: string | null;
   organization: string | null;
+  email: string | null;
+  phone: string | null;
+  contactNotes: string | null;
 };
 
 export type DocumentPreviewState = {
@@ -88,7 +100,8 @@ export type TaskClientPanelProps = {
   onInteractionTitle: (v: string) => void;
   onInteractionDetails: (v: string) => void;
   onInteractionOccurredAt: (v: string) => void;
-  onSubmitInteraction: () => void;
+  onSubmitInteraction: () => Promise<boolean>;
+  onClearInteractionError: () => void;
 };
 
 export type TaskSidePanelsProps = {

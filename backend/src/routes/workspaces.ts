@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
-import { broadcast } from '../index';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import { broadcast } from '../realtime';
 import { ensureChannelForNewWorkspace } from '../utils/workspaceChatChannels';
+import { getLexIntakeWorkspaceIds, workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -11,6 +12,52 @@ router.use(authenticate);
 
 router.get('/', async (req: AuthRequest, res) => {
   try {
+    if (req.lexClientId) {
+      const links = await prisma.lexClientWorkspace.findMany({
+        where: { lexClientId: req.lexClientId },
+        include: {
+          workspace: {
+            include: {
+              owner: {
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const linkedIds = new Set(links.map((l) => l.workspaceId));
+      const intakeOnlyIds = [...getLexIntakeWorkspaceIds()].filter((id) => !linkedIds.has(id));
+
+      const intakeWorkspaces =
+        intakeOnlyIds.length === 0
+          ? []
+          : await prisma.workspace.findMany({
+              where: { id: { in: intakeOnlyIds } },
+              include: {
+                owner: {
+                  select: { id: true, name: true, email: true },
+                },
+              },
+            });
+
+      const fromLinks = links.map((l) => ({
+        ...l.workspace,
+        isOwner: false,
+      }));
+      const fromIntake = intakeWorkspaces.map((w) => ({
+        ...w,
+        isOwner: false,
+      }));
+
+      return res.json([...fromLinks, ...fromIntake]);
+    }
+
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
     const workspaces = await prisma.workspace.findMany({
       where: {
         OR: [
@@ -37,7 +84,7 @@ router.get('/', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/', async (req: AuthRequest, res) => {
+router.post('/', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const { name, description } = req.body;
 
@@ -60,6 +107,20 @@ router.post('/', async (req: AuthRequest, res) => {
 
 router.get('/:id', async (req: AuthRequest, res) => {
   try {
+    if (req.lexClientId) {
+      const link = await prisma.lexClientWorkspace.findUnique({
+        where: {
+          lexClientId_workspaceId: {
+            lexClientId: req.lexClientId,
+            workspaceId: req.params.id,
+          },
+        },
+      });
+      if (!link && !workspaceAllowsLexIntake(req.params.id)) {
+        return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+      }
+    }
+
     const workspace = await prisma.workspace.findUnique({
       where: { id: req.params.id },
       include: {
@@ -83,7 +144,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/:id', async (req: AuthRequest, res) => {
+router.put('/:id', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const { name, description } = req.body;
 
@@ -113,7 +174,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.delete('/:id', async (req: AuthRequest, res) => {
+router.delete('/:id', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const workspace = await prisma.workspace.findUnique({
       where: { id: req.params.id },
@@ -138,7 +199,7 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/users', async (req: AuthRequest, res) => {
+router.post('/:id/users', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const { userEmail } = req.body;
 

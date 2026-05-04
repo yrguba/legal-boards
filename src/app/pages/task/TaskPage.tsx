@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import { boardsApi, documentsApi, tasksApi, usersApi } from '../../services/api';
 import type { Board, Document, User } from '../../types';
@@ -7,7 +7,7 @@ import { PANEL_SIZES, TASK_PAGE_RESIZABLE_STORAGE_ID, TASK_RESIZABLE_PANEL_IDS }
 import { useTaskDerived } from './hooks/useTaskDerived';
 import { renderCustomFieldValue } from './utils/customFieldValue';
 import { formatTaskDate, toDatetimeLocalValue } from './utils/format';
-import { mergeChatMessage } from './utils/chatMessages';
+import { mergeChatMessage, isLawyerClientChannelMessage } from './utils/chatMessages';
 import { validateTaskEdits } from './utils/validateTaskEdits';
 import type { TaskPanelType, TaskRecord, DocumentPreviewState, ClientSubPanel } from './types';
 import { TaskPageHeader } from './components/TaskPageHeader';
@@ -18,10 +18,12 @@ import { TaskSidePanels } from './components/TaskSidePanels';
 import { TaskIconRail } from './components/TaskIconRail';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { useApp } from '../../store/AppContext';
+import { getWsUrl } from '../../utils/wsUrl';
 
 export function TaskPage() {
   const { currentUser } = useApp();
   const { taskId } = useParams();
+  const taskIdRef = useRef<string | undefined>(taskId);
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -146,6 +148,81 @@ export function TaskPage() {
   }, [taskId]);
 
   useEffect(() => {
+    taskIdRef.current = taskId;
+  }, [taskId]);
+
+  /** Входящие сообщения клиента по каналу «чат с клиентом» приходят через WS; REST POST только подтверждает отправку. */
+  useEffect(() => {
+    if (!currentUser?.id || !taskId) return;
+
+    let cancelled = false;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const handlePayload = (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return;
+      const data = raw as Record<string, unknown>;
+      const tid = typeof data.taskId === 'string' ? data.taskId : '';
+      if (!tid || tid !== taskIdRef.current) return;
+      if (data.type !== 'chat_message') return;
+      const msg = data.message as Record<string, unknown> | undefined;
+      if (!msg || typeof msg.id !== 'string') return;
+      if (!isLawyerClientChannelMessage(msg)) return;
+
+      setTask((prev) => {
+        if (!prev || prev.id !== tid) return prev;
+        const list = Array.isArray(prev.chatMessages) ? prev.chatMessages : [];
+        if (list.some((x: { id?: string }) => x.id === msg.id)) return prev;
+        return mergeChatMessage(prev, msg);
+      });
+    };
+
+    const connect = () => {
+      if (cancelled) return;
+      try {
+        ws = new WebSocket(getWsUrl());
+      } catch {
+        reconnectTimer = window.setTimeout(connect, 4000);
+        return;
+      }
+
+      ws.onmessage = (ev) => {
+        try {
+          handlePayload(JSON.parse(ev.data as string));
+        } catch {
+          /* ignore */
+        }
+      };
+
+      ws.onclose = () => {
+        if (cancelled) return;
+        ws = null;
+        reconnectTimer = window.setTimeout(connect, 4000);
+      };
+
+      ws.onerror = () => {
+        try {
+          ws?.close();
+        } catch {
+          /* ignore */
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(reconnectTimer);
+      try {
+        ws?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [currentUser?.id, taskId]);
+
+  useEffect(() => {
     if (!board?.workspaceId) return;
     let cancelled = false;
     (async () => {
@@ -215,12 +292,12 @@ export function TaskPage() {
     }
   };
 
-  const submitClientInteraction = async () => {
-    if (!taskId) return;
+  const submitClientInteraction = async (): Promise<boolean> => {
+    if (!taskId) return false;
     const title = interactionTitle.trim();
     if (!title) {
       setInteractionError('Введите заголовок');
-      return;
+      return false;
     }
     setIsPostingInteraction(true);
     setInteractionError(null);
@@ -242,8 +319,10 @@ export function TaskPage() {
       setInteractionDetails('');
       setInteractionKind('note');
       setInteractionOccurredAt(toDatetimeLocalValue(new Date()));
+      return true;
     } catch (e: any) {
       setInteractionError(e?.message || 'Не удалось сохранить');
+      return false;
     } finally {
       setIsPostingInteraction(false);
     }
@@ -499,6 +578,7 @@ export function TaskPage() {
                   onInteractionDetails={setInteractionDetails}
                   onInteractionOccurredAt={setInteractionOccurredAt}
                   onSubmitInteraction={submitClientInteraction}
+                  onClearInteractionError={() => setInteractionError(null)}
                 />
               ) : (
                 <TaskSidePanels

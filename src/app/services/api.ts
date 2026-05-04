@@ -1,7 +1,11 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5004/api';
 
-class ApiError extends Error {
-  constructor(public status: number, message: string) {
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public code?: string,
+  ) {
     super(message);
     this.name = 'ApiError';
   }
@@ -22,17 +26,19 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers,
+    cache: options.cache ?? 'no-store',
   });
 
   if (!response.ok) {
     const error = (await response.json().catch(() => ({}))) as {
       error?: string;
       details?: string;
+      code?: string;
     };
     const base = error.error || 'Ошибка запроса';
     const msg =
       error.details && typeof error.details === 'string' ? `${base} (${error.details})` : base;
-    throw new ApiError(response.status, msg);
+    throw new ApiError(response.status, msg, error.code);
   }
 
   return response.json();
@@ -75,6 +81,10 @@ export const usersApi = {
 
   async getByWorkspace(workspaceId: string) {
     return fetchApi<any[]>(`/users/workspace/${workspaceId}`);
+  },
+
+  async getLexClientsByWorkspace(workspaceId: string) {
+    return fetchApi<any[]>(`/users/workspace/${workspaceId}/clients`);
   },
 
   async getById(id: string) {
@@ -556,5 +566,3 @@ export const notificationsApi = {
     return fetchApi<void>(`/notifications/${id}`, { method: 'DELETE' });
   },
 };
-
-export { ApiError };

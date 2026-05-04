@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
 import { assertWorkspaceMember } from '../utils/documentAccess';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(authenticate);
+router.use(requireStaffUser);
 
 async function guardWorkspace(
   req: AuthRequest,

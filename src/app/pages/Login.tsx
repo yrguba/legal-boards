@@ -2,11 +2,13 @@ import { useState, FormEvent, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { Briefcase } from 'lucide-react';
+import { ApiError } from '../services/api';
 
 export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { login, isAuthenticated } = useApp();
   const navigate = useNavigate();
   const location = useLocation() as any;
@@ -21,11 +23,21 @@ export function Login() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
       await login(email, password);
       navigate(from);
     } catch (error) {
       console.error('Login failed:', error);
+      if (error instanceof ApiError && error.code === 'CLIENT_USE_LEXPRO') {
+        setError(error.message);
+      } else if (error instanceof ApiError && error.status === 401) {
+        setError('Неверный email или пароль');
+      } else if (error instanceof ApiError) {
+        setError(error.message);
+      } else {
+        setError('Не удалось войти');
+      }
     } finally {
       setLoading(false);
     }
@@ -42,6 +54,12 @@ export function Login() {
             <h1 className="text-2xl font-semibold text-slate-900">Legal Boards</h1>
             <p className="text-sm text-slate-600 mt-1">Войдите в систему</p>
           </div>
+
+          {error ? (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

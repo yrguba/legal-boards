@@ -20,6 +20,8 @@ export const t = {
     `rounded-lg p-2.5 transition-colors ${
       active ? 'bg-brand-light text-brand' : 'text-slate-500 hover:bg-slate-200/80'
     }`,
-  chatInput: 'min-w-0 flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand',
-  sendBtn: 'shrink-0 rounded bg-brand px-3 py-2 text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50',
+  chatInput:
+    'min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25',
+  sendBtn:
+    'shrink-0 rounded-lg bg-brand px-3 py-2 text-white shadow-sm transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50',
 } as const;

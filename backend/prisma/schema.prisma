@@ -39,6 +39,41 @@ model User {
   @@index([departmentId])
 }
 
+/// Пользователи приложения LEXPRO (отдельно от User / Legal Boards)
+model LexClientUser {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  name        String
+  clientKind  String
+  companyName String?
+  /// Контакт после создания запроса (LEXPRO)
+  phone         String?
+  contactNotes  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspaces          LexClientWorkspace[]
+  tasks                 Task[]               @relation("LexTaskCreator")
+  chatMessages          ChatMessage[]
+  attachmentsUploaded   TaskAttachment[]
+}
+
+/// Связь клиента LEXPRO с пространством — при первой задаче на доске этого workspace
+model LexClientWorkspace {
+  id          String   @id @default(cuid())
+  lexClientId String
+  workspaceId String
+  createdAt   DateTime @default(now())
+
+  lexClient   LexClientUser @relation(fields: [lexClientId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([lexClientId, workspaceId])
+  @@index([workspaceId])
+  @@index([lexClientId])
+}
+
 model Workspace {
   id          String   @id @default(cuid())
   name        String
@@ -56,6 +91,7 @@ model Workspace {
   chatChannels WorkspaceChatChannel[]
   calendarEvents CalendarEvent[]
   knowledgeArticles KnowledgeArticle[]
+  lexClients LexClientWorkspace[]
 
   @@index([ownerId])
 }
@@ -193,7 +229,10 @@ model Task {
   title        String
   description  String?
   assigneeId   String?
-  createdBy    String
+  /// Автор со стороны Legal Boards (null — задачу создал клиент LEXPRO)
+  createdBy    String?
+  /// Автор–клиент LEXPRO (null — задачу создал сотрудник)
+  lexCreatorId String?
   customFields Json     @default("{}")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -201,18 +240,35 @@ model Task {
   board        Board           @relation(fields: [boardId], references: [id], onDelete: Cascade)
   column       BoardColumn     @relation(fields: [columnId], references: [id])
   type         TaskType        @relation(fields: [typeId], references: [id])
-  creator      User            @relation("TaskCreator", fields: [createdBy], references: [id])
+  creator      User?           @relation("TaskCreator", fields: [createdBy], references: [id])
+  lexCreator   LexClientUser?  @relation("LexTaskCreator", fields: [lexCreatorId], references: [id])
   assignee     User?           @relation("TaskAssignee", fields: [assigneeId], references: [id])
   comments             Comment[]
   chatMessages         ChatMessage[]
   clientInteractions   TaskClientInteraction[]
   taskAttachments      TaskAttachment[]
+  statusTimelineEvents TaskStatusEvent[]
 
   @@index([boardId])
   @@index([columnId])
   @@index([typeId])
   @@index([assigneeId])
   @@index([createdBy])
+  @@index([lexCreatorId])
+}
+
+/// История смены колонки/типа задачи (для LEXPRO и GET /tasks/:id/status-history), не зависит от получателей уведомлений
+model TaskStatusEvent {
+  id        String   @id @default(cuid())
+  taskId    String
+  kind      String
+  message   String
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([taskId, createdAt])
 }
 
 model Comment {
@@ -231,19 +287,22 @@ model Comment {
 }
 
 model ChatMessage {
-  id        String   @id @default(cuid())
-  taskId    String
-  type      String
-  content   String
-  sender    String
-  userId    String
-  createdAt DateTime @default(now())
+  id              String   @id @default(cuid())
+  taskId          String
+  type            String
+  content         String
+  sender          String
+  userId          String?
+  lexClientUserId String?
+  createdAt       DateTime @default(now())
 
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task          Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user          User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lexClientUser LexClientUser? @relation(fields: [lexClientUserId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
   @@index([userId])
+  @@index([lexClientUserId])
 }
 
 model TaskClientInteraction {
@@ -265,20 +324,23 @@ model TaskClientInteraction {
 
 // Task-scoped file rows (separate from workspace Document)
 model TaskAttachment {
-  id         String   @id @default(cuid())
-  taskId     String
-  name       String
-  type       String
-  size       Int
-  path       String
-  uploadedBy String
-  createdAt  DateTime @default(now())
+  id                    String   @id @default(cuid())
+  taskId                String
+  name                  String
+  type                  String
+  size                  Int
+  path                  String
+  uploadedBy            String?
+  uploadedByLexClientId String?
+  createdAt             DateTime @default(now())
 
-  task     Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  uploader User @relation(fields: [uploadedBy], references: [id])
+  task          Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader      User?          @relation(fields: [uploadedBy], references: [id])
+  lexUploader   LexClientUser? @relation(fields: [uploadedByLexClientId], references: [id])
 
   @@index([taskId])
   @@index([uploadedBy])
+  @@index([uploadedByLexClientId])
 }
 
 model Document {

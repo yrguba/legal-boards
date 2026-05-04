@@ -1,16 +1,84 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest, authorize } from '../middleware/auth';
+import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
-import { broadcast } from '../index';
+import { broadcast } from '../realtime';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(authenticate);
+router.use(requireStaffUser);
+
+router.get('/workspace/:workspaceId/clients', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const workspaceId = req.params.workspaceId;
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, ownerId: true },
+    });
+
+    if (!workspace) {
+      return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+    }
+
+    const isMember = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.userId } },
+      select: { id: true },
+    });
+    if (!isMember && workspace.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const canManageClients =
+      workspace.ownerId === req.userId ||
+      req.userRole === 'admin' ||
+      req.userRole === 'manager';
+
+    if (!canManageClients) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const rows = await prisma.lexClientWorkspace.findMany({
+      where: { workspaceId },
+      include: {
+        lexClient: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            clientKind: true,
+            companyName: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json(
+      rows.map((r) => ({
+        ...r.lexClient,
+        workspaceLinkedAt: r.createdAt,
+      })),
+    );
+  } catch (error) {
+    console.error('Get workspace LEXPRO clients error:', error);
+    res.status(500).json({ error: 'Ошибка получения клиентов' });
+  }
+});
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
+    if (!req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
     const workspaceId = req.params.workspaceId;
 
     const workspace = await prisma.workspace.findUnique({
@@ -166,7 +234,7 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
   }
 });
 
-router.get('/', async (req: AuthRequest, res) => {
+router.get('/', async (_req: AuthRequest, res) => {
   try {
     const users = await prisma.user.findMany({
       select: {
