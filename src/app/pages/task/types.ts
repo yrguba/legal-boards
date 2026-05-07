@@ -1,6 +1,11 @@
 import type { Board, Document, TaskField, User } from '../../types';
 
-export type TaskPanelType = 'client' | 'assistant' | 'comments' | 'documents';
+export type TaskPanelType =
+  | 'client'
+  | 'assistant'
+  | 'comments'
+  | 'documents'
+  | `iframe:${string}`;
 
 export type ClientSubPanel = 'chat' | 'history';
 
@@ -65,6 +70,8 @@ export type TaskMainColumnProps = {
   uploadError: string | null;
   isDraggingFile: boolean;
   attachmentsEnabled: boolean;
+  /** Контроль времени доски включён (старт и финиш заданы) */
+  boardTimeTrackingEnabled: boolean;
   onEditDescription: (v: string) => void;
   onEditColumnId: (v: string) => void;
   onEditTypeId: (v: string) => void;

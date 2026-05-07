@@ -73,6 +73,201 @@ router.get('/workspace/:workspaceId/clients', async (req: AuthRequest, res) => {
   }
 });
 
+/** Каталог LEXPRO: клиенты, запросы (задачи) и взаимодействия по пространству; query: q, minTasks, maxTasks, typeId */
+router.get('/workspace/:workspaceId/lex-directory', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const workspaceId = req.params.workspaceId;
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, ownerId: true },
+    });
+
+    if (!workspace) {
+      return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+    }
+
+    const isMember = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.userId } },
+      select: { id: true },
+    });
+    if (!isMember && workspace.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const canManageClients =
+      workspace.ownerId === req.userId ||
+      req.userRole === 'admin' ||
+      req.userRole === 'manager';
+
+    if (!canManageClients) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const qRaw = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+    const minRaw = req.query.minTasks != null && String(req.query.minTasks) !== ''
+      ? parseInt(String(req.query.minTasks), 10)
+      : null;
+    const maxRaw = req.query.maxTasks != null && String(req.query.maxTasks) !== ''
+      ? parseInt(String(req.query.maxTasks), 10)
+      : null;
+    const typeId =
+      typeof req.query.typeId === 'string' && req.query.typeId.trim() ? req.query.typeId.trim() : null;
+
+    const boards = await prisma.board.findMany({
+      where: { workspaceId },
+      select: { id: true },
+    });
+    const boardIds = boards.map((b) => b.id);
+
+    const links = await prisma.lexClientWorkspace.findMany({
+      where: { workspaceId },
+      include: {
+        lexClient: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            clientKind: true,
+            companyName: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const lexIds = links.map((l) => l.lexClientId);
+
+    const tasks =
+      lexIds.length === 0 || boardIds.length === 0
+        ? []
+        : await prisma.task.findMany({
+            where: {
+              boardId: { in: boardIds },
+              lexCreatorId: { in: lexIds },
+            },
+            include: {
+              type: { select: { id: true, name: true } },
+              board: { select: { id: true, name: true } },
+              clientInteractions: {
+                orderBy: { occurredAt: 'desc' },
+                include: {
+                  user: { select: { id: true, name: true, avatar: true } },
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+
+    const tasksByLex = new Map<string, typeof tasks>();
+    for (const t of tasks) {
+      if (!t.lexCreatorId) continue;
+      const list = tasksByLex.get(t.lexCreatorId) ?? [];
+      list.push(t);
+      tasksByLex.set(t.lexCreatorId, list);
+    }
+
+    const serviceTypesMap = new Map<string, string>();
+    for (const t of tasks) {
+      serviceTypesMap.set(t.type.id, t.type.name);
+    }
+    const serviceTypes = [...serviceTypesMap.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+    type OutIx = {
+      id: string;
+      taskId: string;
+      taskTitle: string;
+      boardId: string;
+      boardName: string;
+      kind: string;
+      title: string;
+      details: string | null;
+      occurredAt: string;
+      createdAt: string;
+      user: { id: string; name: string; avatar: string | null };
+      taskTypeId: string;
+      taskTypeName: string;
+    };
+
+    let clientsOut = links.map((r) => {
+      const lc = r.lexClient;
+      const lt = tasksByLex.get(lc.id) ?? [];
+      const taskSummaries = lt.map((t) => ({
+        id: t.id,
+        title: t.title,
+        boardId: t.board.id,
+        boardName: t.board.name,
+        typeId: t.type.id,
+        typeName: t.type.name,
+        createdAt: t.createdAt.toISOString(),
+      }));
+      const interactions: OutIx[] = [];
+      for (const t of lt) {
+        for (const ci of t.clientInteractions) {
+          interactions.push({
+            id: ci.id,
+            taskId: t.id,
+            taskTitle: t.title,
+            boardId: t.board.id,
+            boardName: t.board.name,
+            kind: ci.kind,
+            title: ci.title,
+            details: ci.details,
+            occurredAt: ci.occurredAt.toISOString(),
+            createdAt: ci.createdAt.toISOString(),
+            user: ci.user,
+            taskTypeId: t.type.id,
+            taskTypeName: t.type.name,
+          });
+        }
+      }
+      interactions.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+
+      return {
+        id: lc.id,
+        email: lc.email,
+        name: lc.name,
+        clientKind: lc.clientKind,
+        companyName: lc.companyName,
+        createdAt: lc.createdAt.toISOString(),
+        workspaceLinkedAt: r.createdAt.toISOString(),
+        taskCount: lt.length,
+        tasks: taskSummaries,
+        interactions,
+      };
+    });
+
+    if (qRaw) {
+      clientsOut = clientsOut.filter((c) => {
+        const name = (c.name || '').toLowerCase();
+        const comp = (c.companyName || '').toLowerCase();
+        return name.includes(qRaw) || comp.includes(qRaw);
+      });
+    }
+    if (minRaw != null && !Number.isNaN(minRaw)) {
+      clientsOut = clientsOut.filter((c) => c.taskCount >= minRaw);
+    }
+    if (maxRaw != null && !Number.isNaN(maxRaw)) {
+      clientsOut = clientsOut.filter((c) => c.taskCount <= maxRaw);
+    }
+    if (typeId) {
+      clientsOut = clientsOut.filter((c) => c.tasks.some((t) => t.typeId === typeId));
+    }
+
+    res.json({ serviceTypes, clients: clientsOut });
+  } catch (error) {
+    console.error('Get lex directory error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки каталога LEXPRO' });
+  }
+});
+
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
     if (!req.userId) {

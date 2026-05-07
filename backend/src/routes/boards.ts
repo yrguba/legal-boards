@@ -1,6 +1,7 @@
-import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import { Router, type Response } from 'express';
+import { PrismaClient, Prisma } from '@prisma/client';
+import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
+import { assertWorkspaceMember } from '../utils/documentAccess';
 import { workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
 
 const router = Router();
@@ -57,12 +58,114 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
       },
     });
 
+    if (req.lexClientId) {
+      const sanitized = boards.map((b) => {
+        const { advancedSettings: _a, ...rest } = b as Record<string, unknown>;
+        return rest;
+      });
+      res.json(sanitized);
+      return;
+    }
+
     res.json(boards);
   } catch (error) {
     console.error('Get boards error:', error);
     res.status(500).json({ error: 'Ошибка получения досок' });
   }
 });
+
+/** Доска: сохранение advancedSettings (admin/manager). PUT/PATCH на …/advanced-settings — надёжнее, чем …/settings (прокси). */
+async function handleBoardAdvancedSettings(req: AuthRequest, res: Response) {
+  try {
+    const idOrCode = (req.params.boardId ?? req.params.id) as string;
+    const board = await prisma.board.findFirst({
+      where: {
+        OR: [{ id: idOrCode }, { code: idOrCode }],
+      },
+      select: { id: true, workspaceId: true },
+    });
+
+    if (!board) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
+    const ok = await assertWorkspaceMember(
+      prisma,
+      board.workspaceId,
+      req.userId!,
+      req.userRole,
+    );
+    if (!ok) {
+      return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+    }
+
+    const body = req.body as { advancedSettings?: unknown };
+    const raw = body.advancedSettings;
+    if (raw === undefined) {
+      return res.status(400).json({ error: 'Укажите объект advancedSettings' });
+    }
+    let stored: Record<string, unknown> = {};
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+      stored = { ...(raw as Record<string, unknown>) };
+      const services = stored.iframeServices;
+      if (Array.isArray(services) && services.length > 40) {
+        stored.iframeServices = services.slice(0, 40);
+      }
+    }
+
+    await prisma.board.update({
+      where: { id: board.id },
+      data: { advancedSettings: stored as Prisma.InputJsonValue },
+    });
+
+    const updated = await prisma.board.findUnique({
+      where: { id: board.id },
+      include: {
+        columns: { orderBy: { position: 'asc' } },
+        taskFields: { orderBy: { position: 'asc' } },
+        taskTypes: true,
+      },
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Patch board settings error:', error);
+    res.status(500).json({ error: 'Ошибка сохранения настроек доски' });
+  }
+}
+
+router.patch(
+  '/:boardId/advanced-settings',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  handleBoardAdvancedSettings,
+);
+router.put(
+  '/:boardId/advanced-settings',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  handleBoardAdvancedSettings,
+);
+router.post(
+  '/:boardId/advanced-settings',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  handleBoardAdvancedSettings,
+);
+
+/** @deprecated используйте …/advanced-settings */
+router.patch(
+  '/:id/settings',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  handleBoardAdvancedSettings,
+);
+router.put(
+  '/:id/settings',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  handleBoardAdvancedSettings,
+);
 
 router.get('/:id', async (req: AuthRequest, res) => {
   try {
@@ -94,6 +197,9 @@ router.get('/:id', async (req: AuthRequest, res) => {
       if (!link && !workspaceAllowsLexIntake(board.workspaceId)) {
         return res.status(403).json({ error: 'Нет доступа к этой доске' });
       }
+      const { advancedSettings: _adv, ...boardForLex } = board as Record<string, unknown>;
+      res.json(boardForLex);
+      return;
     }
 
     res.json(board);
@@ -393,10 +499,20 @@ router.post('/:boardId/types/:typeId/move-tasks', requireStaffUser, async (req: 
   }
 });
 
-router.delete('/:id', requireStaffUser, async (req: AuthRequest, res) => {
+router.delete('/:id', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
   try {
+    const idOrCode = req.params.id;
+    const existing = await prisma.board.findFirst({
+      where: { OR: [{ id: idOrCode }, { code: idOrCode }] },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
     await prisma.board.delete({
-      where: { id: req.params.id },
+      where: { id: existing.id },
     });
 
     res.json({ message: 'Доска удалена' });

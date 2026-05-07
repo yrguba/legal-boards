@@ -9,6 +9,11 @@ import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
 import { assertUserCanAccessTask } from '../utils/taskAccess';
 import { completeChat } from '../services/groqAssistant';
+import {
+  applyTimeTrackingColumnMove,
+  applyTimeTrackingOnTaskCreate,
+  parseBoardTimeTrackingCfg,
+} from '../utils/boardTimeTracking';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -385,7 +390,7 @@ router.post('/', async (req: AuthRequest, res) => {
     if (req.lexClientId) {
       const board = await prisma.board.findUnique({
         where: { id: boardId },
-        select: { workspaceId: true },
+        select: { workspaceId: true, advancedSettings: true },
       });
       if (!board) {
         return res.status(404).json({ error: 'Доска не найдена' });
@@ -405,6 +410,9 @@ router.post('/', async (req: AuthRequest, res) => {
         update: {},
       });
 
+      const ttCfgLex = parseBoardTimeTrackingCfg(board.advancedSettings ?? {});
+      const ttInitLex = applyTimeTrackingOnTaskCreate(columnId, ttCfgLex, new Date());
+
       const lexTask = await prisma.task.create({
         data: {
           boardId,
@@ -416,6 +424,9 @@ router.post('/', async (req: AuthRequest, res) => {
           createdBy: null,
           lexCreatorId: req.lexClientId,
           customFields: customFields || {},
+          trackedTimeSeconds: ttInitLex.trackedTimeSeconds,
+          timeTrackingActiveSince: ttInitLex.timeTrackingActiveSince,
+          timeTrackingCycleOpen: ttInitLex.timeTrackingCycleOpen,
         },
         include: {
           type: true,
@@ -436,6 +447,13 @@ router.post('/', async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
+    const boardForTt = await prisma.board.findUnique({
+      where: { id: boardId },
+      select: { advancedSettings: true },
+    });
+    const ttCfgCreate = parseBoardTimeTrackingCfg(boardForTt?.advancedSettings ?? {});
+    const ttInitCreate = applyTimeTrackingOnTaskCreate(columnId, ttCfgCreate, new Date());
+
     const task = await prisma.task.create({
       data: {
         boardId,
@@ -447,6 +465,9 @@ router.post('/', async (req: AuthRequest, res) => {
         createdBy: req.userId,
         lexCreatorId: null,
         customFields: customFields || {},
+        trackedTimeSeconds: ttInitCreate.trackedTimeSeconds,
+        timeTrackingActiveSince: ttInitCreate.timeTrackingActiveSince,
+        timeTrackingCycleOpen: ttInitCreate.timeTrackingCycleOpen,
       },
       include: {
         type: true,
@@ -495,16 +516,40 @@ router.put('/:id', async (req: AuthRequest, res) => {
     }
     if (customFields !== undefined) data.customFields = customFields;
 
-    if (Object.keys(data).length === 0) {
-      return res.status(400).json({ error: 'Нет полей для обновления' });
-    }
-
     const oldTask = await prisma.task.findUnique({
       where: { id: req.params.id },
     });
 
     if (!oldTask) {
       return res.status(404).json({ error: 'Задача не найдена' });
+    }
+
+    if (columnId !== undefined && oldTask.columnId !== columnId) {
+      const boardCfgRow = await prisma.board.findUnique({
+        where: { id: oldTask.boardId },
+        select: { advancedSettings: true },
+      });
+      const ttCfg = parseBoardTimeTrackingCfg(boardCfgRow?.advancedSettings ?? {});
+      if (ttCfg) {
+        const nextTt = applyTimeTrackingColumnMove(
+          {
+            trackedTimeSeconds: oldTask.trackedTimeSeconds,
+            timeTrackingActiveSince: oldTask.timeTrackingActiveSince,
+            timeTrackingCycleOpen: oldTask.timeTrackingCycleOpen,
+          },
+          oldTask.columnId,
+          columnId,
+          ttCfg,
+          new Date(),
+        );
+        data.trackedTimeSeconds = nextTt.trackedTimeSeconds;
+        data.timeTrackingActiveSince = nextTt.timeTrackingActiveSince;
+        data.timeTrackingCycleOpen = nextTt.timeTrackingCycleOpen;
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'Нет полей для обновления' });
     }
 
     const task = await prisma.task.update({

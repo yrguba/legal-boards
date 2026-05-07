@@ -1,10 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { Plus, LayoutGrid, List, Pencil } from 'lucide-react';
+import { Plus, LayoutGrid, List, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { CreateBoardModal } from '../components/CreateBoardModal';
 import { boardsApi, tasksApi } from '../services/api';
 import type { Board } from '../types';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import { buttonVariants } from '../components/ui/button';
+import { cn } from '../components/ui/utils';
 
 export function Boards() {
   const { currentWorkspace, currentUser } = useApp();
@@ -20,6 +31,8 @@ export function Boards() {
   const [workspaceBoards, setWorkspaceBoards] = useState<Board[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [boardPendingDelete, setBoardPendingDelete] = useState<Board | null>(null);
+  const [isDeletingBoard, setIsDeletingBoard] = useState(false);
   const canCreateBoards = currentUser?.role === 'admin' || currentUser?.role === 'manager';
 
   useEffect(() => {
@@ -138,6 +151,22 @@ export function Boards() {
     }
   };
 
+  const confirmDeleteBoard = async () => {
+    if (!boardPendingDelete) return;
+    setError(null);
+    setIsDeletingBoard(true);
+    try {
+      await boardsApi.delete(boardPendingDelete.id);
+      const removedId = boardPendingDelete.id;
+      setBoardPendingDelete(null);
+      setWorkspaceBoards((prev) => prev.filter((b) => b.id !== removedId));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Не удалось удалить доску');
+    } finally {
+      setIsDeletingBoard(false);
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
@@ -209,21 +238,35 @@ export function Boards() {
                       <List className="w-5 h-5 text-slate-400" />
                     )}
                     {canCreateBoards && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setEditingBoardColumnTaskCounts({});
-                          setEditingBoardTypeTaskCounts({});
-                          setEditingBoard(board);
-                          setIsEditModalOpen(true);
-                        }}
-                        className="p-2 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-                        aria-label="Редактировать доску"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setEditingBoardColumnTaskCounts({});
+                            setEditingBoardTypeTaskCounts({});
+                            setEditingBoard(board);
+                            setIsEditModalOpen(true);
+                          }}
+                          className="p-2 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                          aria-label="Редактировать доску"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setBoardPendingDelete(board);
+                          }}
+                          className="p-2 rounded hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors"
+                          aria-label="Удалить доску"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -258,6 +301,36 @@ export function Boards() {
         columnTaskCounts={editingBoardColumnTaskCounts}
         typeTaskCounts={editingBoardTypeTaskCounts}
       />
+
+      <AlertDialog
+        open={boardPendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingBoard) setBoardPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить доску?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Доска «{boardPendingDelete?.name}» и все связанные задачи будут удалены без возможности восстановления.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingBoard}>Отмена</AlertDialogCancel>
+            <button
+              type="button"
+              disabled={isDeletingBoard}
+              className={cn(
+                buttonVariants(),
+                'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600',
+              )}
+              onClick={() => void confirmDeleteBoard()}
+            >
+              {isDeletingBoard ? 'Удаление…' : 'Удалить'}
+            </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

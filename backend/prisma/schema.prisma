@@ -163,6 +163,8 @@ model Board {
   viewMode    String   @default("kanban")
   visibility  Json     @default("{}")
   attachmentsEnabled Boolean @default(true)
+  /// Расширенные настройки доски (JSON): авто-назначение, учёт времени по статусам, iframe-сервисы
+  advancedSettings Json     @default("{}")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -234,6 +236,12 @@ model Task {
   /// Автор–клиент LEXPRO (null — задачу создал сотрудник)
   lexCreatorId String?
   customFields Json     @default("{}")
+  /// Накопленное время работы по правилам доски (секунды)
+  trackedTimeSeconds       Int       @default(0)
+  /// Начало текущего отрезка учёта (когда задача в «считающейся» колонке цикла)
+  timeTrackingActiveSince  DateTime?
+  /// Цикл «от колонки старт до стоп» открыт (посещена стартовая колонка)
+  timeTrackingCycleOpen    Boolean   @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

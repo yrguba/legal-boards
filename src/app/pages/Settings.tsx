@@ -1,70 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { useApp } from '../store/AppContext';
-import { Building2, Users, Shield, Bell, Handshake } from 'lucide-react';
-import { usersApi } from '../services/api';
+import { Building2, Users, Shield, Bell } from 'lucide-react';
 
-type SettingsTab = 'workspace' | 'users' | 'permissions' | 'notifications' | 'clients';
-
-function formatLexClientDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
+type SettingsTab = 'workspace' | 'users' | 'permissions' | 'notifications';
 
 export function Settings() {
-  const { currentWorkspace, currentUser } = useApp();
+  const { currentWorkspace } = useApp();
   const [activeTab, setActiveTab] = useState<SettingsTab>('workspace');
-
-  const canManageClients =
-    !!currentWorkspace &&
-    (currentWorkspace.isOwner ||
-      currentUser?.role === 'admin' ||
-      currentUser?.role === 'manager');
-
-  const [lexClients, setLexClients] = useState<
-    Array<{
-      id: string;
-      email: string;
-      name: string;
-      clientKind?: string | null;
-      companyName?: string | null;
-      createdAt: string;
-      workspaceLinkedAt?: string;
-    }>
-  >([]);
-  const [lexClientsLoading, setLexClientsLoading] = useState(false);
-  const [lexClientsError, setLexClientsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (activeTab !== 'clients' || !currentWorkspace?.id || !canManageClients) return;
-    let cancelled = false;
-    setLexClientsLoading(true);
-    setLexClientsError(null);
-    usersApi
-      .getLexClientsByWorkspace(currentWorkspace.id)
-      .then((rows) => {
-        if (!cancelled) setLexClients(rows);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled)
-          setLexClientsError(e instanceof Error ? e.message : 'Не удалось загрузить клиентов');
-      })
-      .finally(() => {
-        if (!cancelled) setLexClientsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, currentWorkspace?.id, canManageClients]);
 
   return (
     <div className="p-6">
@@ -100,19 +43,6 @@ export function Settings() {
               <Users className="w-5 h-5" />
               <span>Пользователи и роли</span>
             </button>
-            {canManageClients ? (
-              <button
-                onClick={() => setActiveTab('clients')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
-                  activeTab === 'clients'
-                    ? 'bg-brand-light text-brand'
-                    : 'text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                <Handshake className="w-5 h-5" />
-                <span>Клиенты LEXPRO</span>
-              </button>
-            ) : null}
             <button
               onClick={() => setActiveTab('permissions')}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
@@ -218,65 +148,6 @@ export function Settings() {
                   </ul>
                 </div>
               </div>
-            </div>
-          )}
-
-          {activeTab === 'clients' && (
-            <div className="bg-white rounded-lg border border-slate-200 p-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-2">Клиенты LEXPRO</h2>
-              <p className="text-sm text-slate-600 mb-4">
-                Клиенты LEXPRO появляются здесь после того, как создали запрос на доске в этом рабочем
-                пространстве (связь создаётся автоматически).
-              </p>
-              {!currentWorkspace?.id ? (
-                <p className="text-sm text-slate-500">Выберите рабочее пространство в шапке приложения.</p>
-              ) : lexClientsLoading ? (
-                <p className="text-sm text-slate-500">Загрузка…</p>
-              ) : lexClientsError ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {lexClientsError}
-                </div>
-              ) : lexClients.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  Пока нет клиентов LEXPRO, связанных с этим пространством. После первого созданного ими
-                  запроса на доске здесь появится запись.
-                </p>
-              ) : (
-                <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-slate-50 text-left text-slate-600">
-                      <tr>
-                        <th className="px-4 py-2 font-medium">Имя</th>
-                        <th className="px-4 py-2 font-medium">Email</th>
-                        <th className="px-4 py-2 font-medium">Тип</th>
-                        <th className="px-4 py-2 font-medium">Компания</th>
-                        <th className="px-4 py-2 font-medium">Регистрация в LEXPRO</th>
-                        <th className="px-4 py-2 font-medium">Первый запрос в этом пространстве</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lexClients.map((c) => (
-                        <tr key={c.id} className="border-t border-slate-100">
-                          <td className="px-4 py-2 text-slate-900">{c.name}</td>
-                          <td className="px-4 py-2 text-slate-700">{c.email}</td>
-                          <td className="px-4 py-2 text-slate-700">
-                            {c.clientKind === 'company' ? 'Компания' : 'Частное лицо'}
-                          </td>
-                          <td className="px-4 py-2 text-slate-700">
-                            {c.clientKind === 'company' && c.companyName ? c.companyName : '—'}
-                          </td>
-                          <td className="px-4 py-2 text-slate-500 whitespace-nowrap">
-                            {formatLexClientDate(c.createdAt)}
-                          </td>
-                          <td className="px-4 py-2 text-slate-500 whitespace-nowrap">
-                            {c.workspaceLinkedAt ? formatLexClientDate(c.workspaceLinkedAt) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
           )}
 

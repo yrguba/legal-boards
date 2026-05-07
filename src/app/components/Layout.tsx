@@ -15,6 +15,7 @@ import {
   MessageCircle,
   Calendar,
   BookOpen,
+  Handshake,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
@@ -53,8 +54,14 @@ export function Layout() {
     setShowWorkspaceMenu(false);
   };
 
-  const navItems = useMemo(
-    () => [
+  const canManageLexClients =
+    !!currentWorkspace &&
+    (currentWorkspace.isOwner ||
+      currentUser?.role === 'admin' ||
+      currentUser?.role === 'manager');
+
+  const navItems = useMemo(() => {
+    const items: { to: string; end?: boolean; label: string; icon: typeof LayoutDashboard }[] = [
       { to: '/', end: true, label: 'Доски', icon: LayoutDashboard },
       { to: '/employees', label: 'Сотрудники', icon: Users },
       { to: '/documents', label: 'Документы', icon: FileText },
@@ -63,9 +70,12 @@ export function Layout() {
       { to: '/calendar', label: 'Календарь', icon: Calendar },
       { to: '/workspaces', label: 'Пространства', icon: Layers },
       { to: '/settings', label: 'Настройки', icon: Settings },
-    ],
-    []
-  );
+    ];
+    if (canManageLexClients) {
+      items.splice(6, 0, { to: '/lex-clients', label: 'Клиенты LEXPRO', icon: Handshake });
+    }
+    return items;
+  }, [canManageLexClients]);
 
   return (
     <div className="flex h-screen bg-slate-50">

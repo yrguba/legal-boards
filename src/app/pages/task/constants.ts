@@ -1,4 +1,4 @@
-import { Bot, FileText, MessageSquare, User } from 'lucide-react';
+import { AppWindow, Bot, FileText, MessageSquare, User } from 'lucide-react';
 import type { TaskPanelType } from './types';
 import type { LucideIcon } from 'lucide-react';
 
@@ -22,13 +22,20 @@ export const CLIENT_INTERACTION_KINDS: { value: string; label: string }[] = [
   { value: 'other', label: 'Другое' },
 ];
 
-export const SIDEBAR_PANEL_ICONS: {
+export type TaskSidebarRailEntry = {
   id: TaskPanelType;
   icon: LucideIcon;
   label: string;
-}[] = [
+};
+
+export const TASK_SIDEBAR_STATIC_ENTRIES: TaskSidebarRailEntry[] = [
   { id: 'client', icon: User, label: 'Клиент' },
   { id: 'assistant', icon: Bot, label: 'Ассистент' },
   { id: 'comments', icon: MessageSquare, label: 'Комментарии' },
   { id: 'documents', icon: FileText, label: 'Документы' },
 ];
+
+/** Обратная совместимость */
+export const SIDEBAR_PANEL_ICONS = TASK_SIDEBAR_STATIC_ENTRIES;
+
+export const IFRAME_SIDEBAR_ICON = AppWindow;

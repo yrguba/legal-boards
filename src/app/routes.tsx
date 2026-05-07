@@ -11,6 +11,7 @@ import { Chat } from './pages/Chat';
 import { Calendar } from './pages/Calendar';
 import { Workspaces } from './pages/Workspaces';
 import { Knowledge } from './pages/Knowledge';
+import { LexClients } from './pages/LexClients';
 import { useApp } from './store/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -79,6 +80,10 @@ export const router = createBrowserRouter([
       {
         path: 'settings',
         element: <Settings />,
+      },
+      {
+        path: 'lex-clients',
+        element: <LexClients />,
       },
     ],
   },

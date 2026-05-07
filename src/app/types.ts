@@ -1,3 +1,5 @@
+import type { BoardAdvancedSettings } from './features/board-settings/boardAdvancedSettings.types';
+
 export type UserRole = 'admin' | 'manager' | 'member' | 'guest';
 
 export interface User {
@@ -96,6 +98,7 @@ export interface Board {
   taskFields: TaskField[];
   taskTypes: TaskType[];
   viewMode: 'kanban' | 'list';
+  advancedSettings?: BoardAdvancedSettings;
 }
 
 export interface TaskAttachment {
@@ -121,7 +124,10 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   customFields: Record<string, any>;
-  /** С сервера при загрузке списка задач доски */
+  /** Секунды, накопленные правилами контроля времени доски */
+  trackedTimeSeconds?: number;
+  /** ISO: начало текущего отрезка учёта (таймер на карточке идёт) */
+  timeTrackingActiveSince?: string | null;
   creator?: { id: string; name: string; email?: string };
   assignee?: { id: string; name: string; email?: string; avatar?: string | null };
   /** Вложения только этой задачи (не глобальные Document) */

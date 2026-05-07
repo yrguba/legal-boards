@@ -1,7 +1,8 @@
-import { Calendar, Paperclip, Tag, User } from 'lucide-react';
+import { Calendar, Clock, Paperclip, Tag, User } from 'lucide-react';
 import { t } from '../taskPage.classes';
 import type { TaskMainColumnProps } from '../types';
 import { filePublicUrl } from '../utils/documentPaths';
+import { TaskElapsedTimeDisplay } from '../../../components/TaskElapsedTimeDisplay';
 
 export function TaskDetailsCard(p: TaskMainColumnProps) {
   const {
@@ -40,6 +41,7 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
     onPreviewDoc,
     renderFieldValue,
     formatDate,
+    boardTimeTrackingEnabled,
   } = p;
 
   return (
@@ -124,6 +126,20 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
             <span className="text-sm text-slate-900">{p.column?.name || '—'}</span>
           )}
         </div>
+
+        {boardTimeTrackingEnabled &&
+        ((task.trackedTimeSeconds ?? 0) > 0 || task.timeTrackingActiveSince) ? (
+          <div className="col-span-2">
+            <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">
+              <Clock className="w-4 h-4" />
+              Затраченное время
+            </div>
+            <TaskElapsedTimeDisplay
+              trackedSeconds={task.trackedTimeSeconds ?? 0}
+              activeSinceIso={task.timeTrackingActiveSince}
+            />
+          </div>
+        ) : null}
 
         {taskFields
           .filter((f) => f.id !== titleFieldId && f.id !== descriptionFieldId)

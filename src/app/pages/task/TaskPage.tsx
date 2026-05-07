@@ -3,8 +3,9 @@ import { useParams } from 'react-router';
 import { boardsApi, documentsApi, tasksApi, usersApi } from '../../services/api';
 import type { Board, Document, User } from '../../types';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../../components/ui/resizable';
-import { PANEL_SIZES, TASK_PAGE_RESIZABLE_STORAGE_ID, TASK_RESIZABLE_PANEL_IDS } from './constants';
+import { PANEL_SIZES, IFRAME_SIDEBAR_ICON, TASK_SIDEBAR_STATIC_ENTRIES, TASK_PAGE_RESIZABLE_STORAGE_ID, TASK_RESIZABLE_PANEL_IDS } from './constants';
 import { useTaskDerived } from './hooks/useTaskDerived';
+import { boardTimeTrackingIsConfigured } from '../../utils/boardTimeTracking';
 import { renderCustomFieldValue } from './utils/customFieldValue';
 import { formatTaskDate, toDatetimeLocalValue } from './utils/format';
 import { mergeChatMessage, isLawyerClientChannelMessage } from './utils/chatMessages';
@@ -15,8 +16,10 @@ import { TaskDetailsCard } from './components/TaskDetailsCard';
 import { TaskMetaFooter } from './components/TaskMetaFooter';
 import { TaskClientPanel } from './components/TaskClientPanel';
 import { TaskSidePanels } from './components/TaskSidePanels';
+import { TaskIframeServicePanel } from './components/TaskIframeServicePanel';
 import { TaskIconRail } from './components/TaskIconRail';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
+import { getBoardIframeServices, parseIframePanelId, taskIframePanelId } from './utils/boardIframeServices';
 import { useApp } from '../../store/AppContext';
 import { getWsUrl } from '../../utils/wsUrl';
 
@@ -82,6 +85,39 @@ export function TaskPage() {
     clientInteractionList,
     taskAttachments,
   } = useTaskDerived(task, board, users);
+
+  const boardIframeServices = useMemo(() => getBoardIframeServices(board), [board]);
+
+  const sidebarRailEntries = useMemo(() => {
+    const iframeEntries = boardIframeServices.map((s) => ({
+      id: taskIframePanelId(s.id),
+      icon: IFRAME_SIDEBAR_ICON,
+      label:
+        s.name.trim() ||
+        (() => {
+          try {
+            return new URL(s.url.trim()).hostname;
+          } catch {
+            return 'Сервис';
+          }
+        })(),
+    }));
+    return [...TASK_SIDEBAR_STATIC_ENTRIES, ...iframeEntries];
+  }, [boardIframeServices]);
+
+  const iframeServiceForPanel = useMemo(() => {
+    const sid = parseIframePanelId(activePanel);
+    if (!sid) return undefined;
+    return boardIframeServices.find((s) => s.id === sid);
+  }, [activePanel, boardIframeServices]);
+
+  useEffect(() => {
+    const sid = parseIframePanelId(activePanel);
+    if (!sid) return;
+    if (!boardIframeServices.some((s) => s.id === sid)) {
+      setActivePanel('comments');
+    }
+  }, [activePanel, boardIframeServices]);
 
   const assistantDisplayChat = useMemo(() => {
     const list = [...assistantPanelChat];
@@ -489,6 +525,7 @@ export function TaskPage() {
     uploadError,
     isDraggingFile,
     attachmentsEnabled: board.attachmentsEnabled !== false,
+    boardTimeTrackingEnabled: boardTimeTrackingIsConfigured(board),
     onEditDescription: setEditDescription,
     onEditColumnId: setEditColumnId,
     onEditTypeId: setEditTypeId,
@@ -580,6 +617,12 @@ export function TaskPage() {
                   onSubmitInteraction={submitClientInteraction}
                   onClearInteractionError={() => setInteractionError(null)}
                 />
+              ) : iframeServiceForPanel ? (
+                <TaskIframeServicePanel service={iframeServiceForPanel} />
+              ) : parseIframePanelId(activePanel) ? (
+                <div className="flex h-full min-h-0 items-center justify-center p-4 text-center text-sm text-slate-500">
+                  Сервис удалён из настроек доски или недоступен.
+                </div>
               ) : (
                 <TaskSidePanels
                   activePanel={activePanel}
@@ -604,6 +647,7 @@ export function TaskPage() {
               )}
             </div>
             <TaskIconRail
+              entries={sidebarRailEntries}
               activePanel={activePanel}
               onSelect={(id) => {
                 setActivePanel(id);

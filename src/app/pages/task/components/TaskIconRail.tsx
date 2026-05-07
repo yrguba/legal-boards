@@ -1,16 +1,17 @@
-import { SIDEBAR_PANEL_ICONS } from '../constants';
 import { t } from '../taskPage.classes';
 import type { TaskPanelType } from '../types';
+import type { TaskSidebarRailEntry } from '../constants';
 
 type Props = {
+  entries: TaskSidebarRailEntry[];
   activePanel: TaskPanelType;
   onSelect: (id: TaskPanelType) => void;
 };
 
-export function TaskIconRail({ activePanel, onSelect }: Props) {
+export function TaskIconRail({ entries, activePanel, onSelect }: Props) {
   return (
     <div className="flex w-12 shrink-0 flex-col items-center gap-0.5 border-l border-slate-200 bg-slate-50 py-2">
-      {SIDEBAR_PANEL_ICONS.map(({ id, icon: Icon, label }) => (
+      {entries.map(({ id, icon: Icon, label }) => (
         <button
           key={id}
           type="button"

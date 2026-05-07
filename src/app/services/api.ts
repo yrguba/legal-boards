@@ -87,6 +87,55 @@ export const usersApi = {
     return fetchApi<any[]>(`/users/workspace/${workspaceId}/clients`);
   },
 
+  async getLexClientsDirectory(
+    workspaceId: string,
+    params?: { q?: string; minTasks?: string; maxTasks?: string; typeId?: string },
+  ) {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.set('q', params.q);
+    if (params?.minTasks !== undefined && params.minTasks !== '') sp.set('minTasks', params.minTasks);
+    if (params?.maxTasks !== undefined && params.maxTasks !== '') sp.set('maxTasks', params.maxTasks);
+    if (params?.typeId) sp.set('typeId', params.typeId);
+    const qs = sp.toString();
+    return fetchApi<{
+      serviceTypes: { id: string; name: string }[];
+      clients: Array<{
+        id: string;
+        email: string;
+        name: string;
+        clientKind: string | null;
+        companyName: string | null;
+        createdAt: string;
+        workspaceLinkedAt: string;
+        taskCount: number;
+        tasks: Array<{
+          id: string;
+          title: string;
+          boardId: string;
+          boardName: string;
+          typeId: string;
+          typeName: string;
+          createdAt: string;
+        }>;
+        interactions: Array<{
+          id: string;
+          taskId: string;
+          taskTitle: string;
+          boardId: string;
+          boardName: string;
+          kind: string;
+          title: string;
+          details: string | null;
+          occurredAt: string;
+          createdAt: string;
+          user: { id: string; name: string; avatar: string | null };
+          taskTypeId: string;
+          taskTypeName: string;
+        }>;
+      }>;
+    }>(`/users/workspace/${workspaceId}/lex-directory${qs ? `?${qs}` : ''}`);
+  },
+
   async getById(id: string) {
     return fetchApi<any>(`/users/${id}`);
   },
@@ -239,6 +288,13 @@ export const boardsApi = {
     return fetchApi<any>(`/boards/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  },
+
+  async patchAdvancedSettings(id: string, advancedSettings: Record<string, unknown>) {
+    return fetchApi<any>(`/boards/${id}/advanced-settings`, {
+      method: 'POST',
+      body: JSON.stringify({ advancedSettings }),
     });
   },
 

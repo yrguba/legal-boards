@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router';
+import { useParams, Link, useNavigate } from 'react-router';
 import { boardsApi, tasksApi, usersApi } from '../services/api';
 import type { Board as BoardType, Task as TaskType, User as UserType } from '../types';
 import {
@@ -10,6 +10,7 @@ import {
   Settings,
   MoreHorizontal,
   GripVertical,
+  Trash2,
 } from 'lucide-react';
 import {
   DndContext,
@@ -26,6 +27,21 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CreateTaskModal } from '../components/CreateTaskModal';
+import { BoardSettingsModal } from '../features/board-settings/BoardSettingsModal';
+import { TaskElapsedTimeDisplay } from '../components/TaskElapsedTimeDisplay';
+import { boardTimeTrackingIsConfigured } from '../utils/boardTimeTracking';
+import { useApp } from '../store/AppContext';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import { buttonVariants } from '../components/ui/button';
+import { cn } from '../components/ui/utils';
 
 interface DroppableColumnProps {
   column: any;
@@ -34,6 +50,7 @@ interface DroppableColumnProps {
   getTaskTypeColor: (typeId: string) => string;
   getAssigneeName: (userId?: string) => string;
   onCreateTask: (columnId: string) => void;
+  boardTracksTime: boolean;
 }
 
 function DroppableColumn({
@@ -43,6 +60,7 @@ function DroppableColumn({
   getTaskTypeColor,
   getAssigneeName,
   onCreateTask,
+  boardTracksTime,
 }: DroppableColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -77,6 +95,7 @@ function DroppableColumn({
               getTaskTypeName={getTaskTypeName}
               getTaskTypeColor={getTaskTypeColor}
               getAssigneeName={getAssigneeName}
+              boardTracksTime={boardTracksTime}
             />
           ))}
           {columnTasks.length === 0 && (
@@ -103,9 +122,16 @@ interface TaskCardProps {
   getTaskTypeName: (typeId: string) => string;
   getTaskTypeColor: (typeId: string) => string;
   getAssigneeName: (userId?: string) => string;
+  boardTracksTime: boolean;
 }
 
-function TaskCard({ task, getTaskTypeName, getTaskTypeColor, getAssigneeName }: TaskCardProps) {
+function TaskCard({
+  task,
+  getTaskTypeName,
+  getTaskTypeColor,
+  getAssigneeName,
+  boardTracksTime,
+}: TaskCardProps) {
   const {
     attributes,
     listeners,
@@ -154,7 +180,7 @@ function TaskCard({ task, getTaskTypeName, getTaskTypeColor, getAssigneeName }: 
         </p>
       )}
 
-      <div className="flex items-center justify-between ml-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 ml-6">
         <span
           className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
           style={{ backgroundColor: getTaskTypeColor(task.typeId) }}
@@ -162,15 +188,26 @@ function TaskCard({ task, getTaskTypeName, getTaskTypeColor, getAssigneeName }: 
           {getTaskTypeName(task.typeId)}
         </span>
 
-        {task.assigneeId && (
-          <div className="flex items-center gap-1.5">
-            <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center">
-              <span className="text-xs font-medium text-slate-600">
-                {getAssigneeName(task.assigneeId).charAt(0)}
-              </span>
+        <div className="flex items-center gap-2">
+          {boardTracksTime &&
+          ((task.trackedTimeSeconds ?? 0) > 0 || task.timeTrackingActiveSince) ? (
+            <TaskElapsedTimeDisplay
+              compact
+              trackedSeconds={task.trackedTimeSeconds ?? 0}
+              activeSinceIso={task.timeTrackingActiveSince}
+            />
+          ) : null}
+
+          {task.assigneeId ? (
+            <div className="flex items-center gap-1.5">
+              <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center">
+                <span className="text-xs font-medium text-slate-600">
+                  {getAssigneeName(task.assigneeId).charAt(0)}
+                </span>
+              </div>
             </div>
-          </div>
-        )}
+          ) : null}
+        </div>
       </div>
 
       {task.customFields?.priority && (
@@ -184,6 +221,8 @@ function TaskCard({ task, getTaskTypeName, getTaskTypeColor, getAssigneeName }: 
 
 export function Board() {
   const { boardId } = useParams();
+  const navigate = useNavigate();
+  const { currentUser } = useApp();
   const [board, setBoard] = useState<BoardType | null>(null);
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   const [tasks, setTasks] = useState<TaskType[]>([]);
@@ -196,6 +235,13 @@ export function Board() {
   const [assigneeFilterIds, setAssigneeFilterIds] = useState<string[]>([]);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const filterPanelRef = useRef<HTMLDivElement>(null);
+  const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
+  const [deleteBoardDialogOpen, setDeleteBoardDialogOpen] = useState(false);
+  const [isDeletingBoard, setIsDeletingBoard] = useState(false);
+  const [deleteBoardError, setDeleteBoardError] = useState<string | null>(null);
+
+  const canManageBoardSettings =
+    currentUser?.role === 'admin' || currentUser?.role === 'manager';
 
   const UNASSIGNED_FILTER = '__unassigned__';
 
@@ -261,6 +307,7 @@ export function Board() {
 
   const taskTypes = useMemo(() => board?.taskTypes || [], [board?.taskTypes]);
   const columns = useMemo(() => board?.columns || [], [board?.columns]);
+  const boardTracksTime = useMemo(() => boardTimeTrackingIsConfigured(board), [board]);
 
   if (isLoading) {
     return (
@@ -410,6 +457,22 @@ export function Board() {
     }
   };
 
+  const confirmDeleteBoard = async () => {
+    if (!board) return;
+    setDeleteBoardError(null);
+    setIsDeletingBoard(true);
+    try {
+      await boardsApi.delete(board.id);
+      setDeleteBoardDialogOpen(false);
+      setBoardSettingsOpen(false);
+      navigate('/', { replace: true });
+    } catch (e: unknown) {
+      setDeleteBoardError(e instanceof Error ? e.message : 'Не удалось удалить доску');
+    } finally {
+      setIsDeletingBoard(false);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="bg-white border-b border-slate-200 px-6 py-4">
@@ -501,10 +564,29 @@ export function Board() {
               )}
             </div>
 
-            <button className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded transition-colors">
-              <Settings className="w-4 h-4" />
-              Настройки
-            </button>
+            {canManageBoardSettings && board ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setBoardSettingsOpen(true)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  Настройки
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteBoardError(null);
+                    setDeleteBoardDialogOpen(true);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Удалить
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
@@ -530,6 +612,7 @@ export function Board() {
                     getTaskTypeColor={getTaskTypeColor}
                     getAssigneeName={getAssigneeName}
                     onCreateTask={openCreateTask}
+                    boardTracksTime={boardTracksTime}
                   />
                 );
               })}
@@ -577,6 +660,9 @@ export function Board() {
                     Статус
                   </th>
                   <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
+                    Время
+                  </th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
                     Тип
                   </th>
                   <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
@@ -610,6 +696,18 @@ export function Board() {
                         <span className="text-sm text-slate-600">{column?.name}</span>
                       </td>
                       <td className="px-4 py-3">
+                        {boardTracksTime &&
+                        ((task.trackedTimeSeconds ?? 0) > 0 || task.timeTrackingActiveSince) ? (
+                          <TaskElapsedTimeDisplay
+                            compact
+                            trackedSeconds={task.trackedTimeSeconds ?? 0}
+                            activeSinceIso={task.timeTrackingActiveSince}
+                          />
+                        ) : (
+                          <span className="text-sm text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
                         <span
                           className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
                           style={{ backgroundColor: getTaskTypeColor(task.typeId) }}
@@ -640,6 +738,16 @@ export function Board() {
       </div>
 
       {board && (
+        <BoardSettingsModal
+          open={boardSettingsOpen}
+          onClose={() => setBoardSettingsOpen(false)}
+          board={board}
+          users={users}
+          onSaved={(updated) => setBoard(updated)}
+        />
+      )}
+
+      {board && (
         <CreateTaskModal
           isOpen={isCreateTaskOpen}
           onClose={() => setIsCreateTaskOpen(false)}
@@ -649,6 +757,44 @@ export function Board() {
           onSubmit={handleCreateTask}
         />
       )}
+
+      <AlertDialog
+        open={deleteBoardDialogOpen && !!board}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingBoard) {
+            setDeleteBoardDialogOpen(false);
+            setDeleteBoardError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить доску?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Доска «{board?.name}» и все связанные задачи будут удалены без возможности восстановления.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteBoardError ? (
+            <p className="text-sm text-red-600" role="alert">
+              {deleteBoardError}
+            </p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingBoard}>Отмена</AlertDialogCancel>
+            <button
+              type="button"
+              disabled={isDeletingBoard}
+              className={cn(
+                buttonVariants(),
+                'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600',
+              )}
+              onClick={() => void confirmDeleteBoard()}
+            >
+              {isDeletingBoard ? 'Удаление…' : 'Удалить'}
+            </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
