@@ -14,9 +14,16 @@ import {
   applyTimeTrackingOnTaskCreate,
   parseBoardTimeTrackingCfg,
 } from '../utils/boardTimeTracking';
+import { resolveAssigneeFromBoardRules } from '../utils/boardAutoAssignment';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+function normalizeIncomingAssigneeId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const t = raw.trim();
+  return t.length === 0 ? null : t;
+}
 
 /** Поля клиента LEXPRO для карточки задачи в Legal Boards */
 const LEX_CREATOR_FOR_TASK = {
@@ -413,6 +420,13 @@ router.post('/', async (req: AuthRequest, res) => {
       const ttCfgLex = parseBoardTimeTrackingCfg(board.advancedSettings ?? {});
       const ttInitLex = applyTimeTrackingOnTaskCreate(columnId, ttCfgLex, new Date());
 
+      let finalAssigneeLex = await resolveAssigneeFromBoardRules(prisma, {
+        boardId,
+        workspaceId: board.workspaceId,
+        typeId,
+        advancedSettings: board.advancedSettings ?? {},
+      });
+
       const lexTask = await prisma.task.create({
         data: {
           boardId,
@@ -420,7 +434,7 @@ router.post('/', async (req: AuthRequest, res) => {
           typeId,
           title,
           description,
-          assigneeId: null,
+          assigneeId: finalAssigneeLex,
           createdBy: null,
           lexCreatorId: req.lexClientId,
           customFields: customFields || {},
@@ -440,6 +454,16 @@ router.post('/', async (req: AuthRequest, res) => {
         },
       });
 
+      if (finalAssigneeLex) {
+        await createAndBroadcastNotification({
+          type: 'task_assigned',
+          title: 'Назначена задача',
+          message: `Вам назначена задача "${title}"`,
+          userId: finalAssigneeLex,
+          relatedId: lexTask.id,
+        });
+      }
+
       return res.json(unifyTaskRow(lexTask as Record<string, unknown>));
     }
 
@@ -447,12 +471,22 @@ router.post('/', async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
-    const boardForTt = await prisma.board.findUnique({
+    const boardRow = await prisma.board.findUnique({
       where: { id: boardId },
-      select: { advancedSettings: true },
+      select: { workspaceId: true, advancedSettings: true },
     });
-    const ttCfgCreate = parseBoardTimeTrackingCfg(boardForTt?.advancedSettings ?? {});
+    const ttCfgCreate = parseBoardTimeTrackingCfg(boardRow?.advancedSettings ?? {});
     const ttInitCreate = applyTimeTrackingOnTaskCreate(columnId, ttCfgCreate, new Date());
+
+    let finalAssigneeId = normalizeIncomingAssigneeId(assigneeId);
+    if (!finalAssigneeId && boardRow) {
+      finalAssigneeId = await resolveAssigneeFromBoardRules(prisma, {
+        boardId,
+        workspaceId: boardRow.workspaceId,
+        typeId,
+        advancedSettings: boardRow.advancedSettings ?? {},
+      });
+    }
 
     const task = await prisma.task.create({
       data: {
@@ -461,7 +495,7 @@ router.post('/', async (req: AuthRequest, res) => {
         typeId,
         title,
         description,
-        assigneeId,
+        assigneeId: finalAssigneeId,
         createdBy: req.userId,
         lexCreatorId: null,
         customFields: customFields || {},
@@ -481,12 +515,12 @@ router.post('/', async (req: AuthRequest, res) => {
       },
     });
 
-    if (assigneeId && assigneeId !== req.userId) {
+    if (finalAssigneeId && finalAssigneeId !== req.userId) {
       await createAndBroadcastNotification({
         type: 'task_assigned',
         title: 'Назначена задача',
         message: `Вам назначена задача "${title}"`,
-        userId: assigneeId,
+        userId: finalAssigneeId,
         relatedId: task.id,
       });
     }

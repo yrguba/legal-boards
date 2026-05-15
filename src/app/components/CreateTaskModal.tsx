@@ -129,24 +129,24 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col gap-4 overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Создать задачу</DialogTitle>
         </DialogHeader>
 
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto overscroll-contain px-2 py-2 pb-4 [-webkit-overflow-scrolling:touch]">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Тип *</label>
             <select
               value={typeId}
               onChange={(e) => setTypeId(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
             >
               <option value="" disabled>
                 Выберите тип
@@ -164,7 +164,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
             <input
               readOnly
               value={currentUser?.name ?? '—'}
-              className="w-full px-3 py-2 border border-slate-200 rounded bg-slate-50 text-slate-700 cursor-default"
+              className="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 cursor-default focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
             />
           </div>
 
@@ -173,7 +173,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
             <select
               value={assigneeId}
               onChange={(e) => setAssigneeId(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
             >
               <option value="">Не назначено</option>
               {users.map((u) => (
@@ -197,7 +197,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
                       <input
                         value={customFields[f.id] ?? ''}
                         onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
                       />
                     )}
 
@@ -206,7 +206,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
                         rows={3}
                         value={customFields[f.id] ?? ''}
                         onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
                       />
                     )}
 
@@ -216,7 +216,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
                         onChange={(e) => {
                           setCustomFields((p) => ({ ...p, [f.id]: e.target.value }));
                         }}
-                        className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
                       >
                         {(f.options || []).map((opt) => (
                           <option key={opt} value={opt}>
@@ -231,7 +231,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
                         type="date"
                         value={customFields[f.id] ?? ''}
                         onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
                       />
                     )}
 
@@ -242,7 +242,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
           )}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="shrink-0 gap-2 border-t border-slate-100 pt-4 sm:gap-0">
           <button
             onClick={handleClose}
             className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded transition-colors"
