@@ -125,7 +125,7 @@ pnpm start
 
 ## WebSocket
 
-WebSocket сервер работает на том же порту, что и HTTP сервер. События:
+WebSocket сервер работает на том же порту, что и HTTP сервер, путь **`/ws`** (например `ws://localhost:5004/ws`). События:
 - `notification` - Новое уведомление
 - `chat_message` - Новое сообщение в чате задачи
 - `document_uploaded` - Загружен новый документ

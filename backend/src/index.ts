@@ -24,7 +24,7 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
 initRealtime(wss);
 
 const PORT = process.env.PORT || 5004;
@@ -66,5 +66,5 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`WebSocket server running on ws://localhost:${PORT}`);
+  console.log(`WebSocket server running on ws://localhost:${PORT}/ws`);
 });

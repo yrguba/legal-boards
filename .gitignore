@@ -50,3 +50,6 @@ backend/uploads
 .DS_Store
 Thumbs.db
 .idea
+
+nginx.txt
+nginx-new.txt
