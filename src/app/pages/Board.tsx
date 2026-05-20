@@ -43,6 +43,27 @@ import {
 import { buttonVariants } from '../components/ui/button';
 import { cn } from '../components/ui/utils';
 
+/** После сохранения колонки API возвращает обновлённые поля учёта времени — подмешиваем в карточку без перезагрузки */
+function mergeTaskFromUpdateResponse(prev: TaskType, api: Record<string, unknown>): TaskType {
+  const merged = { ...prev };
+  if (typeof api.columnId === 'string') merged.columnId = api.columnId;
+  if (typeof api.trackedTimeSeconds === 'number') merged.trackedTimeSeconds = api.trackedTimeSeconds;
+  if (Object.prototype.hasOwnProperty.call(api, 'timeTrackingActiveSince')) {
+    const v = api.timeTrackingActiveSince;
+    merged.timeTrackingActiveSince =
+      v === null || v === undefined ? null : typeof v === 'string' ? v : String(v);
+  }
+  if (Object.prototype.hasOwnProperty.call(api, 'assigneeId')) {
+    merged.assigneeId =
+      api.assigneeId === null || api.assigneeId === undefined
+        ? undefined
+        : String(api.assigneeId);
+  }
+  if (api.assignee !== undefined) merged.assignee = api.assignee as TaskType['assignee'];
+  if (typeof api.updatedAt === 'string') merged.updatedAt = api.updatedAt;
+  return merged;
+}
+
 interface DroppableColumnProps {
   column: any;
   columnTasks: any[];
@@ -442,7 +463,14 @@ export function Board() {
     if (!activeTask) return;
 
     try {
-      await tasksApi.update(activeTaskId, { columnId: activeTask.columnId });
+      const updated = (await tasksApi.update(activeTaskId, {
+        columnId: activeTask.columnId,
+      })) as Record<string, unknown>;
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          task.id === activeTaskId ? mergeTaskFromUpdateResponse(task, updated) : task,
+        ),
+      );
     } catch (error) {
       console.error('Error updating task column:', error);
       const overId = over.id as string;
