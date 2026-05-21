@@ -22,18 +22,26 @@ export async function completeChat(messages: { role: ChatRole; content: string }
     }),
   });
 
+  const rawBody = await res.text();
+
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = res.statusText || 'Ошибка Groq API';
+    let code: string | undefined;
     try {
-      const errBody = (await res.json()) as { error?: { message?: string } };
+      const errBody = JSON.parse(rawBody) as {
+        error?: { message?: string; code?: string };
+      };
       if (errBody?.error?.message) detail = errBody.error.message;
+      code = errBody?.error?.code;
     } catch {
-      /* ignore */
+      const trimmed = rawBody.trim();
+      if (trimmed) detail = trimmed.length > 800 ? `${trimmed.slice(0, 800)}…` : trimmed;
     }
-    throw new Error(detail || 'Ошибка Groq API');
+    const codePart = code ? ` [${code}]` : '';
+    throw new Error(`Groq API ${res.status}: ${detail}${codePart}`);
   }
 
-  const data = (await res.json()) as {
+  const data = JSON.parse(rawBody) as {
     choices?: { message?: { content?: string | null } }[];
   };
   const text = data.choices?.[0]?.message?.content?.trim();

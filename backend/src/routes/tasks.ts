@@ -924,9 +924,13 @@ router.post('/:id/chat/assistant', async (req: AuthRequest, res) => {
     try {
       replyText = await completeChat(llmMessages);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Ошибка Groq';
+      const detail = e instanceof Error ? e.message : 'Ошибка Groq';
       console.error('Groq assistant error:', e);
-      return res.status(502).json({ error: msg });
+      // 503 — сбой внешнего провайдера LLM (не путать с 502 от nginx «upstream недоступен»).
+      return res.status(503).json({
+        error: 'Ассистент временно недоступен',
+        details: detail,
+      });
     }
 
     const assistantMessage = await prisma.chatMessage.create({

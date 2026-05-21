@@ -130,6 +130,25 @@ WebSocket сервер работает на том же порту, что и H
 - `chat_message` - Новое сообщение в чате задачи
 - `document_uploaded` - Загружен новый документ
 
+## Groq (ассистент в чате задачи)
+
+Чат ассистента на доске вызывает OpenAI‑совместимый endpoint Groq. Переменные окружения:
+
+| Переменная | Описание |
+|------------|----------|
+| `GROQ_API_KEY` | Секретный ключ из [Groq Console](https://console.groq.com/) |
+| `GROQ_MODEL` | Необязательно; по умолчанию `llama-3.3-70b-versatile` |
+
+При недоступности Groq клиент получает **503** и JSON `{ "error": "…", "details": "…" }` (техническая причина в `details`, см. логи сервера).
+
+**Ответ API `403 Forbidden` или текст вида «model … blocked»**
+
+У Groq есть ограничения **по модели** на уровне организации и проекта: если модель не разрешена, запрос вернётся с кодом `permissions_error`. Нужно в консоли открыть [Organization Limits](https://console.groq.com/settings/limits) и [Project Limits](https://console.groq.com/settings/project/limits) и либо добавить используемую модель в список разрешённых (режим «Only Allow»), либо убрать блокировку. Либо задайте в `GROQ_MODEL` модель, которая уже разрешена для вашего ключа (например `llama-3.1-8b-instant`).
+
+Подробнее: [Model Permissions](https://console.groq.com/docs/model-permissions).
+
+После смены переменных на проде перезапустите процесс (например `pm2 restart`).
+
 ## Структура проекта
 
 ```
