@@ -7,7 +7,7 @@ export type TaskPanelType =
   | 'documents'
   | `iframe:${string}`;
 
-export type ClientSubPanel = 'chat' | 'history';
+export type ClientSubPanel = 'chat' | 'history' | 'conclusion';
 
 /** Задача с вложениями и связями с API (расширенный ответ getById) */
 export type TaskRecord = Record<string, any> & {
@@ -16,6 +16,7 @@ export type TaskRecord = Record<string, any> & {
   boardId: string;
   columnId: string;
   typeId: string;
+  conclusionText?: string | null;
   customFields?: Record<string, unknown>;
   taskAttachments?: unknown[];
   comments?: unknown[];
@@ -109,6 +110,20 @@ export type TaskClientPanelProps = {
   onInteractionOccurredAt: (v: string) => void;
   onSubmitInteraction: () => Promise<boolean>;
   onClearInteractionError: () => void;
+  /** Вкладка «Заключение» только для задач LEXPRO-клиента */
+  showLexConclusionTab?: boolean;
+  conclusionAttachments?: Record<string, unknown>[];
+  conclusionDraft: string;
+  onConclusionDraft: (value: string) => void;
+  savingConclusion: boolean;
+  conclusionSaveError: string | null;
+  onSaveConclusion: () => void;
+  uploadingConclusionFile: boolean;
+  conclusionUploadError: string | null;
+  onUploadConclusionFile: (file: File) => void;
+  onRemoveConclusionAttachment: (id: string) => void;
+  apiBaseUrl: string;
+  onPreviewConclusionAttachment: (doc: DocumentPreviewState) => void;
 };
 
 export type TaskSidePanelsProps = {

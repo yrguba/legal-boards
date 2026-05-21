@@ -154,6 +154,8 @@ export interface TaskAttachment {
   path: string;
   size?: number;
   type?: string;
+  /** general — вложение клиента; conclusion — файл к заключению исполнителя */
+  purpose?: string;
 }
 
 export interface TaskChatMessage {
@@ -174,6 +176,8 @@ export interface TaskDetail extends TaskListItem {
   type?: { id: string; name: string; color?: string };
   assignee?: { id: string; name: string };
   creator?: { id: string; name: string };
+  /** Заключение юриста для клиента (LEXPRO вкладка «Заключение») */
+  conclusionText?: string | null;
   comments?: TaskComment[];
   chatMessages?: TaskChatMessage[];
   taskAttachments?: TaskAttachment[];

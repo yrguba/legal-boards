@@ -1,5 +1,17 @@
-import { useState } from 'react';
-import { Building2, History, Mail, MessageSquare, Phone, Plus, Send } from 'lucide-react';
+import { useRef, useState } from 'react';
+import {
+  Building2,
+  History,
+  Mail,
+  MessageSquare,
+  Phone,
+  Plus,
+  Scale,
+  Save,
+  Send,
+  Paperclip,
+  Trash2,
+} from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +24,7 @@ import { CLIENT_INTERACTION_KINDS } from '../constants';
 import { t } from '../taskPage.classes';
 import type { TaskClientPanelProps } from '../types';
 import { formatDateTime } from '../utils/format';
+import { filePublicUrl } from '../utils/documentPaths';
 
 function ClientContactRow({
   icon: Icon,
@@ -36,6 +49,7 @@ function ClientContactRow({
 export function TaskClientPanel(p: TaskClientPanelProps) {
   const { clientInfo } = p;
   const [interactionModalOpen, setInteractionModalOpen] = useState(false);
+  const conclusionFileRef = useRef<HTMLInputElement>(null);
 
   const submitFromModal = async () => {
     const ok = await p.onSubmitInteraction();
@@ -88,6 +102,16 @@ export function TaskClientPanel(p: TaskClientPanelProps) {
           >
             История
           </button>
+          {p.showLexConclusionTab ? (
+            <button
+              type="button"
+              onClick={() => p.onClientSubPanel('conclusion')}
+              className={t.tabButton(p.clientSubPanel === 'conclusion')}
+            >
+              <Scale className="mr-1 inline-block size-3.5 opacity-70" aria-hidden />
+              Заключение
+            </button>
+          ) : null}
         </div>
         {p.clientSubPanel === 'chat' ? (
           <>
@@ -169,7 +193,7 @@ export function TaskClientPanel(p: TaskClientPanelProps) {
               </div>
             </div>
           </>
-        ) : (
+        ) : p.clientSubPanel === 'history' ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="flex shrink-0 justify-end border-b border-slate-100 px-3 py-2">
               <button
@@ -306,7 +330,120 @@ export function TaskClientPanel(p: TaskClientPanelProps) {
               </DialogContent>
             </Dialog>
           </div>
-        )}
+        ) : p.showLexConclusionTab ? (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <p className="shrink-0 px-3 pt-2 text-[11px] leading-snug text-slate-500">
+              Ответ клиенту в LEXPRO (вкладка «Заключение»). Можно только текст, только файлы или оба варианта.
+            </p>
+            {p.conclusionSaveError ? (
+              <div className="mx-3 mt-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">
+                {p.conclusionSaveError}
+              </div>
+            ) : null}
+            {p.conclusionUploadError ? (
+              <div className="mx-3 mt-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">
+                {p.conclusionUploadError}
+              </div>
+            ) : null}
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+              <textarea
+                value={p.conclusionDraft}
+                onChange={(e) => p.onConclusionDraft(e.target.value)}
+                placeholder="Текст заключения…"
+                rows={8}
+                disabled={p.savingConclusion}
+                className="min-h-[100px] w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-slate-50"
+              />
+              <button
+                type="button"
+                onClick={() => void p.onSaveConclusion()}
+                disabled={p.savingConclusion}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Save className="size-3.5" aria-hidden />
+                {p.savingConclusion ? 'Сохранение…' : 'Сохранить текст'}
+              </button>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                <div className="mb-2 text-xs font-medium text-slate-600">Документ к заключению</div>
+                <input
+                  ref={conclusionFileRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void p.onUploadConclusionFile(f);
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => conclusionFileRef.current?.click()}
+                  disabled={p.uploadingConclusionFile}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:opacity-50"
+                >
+                  <Paperclip className="size-3.5 text-brand" aria-hidden />
+                  {p.uploadingConclusionFile ? 'Загрузка…' : 'Загрузить файл'}
+                </button>
+              </div>
+
+              {(p.conclusionAttachments ?? []).length === 0 ? (
+                <p className="text-xs text-slate-500">Файлов к заключению пока нет.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(p.conclusionAttachments ?? []).map((att) => {
+                    const id = att.id as string;
+                    const name = (att.name as string) || id;
+                    const href = filePublicUrl(p.apiBaseUrl, att.path as string | undefined);
+                    const canPreview =
+                      !!href &&
+                      (String(att.type || '').startsWith('image/') || att.type === 'application/pdf');
+
+                    return (
+                      <li
+                        key={id}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 bg-white p-2 text-sm text-slate-800"
+                      >
+                        <span className="min-w-0 truncate">{name}</span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {canPreview ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                p.onPreviewConclusionAttachment({ ...att, name, href } as any)
+                              }
+                              className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                            >
+                              Просмотр
+                            </button>
+                          ) : null}
+                          {href ? (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded px-2 py-1 text-xs text-brand hover:bg-brand-light"
+                            >
+                              Скачать
+                            </a>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => void p.onRemoveConclusionAttachment(id)}
+                            className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            aria-label="Удалить файл заключения"
+                          >
+                            <Trash2 className="size-4" />
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

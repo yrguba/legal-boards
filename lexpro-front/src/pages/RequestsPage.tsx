@@ -214,7 +214,7 @@ function mergeChatMessagesForLexTask(
   return { ...fetched, chatMessages: sortChatByCreatedAt(serverMsgs as TaskChatMessage[]) };
 }
 
-type TabKey = 'details' | 'contacts' | 'history' | 'chat';
+type TabKey = 'details' | 'contacts' | 'history' | 'chat' | 'conclusion';
 
 export function RequestsPage() {
   const { taskId } = useParams();
@@ -283,6 +283,24 @@ export function RequestsPage() {
     setChatUnread(false);
     setHistoryUnread(false);
   }, [taskId]);
+
+  const refreshDetailRef = useRef<(() => Promise<void>) | undefined>(undefined);
+
+  const refreshDetail = useCallback(async () => {
+    if (!taskId) return;
+    const seq = detailSeqRef.current;
+    try {
+      const t = await tasksApi.getById(taskId);
+      if (seq !== detailSeqRef.current || t.id !== taskId) return;
+      setTaskDetail((prev) => mergeChatMessagesForLexTask(taskId, t, prev, pendingWsChatRef));
+    } catch {
+      /* ignore */
+    }
+  }, [taskId]);
+
+  useEffect(() => {
+    refreshDetailRef.current = refreshDetail;
+  }, [refreshDetail]);
 
   useEffect(() => {
     if (tab === 'chat') setChatUnread(false);
@@ -363,6 +381,12 @@ export function RequestsPage() {
         if (tabRef.current !== 'history') {
           setHistoryUnread(true);
         }
+        return;
+      }
+
+      if (data.type === 'task_conclusion_updated') {
+        if (String(data.lexCreatorId ?? '') !== String(lexUserId)) return;
+        void refreshDetailRef.current?.();
       }
     };
 
@@ -416,10 +440,23 @@ export function RequestsPage() {
     return allBoardOptions.find((b) => b.id === taskDetail.boardId) ?? null;
   }, [taskDetail, allBoardOptions]);
 
+  const lexConclusionAttachments = useMemo(() => {
+    const list = taskDetail?.taskAttachments ?? [];
+    return list.filter((a) => (a.purpose || 'general') === 'conclusion');
+  }, [taskDetail?.taskAttachments]);
+
+  const hasLexConclusion =
+    !!(taskDetail?.conclusionText && String(taskDetail.conclusionText).trim()) ||
+    lexConclusionAttachments.length > 0;
+
   const getColumnName = useCallback(
     (boardId: string, columnId: string) => columnMaps[boardId]?.[columnId] ?? '—',
     [columnMaps],
   );
+
+  useEffect(() => {
+    if (tab === 'conclusion' && !hasLexConclusion) setTab('details');
+  }, [tab, hasLexConclusion]);
 
   const reloadTasks = useCallback(async () => {
     if (!allBoardOptions.length) {
@@ -583,18 +620,6 @@ export function RequestsPage() {
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
-
-  const refreshDetail = useCallback(async () => {
-    if (!taskId) return;
-    const seq = detailSeqRef.current;
-    try {
-      const t = await tasksApi.getById(taskId);
-      if (seq !== detailSeqRef.current || t.id !== taskId) return;
-      setTaskDetail((prev) => mergeChatMessagesForLexTask(taskId, t, prev, pendingWsChatRef));
-    } catch {
-      /* интервал опроса не должен ломать UI */
-    }
   }, [taskId]);
 
   const handlePostClientChat = async (e: FormEvent) => {
@@ -830,6 +855,9 @@ export function RequestsPage() {
                       ['details', 'Детали запроса', LayoutList],
                       ['contacts', 'Контакты', Phone],
                       ['history', 'История изменений', ScrollText],
+                      ...(hasLexConclusion
+                        ? ([['conclusion', 'Заключение', Scale]] as const)
+                        : []),
                       ['chat', 'Чат', MessagesSquare],
                     ] as const
                   ).map(([key, label, Icon]) => (
@@ -922,9 +950,13 @@ export function RequestsPage() {
                           {uploadError}
                         </div>
                       ) : null}
-                      {taskDetail.taskAttachments && taskDetail.taskAttachments.length > 0 ? (
+                      {taskDetail.taskAttachments &&
+                      taskDetail.taskAttachments.filter((att) => (att.purpose || 'general') !== 'conclusion')
+                        .length > 0 ? (
                         <ul className="space-y-2">
-                          {taskDetail.taskAttachments.map((att) => {
+                          {taskDetail.taskAttachments
+                            .filter((att) => (att.purpose || 'general') !== 'conclusion')
+                            .map((att) => {
                             const href = filePublicUrl(apiBase, att.path);
                             return (
                               <li
@@ -982,6 +1014,57 @@ export function RequestsPage() {
                     )}
                   </div>
                 )}
+
+                {tab === 'conclusion' && hasLexConclusion && taskDetail ? (
+                  <div className="space-y-6">
+                    <section>
+                      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-700">
+                        <Scale className="h-4 w-4 text-brand" />
+                        Ответ исполнителя
+                      </div>
+                      {taskDetail.conclusionText?.trim() ? (
+                        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-800 whitespace-pre-wrap">
+                          {taskDetail.conclusionText}
+                        </div>
+                      ) : lexConclusionAttachments.length > 0 ? (
+                        <p className="text-sm text-slate-500">Текст не указан — ниже приложены только файлы.</p>
+                      ) : null}
+                    </section>
+                    {lexConclusionAttachments.length > 0 ? (
+                      <section>
+                        <div className="mb-2 text-sm font-medium text-slate-700">Документы</div>
+                        <ul className="space-y-2">
+                          {lexConclusionAttachments.map((att) => {
+                            const href = filePublicUrl(apiBase, att.path);
+                            return (
+                              <li
+                                key={att.id}
+                                className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
+                              >
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <FileText className="h-8 w-8 shrink-0 text-brand" />
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-medium text-slate-900">{att.name}</div>
+                                    <div className="text-xs text-slate-500">{fmtBytes(att.size)}</div>
+                                  </div>
+                                </div>
+                                {href ? (
+                                  <a
+                                    href={href}
+                                    download={att.name}
+                                    className="rounded-md p-2 text-brand hover:bg-brand-light"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                ) : null}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </section>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {tab === 'chat' && (
                   <div className="flex flex-col gap-4">

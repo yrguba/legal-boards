@@ -70,6 +70,26 @@ export function TaskPage() {
     null,
   );
 
+  const showLexConclusionTab = Boolean(task?.lexCreatorId ?? task?.lexClientProfile?.id);
+  const [conclusionDraft, setConclusionDraft] = useState('');
+  useEffect(() => {
+    if (!task) {
+      setConclusionDraft('');
+      return;
+    }
+    const ct = task.conclusionText;
+    setConclusionDraft(typeof ct === 'string' ? ct : '');
+  }, [task?.id, task?.conclusionText]);
+
+  useEffect(() => {
+    if (!showLexConclusionTab && clientSubPanel === 'conclusion') setClientSubPanel('chat');
+  }, [showLexConclusionTab, clientSubPanel]);
+
+  const [savingConclusion, setSavingConclusion] = useState(false);
+  const [conclusionSaveError, setConclusionSaveError] = useState<string | null>(null);
+  const [uploadingConclusionFile, setUploadingConclusionFile] = useState(false);
+  const [conclusionUploadError, setConclusionUploadError] = useState<string | null>(null);
+
   const {
     apiBaseUrl,
     taskFields,
@@ -84,6 +104,7 @@ export function TaskPage() {
     assistantPanelChat,
     clientInteractionList,
     taskAttachments,
+    conclusionAttachments,
   } = useTaskDerived(task, board, users);
 
   const boardIframeServices = useMemo(() => getBoardIframeServices(board), [board]);
@@ -397,6 +418,56 @@ export function TaskPage() {
     }
   };
 
+  const saveConclusionTextHandler = async () => {
+    if (!taskId) return;
+    setConclusionSaveError(null);
+    setSavingConclusion(true);
+    try {
+      const trimmed = conclusionDraft.trim();
+      const conclusionTextPayload = trimmed.length === 0 ? null : trimmed;
+      const res = await tasksApi.patchTaskConclusion(taskId, conclusionTextPayload);
+      setTask((prev: TaskRecord | null) => (prev ? { ...prev, conclusionText: res.conclusionText } : prev));
+    } catch (e: unknown) {
+      setConclusionSaveError(e instanceof Error ? e.message : 'Не удалось сохранить');
+    } finally {
+      setSavingConclusion(false);
+    }
+  };
+
+  const uploadConclusionFileHandler = async (file: File) => {
+    if (!taskId) return;
+    setConclusionUploadError(null);
+    setUploadingConclusionFile(true);
+    try {
+      const created = (await tasksApi.uploadAttachment(taskId, file, {
+        purpose: 'conclusion',
+      })) as Record<string, unknown>;
+      setTask((prev: any) => ({
+        ...prev,
+        taskAttachments: [created, ...(Array.isArray(prev?.taskAttachments) ? prev.taskAttachments : [])],
+      }));
+    } catch (e: unknown) {
+      setConclusionUploadError(e instanceof Error ? e.message : 'Не удалось загрузить файл');
+    } finally {
+      setUploadingConclusionFile(false);
+    }
+  };
+
+  const removeConclusionAttachment = async (attachmentId: string) => {
+    if (!taskId) return;
+    try {
+      await tasksApi.deleteAttachment(taskId, attachmentId);
+      setTask((prev: any) => ({
+        ...prev,
+        taskAttachments: (Array.isArray(prev?.taskAttachments) ? prev.taskAttachments : []).filter(
+          (a: { id?: string }) => a.id !== attachmentId,
+        ),
+      }));
+    } catch (e: unknown) {
+      setConclusionUploadError(e instanceof Error ? e.message : 'Не удалось удалить файл');
+    }
+  };
+
   const handleUploadAttachment = async (file: File) => {
     if (!taskId) return;
     setUploadingFile(true);
@@ -616,6 +687,19 @@ export function TaskPage() {
                   onInteractionOccurredAt={setInteractionOccurredAt}
                   onSubmitInteraction={submitClientInteraction}
                   onClearInteractionError={() => setInteractionError(null)}
+                  showLexConclusionTab={showLexConclusionTab}
+                  conclusionAttachments={conclusionAttachments}
+                  conclusionDraft={conclusionDraft}
+                  onConclusionDraft={setConclusionDraft}
+                  savingConclusion={savingConclusion}
+                  conclusionSaveError={conclusionSaveError}
+                  onSaveConclusion={saveConclusionTextHandler}
+                  uploadingConclusionFile={uploadingConclusionFile}
+                  conclusionUploadError={conclusionUploadError}
+                  onUploadConclusionFile={uploadConclusionFileHandler}
+                  onRemoveConclusionAttachment={removeConclusionAttachment}
+                  apiBaseUrl={apiBaseUrl}
+                  onPreviewConclusionAttachment={(doc) => setPreviewDoc(doc)}
                 />
               ) : iframeServiceForPanel ? (
                 <TaskIframeServicePanel service={iframeServiceForPanel} />

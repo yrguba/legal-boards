@@ -377,9 +377,12 @@ export const tasksApi = {
     });
   },
 
-  async uploadAttachment(taskId: string, file: File) {
+  async uploadAttachment(taskId: string, file: File, opts?: { purpose?: 'general' | 'conclusion' }) {
     const formData = new FormData();
     formData.append('file', file);
+    if (opts?.purpose === 'conclusion') {
+      formData.append('purpose', 'conclusion');
+    }
     const token = localStorage.getItem('auth_token');
     const response = await fetch(`${API_URL}/tasks/${taskId}/attachments`, {
       method: 'POST',
@@ -391,6 +394,13 @@ export const tasksApi = {
       throw new ApiError(response.status, error.error);
     }
     return response.json();
+  },
+
+  async patchTaskConclusion(taskId: string, conclusionText: string | null) {
+    return fetchApi<{ conclusionText: string | null }>(`/tasks/${taskId}/conclusion`, {
+      method: 'PATCH',
+      body: JSON.stringify({ conclusionText }),
+    });
   },
 
   async deleteAttachment(taskId: string, attachmentId: string) {

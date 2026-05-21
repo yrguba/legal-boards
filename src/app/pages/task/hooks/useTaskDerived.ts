@@ -87,7 +87,17 @@ export function useTaskDerived(task: TaskRecord | null, board: Board | null, use
   const taskAttachments: Record<string, unknown>[] = useMemo(() => {
     const list = task?.taskAttachments;
     if (!Array.isArray(list)) return [];
-    return list as Record<string, unknown>[];
+    return list.filter(
+      (a) => ((a as { purpose?: string }).purpose || 'general') !== 'conclusion',
+    ) as Record<string, unknown>[];
+  }, [task?.taskAttachments]);
+
+  const conclusionAttachments = useMemo(() => {
+    const list = task?.taskAttachments;
+    if (!Array.isArray(list)) return [];
+    return list.filter(
+      (a) => ((a as { purpose?: string }).purpose || 'general') === 'conclusion',
+    ) as Record<string, unknown>[];
   }, [task?.taskAttachments]);
 
   return {
@@ -105,5 +115,6 @@ export function useTaskDerived(task: TaskRecord | null, board: Board | null, use
     assistantPanelChat,
     clientInteractionList,
     taskAttachments,
+    conclusionAttachments,
   };
 }

@@ -64,6 +64,25 @@ function accessCtx(req: AuthRequest) {
   return { userId: req.userId, userRole: req.userRole, lexClientId: req.lexClientId };
 }
 
+function normalizeAttachmentPurpose(raw: unknown): 'general' | 'conclusion' {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return s === 'conclusion' ? 'conclusion' : 'general';
+}
+
+async function notifyLexClientsConclusion(taskId: string) {
+  const t = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { lexCreatorId: true },
+  });
+  if (t?.lexCreatorId) {
+    broadcast({
+      type: 'task_conclusion_updated',
+      taskId,
+      lexCreatorId: t.lexCreatorId,
+    });
+  }
+}
+
 function unifyTaskRow(task: Record<string, unknown>) {
   const lexCreator = task.lexCreator as {
     id: string;
@@ -221,6 +240,13 @@ router.post('/:id/attachments', taskUpload.single('file'), async (req: AuthReque
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
     }
+    let purpose = normalizeAttachmentPurpose((req.body as { purpose?: unknown })?.purpose);
+    if (req.lexClientId) {
+      purpose = 'general';
+    } else if (purpose === 'conclusion' && !req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
     const displayName = decodeMultipartFilename(req.file.originalname);
     const att = await prisma.taskAttachment.create({
       data: req.lexClientId
@@ -232,6 +258,7 @@ router.post('/:id/attachments', taskUpload.single('file'), async (req: AuthReque
             path: toPublicUploadPath(req.file.path),
             uploadedBy: null,
             uploadedByLexClientId: req.lexClientId,
+            purpose: 'general',
           }
         : {
             taskId,
@@ -241,12 +268,16 @@ router.post('/:id/attachments', taskUpload.single('file'), async (req: AuthReque
             path: toPublicUploadPath(req.file.path),
             uploadedBy: req.userId!,
             uploadedByLexClientId: null,
+            purpose,
           },
       include: {
         uploader: { select: { id: true, name: true, email: true, avatar: true } },
         lexUploader: { select: { id: true, name: true, email: true } },
       },
     });
+    if (purpose === 'conclusion') {
+      void notifyLexClientsConclusion(taskId);
+    }
     return res.json(unifyAttachmentRow(att as Record<string, unknown>));
   } catch (error) {
     console.error('Upload task attachment error:', error);
@@ -267,13 +298,19 @@ router.delete('/:id/attachments/:attachmentId', async (req: AuthRequest, res) =>
     if (!att) {
       return res.status(404).json({ error: 'Вложение не найдено' });
     }
+    const attachmentPurpose = (att.purpose || 'general') as string;
     const staffOk =
       !!req.userId &&
-      (att.uploadedBy === req.userId || req.userRole === 'admin');
+      !req.lexClientId &&
+      (req.userRole === 'admin' ||
+        att.uploadedBy === req.userId ||
+        attachmentPurpose === 'conclusion');
     const lexOk =
       !!req.lexClientId &&
       !!att.uploadedByLexClientId &&
-      att.uploadedByLexClientId === req.lexClientId;
+      att.uploadedByLexClientId === req.lexClientId &&
+      attachmentPurpose !== 'conclusion';
+
     if (!staffOk && !lexOk) {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
@@ -285,11 +322,58 @@ router.delete('/:id/attachments/:attachmentId', async (req: AuthRequest, res) =>
     } catch {
       /* ignore */
     }
+    const wasConclusion = attachmentPurpose === 'conclusion';
     await prisma.taskAttachment.delete({ where: { id: attachmentId } });
+    if (wasConclusion) {
+      void notifyLexClientsConclusion(taskId);
+    }
     return res.json({ message: 'Вложение удалено' });
   } catch (error) {
     console.error('Delete task attachment error:', error);
     return res.status(500).json({ error: 'Ошибка удаления вложения' });
+  }
+});
+
+/** Текст заключения исполнителя для клиента (LEXPRO и др.). */
+router.patch('/:id/conclusion', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res
+        .status(403)
+        .json({ error: 'Редактирование заключения доступно только сотрудникам Legal Boards' });
+    }
+
+    const taskId = req.params.id;
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(req.body, 'conclusionText')) {
+      return res.status(400).json({ error: 'Передайте поле conclusionText (строка или null)' });
+    }
+
+    const raw = (req.body as { conclusionText?: unknown }).conclusionText;
+    let conclusionText: string | null = null;
+    if (raw === null || raw === undefined) {
+      conclusionText = null;
+    } else if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      conclusionText = trimmed.length === 0 ? null : trimmed;
+    } else {
+      return res.status(400).json({ error: 'conclusionText должен быть строкой или null' });
+    }
+
+    await prisma.task.update({
+      where: { id: taskId },
+      data: { conclusionText },
+    });
+    void notifyLexClientsConclusion(taskId);
+
+    res.json({ conclusionText });
+  } catch (error) {
+    console.error('Patch task conclusion error:', error);
+    res.status(500).json({ error: 'Ошибка сохранения заключения' });
   }
 });
 

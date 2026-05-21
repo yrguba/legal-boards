@@ -242,6 +242,8 @@ model Task {
   timeTrackingActiveSince  DateTime?
   /// Цикл «от колонки старт до стоп» открыт (посещена стартовая колонка)
   timeTrackingCycleOpen    Boolean   @default(false)
+  /// Заключение исполнителя для клиента (LEXPRO и др.)
+  conclusionText           String?   @db.Text
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -340,6 +342,8 @@ model TaskAttachment {
   path                  String
   uploadedBy            String?
   uploadedByLexClientId String?
+  /// general — обычные вложения; conclusion — файл к заключению исполнителя (видно во вкладке «Заключение» LEXPRO)
+  purpose               String    @default("general")
   createdAt             DateTime @default(now())
 
   task          Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
@@ -349,6 +353,7 @@ model TaskAttachment {
   @@index([taskId])
   @@index([uploadedBy])
   @@index([uploadedByLexClientId])
+  @@index([taskId, purpose])
 }
 
 model Document {
