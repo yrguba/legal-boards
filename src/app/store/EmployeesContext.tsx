@@ -11,7 +11,14 @@ interface EmployeesContextType {
   loading: boolean;
   error: string | null;
   createDepartment: (data: { name: string; description: string; workspaceId: string }) => Promise<void>;
+  updateDepartment: (
+    id: string,
+    data: { name?: string; description?: string },
+  ) => Promise<void>;
+  deleteDepartment: (id: string) => Promise<void>;
   createGroup: (data: { name: string; description: string; memberIds: string[]; workspaceId: string }) => Promise<void>;
+  updateGroup: (id: string, data: { name?: string; description?: string }) => Promise<void>;
+  deleteGroup: (id: string) => Promise<void>;
   createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ initialPassword?: string } | void>;
   updateUser: (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[] }) => Promise<void>;
   updateDepartmentMembers: (departmentId: string, memberIds: string[]) => Promise<void>;
@@ -62,6 +69,16 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
     setDepartments([...departments, newDepartment]);
   };
 
+  const updateDepartment = async (id: string, data: { name?: string; description?: string }) => {
+    await departmentsApi.update(id, data);
+    await refreshData();
+  };
+
+  const deleteDepartment = async (id: string) => {
+    await departmentsApi.delete(id);
+    await refreshData();
+  };
+
   const createGroup = async (data: { name: string; description: string; memberIds: string[]; workspaceId: string }) => {
     const newGroup = await groupsApi.create(data);
     // normalize to expected shape
@@ -72,6 +89,16 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
         memberIds: newGroup.memberIds || data.memberIds || [],
       },
     ]);
+  };
+
+  const updateGroup = async (id: string, data: { name?: string; description?: string }) => {
+    await groupsApi.update(id, data);
+    await refreshData();
+  };
+
+  const deleteGroup = async (id: string) => {
+    await groupsApi.delete(id);
+    await refreshData();
   };
 
   const createUser = async (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => {
@@ -111,7 +138,11 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
         loading,
         error,
         createDepartment,
+        updateDepartment,
+        deleteDepartment,
         createGroup,
+        updateGroup,
+        deleteGroup,
         createUser,
         updateUser,
         updateDepartmentMembers,

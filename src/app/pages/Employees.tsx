@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useEmployees } from '../store/EmployeesContext';
-import { Plus, Users as UsersIcon, Building, UserPlus, Edit, Settings } from 'lucide-react';
+import { Plus, Users as UsersIcon, Building, UserPlus, Edit, Settings, Trash2 } from 'lucide-react';
 import { CreateDepartmentModal } from '../components/CreateDepartmentModal';
 import { CreateGroupModal } from '../components/CreateGroupModal';
 import { CreateEmployeeModal } from '../components/CreateEmployeeModal';
@@ -77,11 +77,26 @@ function DroppableBox({
 }
 
 export function Employees() {
-  const { currentWorkspace } = useApp();
-  const { users, departments, groups, createDepartment, createGroup, updateUser, updateDepartmentMembers, updateGroupMembers } = useEmployees();
+  const { currentWorkspace, currentUser } = useApp();
+  const {
+    users,
+    departments,
+    groups,
+    createDepartment,
+    updateDepartment,
+    deleteDepartment,
+    createGroup,
+    updateGroup,
+    deleteGroup,
+    updateUser,
+    updateDepartmentMembers,
+    updateGroupMembers,
+  } = useEmployees();
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [isDepartmentModalOpen, setIsDepartmentModalOpen] = useState(false);
+  const [departmentEditing, setDepartmentEditing] = useState<Department | null>(null);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+  const [groupEditing, setGroupEditing] = useState<Group | null>(null);
   const [isCreateEmployeeModalOpen, setIsCreateEmployeeModalOpen] = useState(false);
   const [isEditEmployeeModalOpen, setIsEditEmployeeModalOpen] = useState(false);
   const [isManageDepartmentMembersModalOpen, setIsManageDepartmentMembersModalOpen] = useState(false);
@@ -93,16 +108,79 @@ export function Employees() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const handleCreateDepartment = async (data: { name: string; description: string }) => {
+  const canManageOrg = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+
+  const handleSaveDepartment = async (data: { name: string; description: string }) => {
     if (!currentWorkspace) return;
-    await createDepartment({ ...data, workspaceId: currentWorkspace.id });
-    setIsDepartmentModalOpen(false);
+    try {
+      if (departmentEditing) {
+        await updateDepartment(departmentEditing.id, data);
+      } else {
+        await createDepartment({ ...data, workspaceId: currentWorkspace.id });
+      }
+      setIsDepartmentModalOpen(false);
+      setDepartmentEditing(null);
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Не удалось сохранить отдел');
+    }
   };
 
-  const handleCreateGroup = async (data: { name: string; description: string; memberIds: string[] }) => {
+  const confirmDeleteDepartment = async (dept: Department) => {
+    if (
+      !window.confirm(
+        `Удалить отдел «${dept.name}»? Сотрудники будут переведены в «Без отдела».`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteDepartment(dept.id);
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Не удалось удалить отдел');
+    }
+  };
+
+  const handleSaveGroup = async (data: {
+    name: string;
+    description: string;
+    memberIds: string[];
+  }) => {
     if (!currentWorkspace) return;
-    await createGroup({ ...data, workspaceId: currentWorkspace.id });
-    setIsGroupModalOpen(false);
+    try {
+      if (groupEditing) {
+        await updateGroup(groupEditing.id, {
+          name: data.name,
+          description: data.description,
+        });
+        await updateGroupMembers(groupEditing.id, data.memberIds);
+      } else {
+        await createGroup({
+          name: data.name,
+          description: data.description,
+          memberIds: data.memberIds,
+          workspaceId: currentWorkspace.id,
+        });
+      }
+      setIsGroupModalOpen(false);
+      setGroupEditing(null);
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Не удалось сохранить группу');
+    }
+  };
+
+  const confirmDeleteGroup = async (group: Group) => {
+    if (
+      !window.confirm(
+        `Удалить группу «${group.name}»? Участников нужно будет заново добавить в другие группы.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteGroup(group.id);
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Не удалось удалить группу');
+    }
   };
 
   const handleEditEmployee = async (userId: string, data: { role: UserRole; departmentId?: string; groupIds: string[] }) => {
@@ -365,13 +443,19 @@ export function Employees() {
         <div>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-medium text-slate-900">Отделы</h2>
-            <button
-              onClick={() => setIsDepartmentModalOpen(true)}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-white text-slate-700 border border-slate-200 rounded hover:bg-slate-50 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Создать отдел
-            </button>
+            {canManageOrg ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDepartmentEditing(null);
+                  setIsDepartmentModalOpen(true);
+                }}
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-white text-slate-700 border border-slate-200 rounded hover:bg-slate-50 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Создать отдел
+              </button>
+            ) : null}
           </div>
           <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -397,13 +481,37 @@ export function Employees() {
                       </div>
                     )}
                   </DroppableBox>
-                  <button
-                    onClick={() => openManageDepartmentMembers(dept)}
-                    className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
-                    title="Управление участниками"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
+                  {canManageOrg ? (
+                    <div className="absolute top-3 right-3 flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDepartmentEditing(dept);
+                          setIsDepartmentModalOpen(true);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                        title="Редактировать отдел"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void confirmDeleteDepartment(dept)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Удалить отдел"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openManageDepartmentMembers(dept)}
+                        className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                        title="Управление участниками"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -415,13 +523,19 @@ export function Employees() {
         <div>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-medium text-slate-900">Группы</h2>
-            <button
-              onClick={() => setIsGroupModalOpen(true)}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-white text-slate-700 border border-slate-200 rounded hover:bg-slate-50 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Создать группу
-            </button>
+            {canManageOrg ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupEditing(null);
+                  setIsGroupModalOpen(true);
+                }}
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-white text-slate-700 border border-slate-200 rounded hover:bg-slate-50 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Создать группу
+              </button>
+            ) : null}
           </div>
           <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -456,13 +570,37 @@ export function Employees() {
                       </div>
                     )}
                   </DroppableBox>
-                  <button
-                    onClick={() => openManageGroupMembers(group)}
-                    className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
-                    title="Управление участниками"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
+                  {canManageOrg ? (
+                    <div className="absolute top-3 right-3 flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGroupEditing(group);
+                          setIsGroupModalOpen(true);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                        title="Редактировать группу"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void confirmDeleteGroup(group)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Удалить группу"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openManageGroupMembers(group)}
+                        className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                        title="Управление участниками"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -472,14 +610,22 @@ export function Employees() {
 
       <CreateDepartmentModal
         isOpen={isDepartmentModalOpen}
-        onClose={() => setIsDepartmentModalOpen(false)}
-        onSubmit={handleCreateDepartment}
+        editingDepartment={departmentEditing}
+        onClose={() => {
+          setIsDepartmentModalOpen(false);
+          setDepartmentEditing(null);
+        }}
+        onSubmit={handleSaveDepartment}
       />
 
       <CreateGroupModal
         isOpen={isGroupModalOpen}
-        onClose={() => setIsGroupModalOpen(false)}
-        onSubmit={handleCreateGroup}
+        editingGroup={groupEditing}
+        onClose={() => {
+          setIsGroupModalOpen(false);
+          setGroupEditing(null);
+        }}
+        onSubmit={handleSaveGroup}
       />
 
       <CreateEmployeeModal

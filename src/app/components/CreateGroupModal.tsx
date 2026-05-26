@@ -1,41 +1,57 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { useApp } from '../store/AppContext';
 import { useEmployees } from '../store/EmployeesContext';
+import type { Group } from '../types';
 
 interface CreateGroupModalProps {
   isOpen: boolean;
+  editingGroup?: Group | null;
   onClose: () => void;
-  onSubmit: (data: { name: string; description: string; memberIds: string[] }) => void;
+  onSubmit: (data: { name: string; description: string; memberIds: string[] }) => void | Promise<void>;
 }
 
-export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModalProps) {
-  const { currentWorkspace } = useApp();
+export function CreateGroupModal({ isOpen, editingGroup, onClose, onSubmit }: CreateGroupModalProps) {
   const { users } = useEmployees();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(editingGroup?.name ?? '');
+    setDescription(editingGroup?.description ?? '');
+    setSelectedMembers([...(editingGroup?.memberIds ?? [])]);
+  }, [
+    isOpen,
+    editingGroup?.id,
+    editingGroup?.name,
+    editingGroup?.description,
+    editingGroup?.memberIds?.join(','),
+  ]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const isEdit = Boolean(editingGroup?.id);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (name.trim()) {
-      onSubmit({
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      await onSubmit({
         name: name.trim(),
         description: description.trim(),
         memberIds: selectedMembers,
       });
-      setName('');
-      setDescription('');
-      setSelectedMembers([]);
-      onClose();
+    } finally {
+      setBusy(false);
     }
   };
 
   const toggleMember = (userId: string) => {
     setSelectedMembers((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
     );
   };
 
@@ -43,8 +59,11 @@ export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModal
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-semibold text-slate-900">Создать группу</h2>
+          <h2 className="text-xl font-semibold text-slate-900">
+            {isEdit ? 'Редактировать группу' : 'Создать группу'}
+          </h2>
           <button
+            type="button"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 transition-colors"
           >
@@ -52,11 +71,9 @@ export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModal
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
+        <form onSubmit={(e) => void handleSubmit(e)} className="flex-1 overflow-y-auto p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Название группы *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Название группы *</label>
             <input
               type="text"
               value={name}
@@ -68,9 +85,7 @@ export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModal
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Описание
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Описание</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -81,9 +96,7 @@ export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModal
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Участники группы
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Участники группы</label>
             <div className="border border-slate-200 rounded max-h-64 overflow-y-auto">
               {users.map((user) => (
                 <label
@@ -97,9 +110,7 @@ export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModal
                     className="w-4 h-4 text-brand"
                   />
                   <div className="w-8 h-8 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
-                    <span className="text-sm font-medium text-brand">
-                      {user.name.charAt(0)}
-                    </span>
+                    <span className="text-sm font-medium text-brand">{user.name.charAt(0)}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-slate-900">{user.name}</div>
@@ -108,24 +119,24 @@ export function CreateGroupModal({ isOpen, onClose, onSubmit }: CreateGroupModal
                 </label>
               ))}
             </div>
-            <div className="text-xs text-slate-500 mt-1">
-              Выбрано: {selectedMembers.length}
-            </div>
+            <div className="text-xs text-slate-500 mt-1">Выбрано: {selectedMembers.length}</div>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded transition-colors"
+              disabled={busy}
+              className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded transition-colors disabled:opacity-50"
             >
               Отмена
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors"
+              disabled={busy}
+              className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors disabled:opacity-50"
             >
-              Создать
+              {busy ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Создать'}
             </button>
           </div>
         </form>
