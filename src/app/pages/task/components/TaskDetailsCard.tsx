@@ -3,6 +3,7 @@ import { t } from '../taskPage.classes';
 import type { TaskMainColumnProps } from '../types';
 import { filePublicUrl } from '../utils/documentPaths';
 import { TaskElapsedTimeDisplay } from '../../../components/TaskElapsedTimeDisplay';
+import { TaskApprovalsSection } from './TaskApprovalsSection';
 
 export function TaskDetailsCard(p: TaskMainColumnProps) {
   const {
@@ -42,6 +43,13 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
     renderFieldValue,
     formatDate,
     boardTimeTrackingEnabled,
+    approvalRules,
+    columnApprovals,
+    currentUserId,
+    approvingRuleId,
+    approvalError,
+    onApproveRule,
+    onRejectRule,
   } = p;
 
   return (
@@ -126,6 +134,17 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
             <span className="text-sm text-slate-900">{p.column?.name || '—'}</span>
           )}
         </div>
+
+        <TaskApprovalsSection
+          columnId={task.columnId}
+          rules={approvalRules}
+          approvals={columnApprovals}
+          currentUserId={currentUserId}
+          processingRuleId={approvingRuleId}
+          approvalError={approvalError}
+          onApprove={onApproveRule}
+          onReject={onRejectRule}
+        />
 
         {boardTimeTrackingEnabled &&
         ((task.trackedTimeSeconds ?? 0) > 0 || task.timeTrackingActiveSince) ? (

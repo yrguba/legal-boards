@@ -18,6 +18,7 @@ import notificationRoutes from './routes/notifications';
 import workspaceChatRoutes from './routes/workspaceChats';
 import calendarEventRoutes from './routes/calendarEvents';
 import knowledgeArticleRoutes from './routes/knowledgeArticles';
+import reportRoutes from './routes/reports';
 import { initRealtime } from './realtime';
 
 dotenv.config();
@@ -51,6 +52,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/workspace-chats', workspaceChatRoutes);
 app.use('/api/calendar-events', calendarEventRoutes);
 app.use('/api/knowledge', knowledgeArticleRoutes);
+app.use('/api/reports', reportRoutes);
 
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected');

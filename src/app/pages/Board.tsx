@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router';
-import { boardsApi, tasksApi, usersApi } from '../services/api';
+import { boardsApi, tasksApi, usersApi, ApiError } from '../services/api';
 import type { Board as BoardType, Task as TaskType, User as UserType } from '../types';
+import {
+  formatPendingApprovalsMessage,
+  getBoardApprovalRules,
+  type TaskColumnApprovalRow,
+} from '../utils/boardApprovals';
 import {
   Plus,
   LayoutGrid,
@@ -27,7 +32,15 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CreateTaskModal } from '../components/CreateTaskModal';
+import { ColumnActionTransitionModal } from '../components/ColumnActionTransitionModal';
 import { BoardSettingsModal } from '../features/board-settings/BoardSettingsModal';
+import {
+  buildColumnTransitionPlan,
+  formatColumnTransitionCheckErrors,
+  mergeActionCompletion,
+  type ColumnTransitionInteractiveStep,
+  type TaskColumnActionCompletionRow,
+} from '../utils/boardColumnActions';
 import { TaskElapsedTimeDisplay } from '../components/TaskElapsedTimeDisplay';
 import { boardTimeTrackingIsConfigured } from '../utils/boardTimeTracking';
 import { useApp } from '../store/AppContext';
@@ -61,6 +74,13 @@ function mergeTaskFromUpdateResponse(prev: TaskType, api: Record<string, unknown
   }
   if (api.assignee !== undefined) merged.assignee = api.assignee as TaskType['assignee'];
   if (typeof api.updatedAt === 'string') merged.updatedAt = api.updatedAt;
+  if (Array.isArray(api.columnApprovals)) {
+    (merged as TaskType & { columnApprovals?: unknown[] }).columnApprovals = api.columnApprovals;
+  }
+  if (Array.isArray(api.columnActionCompletions)) {
+    (merged as TaskType & { columnActionCompletions?: unknown[] }).columnActionCompletions =
+      api.columnActionCompletions;
+  }
   return merged;
 }
 
@@ -256,10 +276,20 @@ export function Board() {
   const [assigneeFilterIds, setAssigneeFilterIds] = useState<string[]>([]);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const filterPanelRef = useRef<HTMLDivElement>(null);
+  const dragOriginColumnRef = useRef<string | null>(null);
   const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
   const [deleteBoardDialogOpen, setDeleteBoardDialogOpen] = useState(false);
   const [isDeletingBoard, setIsDeletingBoard] = useState(false);
   const [deleteBoardError, setDeleteBoardError] = useState<string | null>(null);
+  const [dragMoveError, setDragMoveError] = useState<string | null>(null);
+  const [columnTransition, setColumnTransition] = useState<{
+    taskId: string;
+    fromColumnId: string;
+    toColumnId: string;
+    steps: ColumnTransitionInteractiveStep[];
+  } | null>(null);
+  const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
+  const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
 
   const canManageBoardSettings =
     currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -329,6 +359,51 @@ export function Board() {
   const taskTypes = useMemo(() => board?.taskTypes || [], [board?.taskTypes]);
   const columns = useMemo(() => board?.columns || [], [board?.columns]);
   const boardTracksTime = useMemo(() => boardTimeTrackingIsConfigured(board), [board]);
+  const approvalRules = useMemo(() => getBoardApprovalRules(board), [board]);
+
+  const resolveDropColumnId = (overId: string): string | null => {
+    const overTask = tasks.find((t) => t.id === overId);
+    if (overTask) return overTask.columnId;
+    if (columns.some((c) => c.id === overId)) return overId;
+    return null;
+  };
+
+  const taskColumnApprovals = (task: TaskType): TaskColumnApprovalRow[] => {
+    const raw = (task as TaskType & { columnApprovals?: TaskColumnApprovalRow[] }).columnApprovals;
+    return Array.isArray(raw) ? raw : [];
+  };
+
+  const taskColumnActionCompletions = (task: TaskType): TaskColumnActionCompletionRow[] => {
+    const raw = (task as TaskType & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
+      .columnActionCompletions;
+    return Array.isArray(raw) ? raw : [];
+  };
+
+  const revertTaskColumn = (taskId: string, columnId: string) => {
+    setTasks((prevTasks) =>
+      prevTasks.map((task) => (task.id === taskId ? { ...task, columnId } : task)),
+    );
+  };
+
+  const finishColumnMove = async (taskId: string, targetColumnId: string, originColumnId: string) => {
+    try {
+      const updated = (await tasksApi.update(taskId, {
+        columnId: targetColumnId,
+      })) as Record<string, unknown>;
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          task.id === taskId ? mergeTaskFromUpdateResponse(task, updated) : task,
+        ),
+      );
+    } catch (error) {
+      console.error('Error updating task column:', error);
+      const message =
+        error instanceof ApiError ? error.message : 'Не удалось изменить статус задачи';
+      setDragMoveError(message);
+      revertTaskColumn(taskId, originColumnId);
+      throw error;
+    }
+  };
 
   if (isLoading) {
     return (
@@ -420,8 +495,10 @@ export function Board() {
   };
 
   const handleDragStart = (event: DragStartEvent) => {
+    setDragMoveError(null);
     const { active } = event;
     const task = tasks.find((t) => t.id === active.id);
+    dragOriginColumnRef.current = task?.columnId ?? null;
     setActiveTask(task);
   };
 
@@ -456,32 +533,74 @@ export function Board() {
     const { active, over } = event;
     setActiveTask(null);
 
-    if (!over) return;
-
     const activeTaskId = active.id as string;
-    const activeTask = tasks.find((t) => t.id === activeTaskId);
-    if (!activeTask) return;
+    const originColumnId = dragOriginColumnRef.current;
+    dragOriginColumnRef.current = null;
+
+    if (!over) {
+      if (originColumnId) {
+        setTasks((prevTasks) =>
+          prevTasks.map((task) =>
+            task.id === activeTaskId ? { ...task, columnId: originColumnId } : task,
+          ),
+        );
+      }
+      return;
+    }
+
+    const targetColumnId = resolveDropColumnId(over.id as string);
+    if (!originColumnId || !targetColumnId || originColumnId === targetColumnId) {
+      if (originColumnId) {
+        setTasks((prevTasks) =>
+          prevTasks.map((task) =>
+            task.id === activeTaskId ? { ...task, columnId: originColumnId } : task,
+          ),
+        );
+      }
+      return;
+    }
+
+    const draggedTask = tasks.find((t) => t.id === activeTaskId);
+    const pendingMsg = draggedTask
+      ? formatPendingApprovalsMessage(
+          approvalRules,
+          originColumnId,
+          taskColumnApprovals(draggedTask),
+        )
+      : null;
+    if (pendingMsg) {
+      setDragMoveError(pendingMsg);
+      revertTaskColumn(activeTaskId, originColumnId);
+      return;
+    }
+
+    const taskForPlan = {
+      ...draggedTask,
+      columnActionCompletions: taskColumnActionCompletions(draggedTask),
+    };
+    const actionPlan = buildColumnTransitionPlan(board, taskForPlan, originColumnId, targetColumnId);
+    if (actionPlan.checkErrors.length > 0) {
+      setDragMoveError(formatColumnTransitionCheckErrors(actionPlan.checkErrors));
+      revertTaskColumn(activeTaskId, originColumnId);
+      return;
+    }
+
+    if (actionPlan.interactiveSteps.length > 0) {
+      revertTaskColumn(activeTaskId, originColumnId);
+      setColumnTransitionError(null);
+      setColumnTransition({
+        taskId: activeTaskId,
+        fromColumnId: originColumnId,
+        toColumnId: targetColumnId,
+        steps: actionPlan.interactiveSteps,
+      });
+      return;
+    }
 
     try {
-      const updated = (await tasksApi.update(activeTaskId, {
-        columnId: activeTask.columnId,
-      })) as Record<string, unknown>;
-      setTasks((prevTasks) =>
-        prevTasks.map((task) =>
-          task.id === activeTaskId ? mergeTaskFromUpdateResponse(task, updated) : task,
-        ),
-      );
-    } catch (error) {
-      console.error('Error updating task column:', error);
-      const overId = over.id as string;
-      const overTask = tasks.find((t) => t.id === overId);
-      const previousColumn = overTask ? overTask.columnId : overId;
-
-      setTasks((prevTasks) =>
-        prevTasks.map((task) =>
-          task.id === activeTaskId ? { ...task, columnId: previousColumn } : task
-        )
-      );
+      await finishColumnMove(activeTaskId, targetColumnId, originColumnId);
+    } catch {
+      /* ошибка уже показана */
     }
   };
 
@@ -618,6 +737,12 @@ export function Board() {
           </div>
         </div>
       </div>
+
+      {dragMoveError ? (
+        <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          {dragMoveError}
+        </div>
+      ) : null}
 
       <div className="flex-1 overflow-auto p-6">
         {viewMode === 'kanban' ? (
@@ -785,6 +910,69 @@ export function Board() {
           onSubmit={handleCreateTask}
         />
       )}
+
+      <ColumnActionTransitionModal
+        open={!!columnTransition}
+        steps={columnTransition?.steps ?? []}
+        targetColumnName={
+          columnTransition
+            ? columns.find((c) => c.id === columnTransition.toColumnId)?.name
+            : undefined
+        }
+        submitting={columnTransitionSubmitting}
+        error={columnTransitionError}
+        onClose={() => {
+          if (columnTransitionSubmitting) return;
+          setColumnTransition(null);
+          setColumnTransitionError(null);
+        }}
+        onSubmitStep={async (step, payload) => {
+          if (!columnTransition) return;
+          setColumnTransitionSubmitting(true);
+          setColumnTransitionError(null);
+          try {
+            const row = (await tasksApi.completeColumnAction(
+              columnTransition.taskId,
+              step.rule.id,
+              payload,
+              step.forColumnId,
+            )) as TaskColumnActionCompletionRow;
+            setTasks((prev) =>
+              prev.map((t) => {
+                if (t.id !== columnTransition.taskId) return t;
+                const list = taskColumnActionCompletions(t);
+                return { ...t, columnActionCompletions: mergeActionCompletion(list, row) };
+              }),
+            );
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Не удалось выполнить действие';
+            setColumnTransitionError(msg);
+            throw e;
+          } finally {
+            setColumnTransitionSubmitting(false);
+          }
+        }}
+        onAllComplete={async () => {
+          if (!columnTransition) return;
+          setColumnTransitionSubmitting(true);
+          setColumnTransitionError(null);
+          try {
+            await finishColumnMove(
+              columnTransition.taskId,
+              columnTransition.toColumnId,
+              columnTransition.fromColumnId,
+            );
+            setColumnTransition(null);
+          } catch (e: unknown) {
+            setColumnTransitionError(
+              e instanceof Error ? e.message : 'Не удалось перевести задачу',
+            );
+            throw e;
+          } finally {
+            setColumnTransitionSubmitting(false);
+          }
+        }}
+      />
 
       <AlertDialog
         open={deleteBoardDialogOpen && !!board}

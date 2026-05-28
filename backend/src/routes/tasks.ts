@@ -15,6 +15,26 @@ import {
   parseBoardTimeTrackingCfg,
 } from '../utils/boardTimeTracking';
 import { resolveAssigneeFromBoardRules } from '../utils/boardAutoAssignment';
+import {
+  assertColumnApprovalsComplete,
+  canUserApproveRule,
+  findApprovalRuleById,
+  parseBoardApprovalRules,
+} from '../utils/boardApprovals';
+import {
+  assertColumnEnterActionsComplete,
+  assertColumnExitActionsComplete,
+  findColumnActionRuleById,
+  parseBoardColumnActionRules,
+  validateConfirmPayload,
+  validateFormPayload,
+} from '../utils/boardColumnActions';
+import {
+  ACTIVITY_EVENT_TYPES,
+  getTaskActivityFeed,
+  resolveUserNames,
+  writeActivityLog,
+} from '../utils/activityLog';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -141,6 +161,24 @@ function unifyAttachmentRow(a: Record<string, unknown>) {
   };
 }
 
+function unifyApprovalRow(a: Record<string, unknown>) {
+  const approver = a.approver as Record<string, unknown> | null | undefined;
+  const { approver: _a, ...rest } = a;
+  return {
+    ...rest,
+    approver: approver ?? null,
+  };
+}
+
+function unifyActionCompletionRow(a: Record<string, unknown>) {
+  const completer = a.completer as Record<string, unknown> | null | undefined;
+  const { completer: _c, ...rest } = a;
+  return {
+    ...rest,
+    completer: completer ?? null,
+  };
+}
+
 async function createAndBroadcastNotification(args: {
   type: string;
   title: string;
@@ -218,6 +256,33 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
         lexCreator: LEX_CREATOR_FOR_TASK,
         _count: {
           select: { comments: true, chatMessages: true },
+        },
+        columnApprovals: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            ruleId: true,
+            columnId: true,
+            ruleName: true,
+            approvedByUserId: true,
+            status: true,
+            reason: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+        columnActionCompletions: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            ruleId: true,
+            columnId: true,
+            ruleName: true,
+            actionKind: true,
+            payload: true,
+            completedByUserId: true,
+            createdAt: true,
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -377,6 +442,23 @@ router.patch('/:id/conclusion', async (req: AuthRequest, res) => {
   }
 });
 
+/** Unified activity / audit timeline for a task */
+router.get('/:id/activity', async (req: AuthRequest, res) => {
+  try {
+    const taskId = req.params.id;
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const items = await getTaskActivityFeed(prisma, taskId);
+    res.json({ items });
+  } catch (error) {
+    console.error('Get task activity error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки истории' });
+  }
+});
+
 /** История смены колонки и типа: TaskStatusEvent + старые записи Notification */
 router.get('/:id/status-history', async (req: AuthRequest, res) => {
   try {
@@ -438,6 +520,18 @@ router.get('/:id', async (req: AuthRequest, res) => {
             lexUploader: { select: { id: true, name: true, email: true } },
           },
         },
+        columnApprovals: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            approver: { select: { id: true, name: true, email: true, avatar: true } },
+          },
+        },
+        columnActionCompletions: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            completer: { select: { id: true, name: true, email: true, avatar: true } },
+          },
+        },
       },
     });
 
@@ -466,6 +560,12 @@ router.get('/:id', async (req: AuthRequest, res) => {
       ),
       taskAttachments: task.taskAttachments.map((a) =>
         unifyAttachmentRow(a as Record<string, unknown>),
+      ),
+      columnApprovals: task.columnApprovals.map((a) =>
+        unifyApprovalRow(a as Record<string, unknown>),
+      ),
+      columnActionCompletions: task.columnActionCompletions.map((a) =>
+        unifyActionCompletionRow(a as Record<string, unknown>),
       ),
     });
   } catch (error) {
@@ -636,6 +736,10 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
     const oldTask = await prisma.task.findUnique({
       where: { id: req.params.id },
+      include: {
+        board: { select: { workspaceId: true } },
+        _count: { select: { taskAttachments: true } },
+      },
     });
 
     if (!oldTask) {
@@ -645,9 +749,66 @@ router.put('/:id', async (req: AuthRequest, res) => {
     if (columnId !== undefined && oldTask.columnId !== columnId) {
       const boardCfgRow = await prisma.board.findUnique({
         where: { id: oldTask.boardId },
-        select: { advancedSettings: true },
+        select: {
+          advancedSettings: true,
+          taskFields: {
+            orderBy: { position: 'asc' },
+            select: { id: true, name: true, type: true, required: true },
+          },
+        },
       });
-      const ttCfg = parseBoardTimeTrackingCfg(boardCfgRow?.advancedSettings ?? {});
+      const advancedSettings = boardCfgRow?.advancedSettings ?? {};
+      const boardTaskFields = boardCfgRow?.taskFields ?? [];
+      const taskForChecks = {
+        ...oldTask,
+        title: title !== undefined ? title : oldTask.title,
+        assigneeId: Object.prototype.hasOwnProperty.call(req.body, 'assigneeId')
+          ? assigneeId ?? null
+          : oldTask.assigneeId,
+        description: description !== undefined ? description : oldTask.description,
+        customFields: customFields !== undefined ? customFields : oldTask.customFields,
+      };
+      const approvalCheck = await assertColumnApprovalsComplete(
+        prisma,
+        oldTask.id,
+        oldTask.columnId,
+        advancedSettings,
+      );
+      if (!approvalCheck.ok) {
+        return res.status(400).json({
+          error: approvalCheck.message,
+          code: 'approvals_pending',
+        });
+      }
+
+      const exitActionsCheck = await assertColumnExitActionsComplete(
+        prisma,
+        taskForChecks,
+        advancedSettings,
+        boardTaskFields,
+      );
+      if (!exitActionsCheck.ok) {
+        return res.status(400).json({
+          error: exitActionsCheck.message,
+          code: exitActionsCheck.code ?? 'column_actions_pending',
+        });
+      }
+
+      const enterActionsCheck = await assertColumnEnterActionsComplete(
+        prisma,
+        taskForChecks,
+        columnId,
+        advancedSettings,
+        boardTaskFields,
+      );
+      if (!enterActionsCheck.ok) {
+        return res.status(400).json({
+          error: enterActionsCheck.message,
+          code: enterActionsCheck.code ?? 'column_actions_pending',
+        });
+      }
+
+      const ttCfg = parseBoardTimeTrackingCfg(advancedSettings);
       if (ttCfg) {
         const nextTt = applyTimeTrackingColumnMove(
           {
@@ -684,8 +845,29 @@ router.put('/:id', async (req: AuthRequest, res) => {
             uploader: { select: { id: true, name: true, email: true, avatar: true } },
           },
         },
+        columnApprovals: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            approver: { select: { id: true, name: true, email: true, avatar: true } },
+          },
+        },
+        columnActionCompletions: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            completer: { select: { id: true, name: true, email: true, avatar: true } },
+          },
+        },
       },
     });
+
+    if (columnId !== undefined && oldTask.columnId !== columnId) {
+      await prisma.taskColumnApproval.deleteMany({
+        where: { taskId: task.id, columnId: oldTask.columnId },
+      });
+      await prisma.taskColumnActionCompletion.deleteMany({
+        where: { taskId: task.id, columnId: oldTask.columnId },
+      });
+    }
 
     const notifyUserIds = Array.from(
       new Set(
@@ -718,6 +900,28 @@ router.put('/:id', async (req: AuthRequest, res) => {
             message: statusMessage,
           },
         });
+        try {
+          await writeActivityLog(prisma, {
+            workspaceId: oldTask.board.workspaceId,
+            boardId: oldTask.boardId,
+            taskId: task.id,
+            eventType: ACTIVITY_EVENT_TYPES.COLUMN_CHANGED,
+            actorUserId: req.userId,
+            payload: {
+              fromColumnId: oldTask.columnId,
+              toColumnId: columnId,
+              fromColumnName: fromColumn?.name ?? null,
+              toColumnName: toColumn.name,
+            },
+            snapshot: {
+              title: task.title,
+              assigneeId: task.assigneeId,
+            },
+            source: typeof req.body?.source === 'string' ? req.body.source : 'api',
+          });
+        } catch (logErr) {
+          console.error('Activity log column_changed error:', logErr);
+        }
         await Promise.all(
           notifyUserIds.map((userId) =>
             createAndBroadcastNotification({
@@ -740,6 +944,31 @@ router.put('/:id', async (req: AuthRequest, res) => {
             },
           });
         }
+      }
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(req.body, 'assigneeId') &&
+      (assigneeId ?? null) !== oldTask.assigneeId
+    ) {
+      try {
+        const nameMap = await resolveUserNames(prisma, [oldTask.assigneeId, assigneeId]);
+        await writeActivityLog(prisma, {
+          workspaceId: oldTask.board.workspaceId,
+          boardId: oldTask.boardId,
+          taskId: task.id,
+          eventType: ACTIVITY_EVENT_TYPES.ASSIGNEE_CHANGED,
+          actorUserId: req.userId,
+          payload: {
+            fromUserId: oldTask.assigneeId,
+            toUserId: assigneeId ?? null,
+            fromUserName: oldTask.assigneeId ? nameMap.get(oldTask.assigneeId) ?? null : null,
+            toUserName: assigneeId ? nameMap.get(assigneeId) ?? null : null,
+          },
+          snapshot: { title: task.title, columnId: task.columnId },
+        });
+      } catch (logErr) {
+        console.error('Activity log assignee_changed error:', logErr);
       }
     }
 
@@ -806,10 +1035,265 @@ router.put('/:id', async (req: AuthRequest, res) => {
       }
     }
 
-    res.json(task);
+    res.json({
+      ...task,
+      columnApprovals:
+        columnId !== undefined && oldTask.columnId !== columnId
+          ? task.columnApprovals.filter((a) => a.columnId !== oldTask.columnId)
+          : task.columnApprovals,
+      columnActionCompletions:
+        columnId !== undefined && oldTask.columnId !== columnId
+          ? task.columnActionCompletions.filter((a) => a.columnId !== oldTask.columnId)
+          : task.columnActionCompletions,
+    });
   } catch (error) {
     console.error('Update task error:', error);
     res.status(500).json({ error: 'Ошибка обновления задачи' });
+  }
+});
+
+router.post('/:id/approvals', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Согласование доступно только сотрудникам Legal Boards' });
+    }
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Требуется авторизация' });
+    }
+
+    const taskId = req.params.id;
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const { ruleId, action, reason } = req.body as {
+      ruleId?: unknown;
+      action?: unknown;
+      reason?: unknown;
+    };
+    if (typeof ruleId !== 'string' || !ruleId.trim()) {
+      return res.status(400).json({ error: 'Укажите ruleId' });
+    }
+
+    const decision = action === 'reject' ? 'rejected' : 'approved';
+    const reasonText = typeof reason === 'string' ? reason.trim() : '';
+    if (decision === 'rejected' && !reasonText) {
+      return res.status(400).json({ error: 'Укажите причину отклонения' });
+    }
+
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, columnId: true, boardId: true, title: true, board: { select: { workspaceId: true } } },
+    });
+    if (!task) {
+      return res.status(404).json({ error: 'Задача не найдена' });
+    }
+
+    const board = await prisma.board.findUnique({
+      where: { id: task.boardId },
+      select: { advancedSettings: true },
+    });
+    const rules = parseBoardApprovalRules(board?.advancedSettings ?? {});
+    const rule = findApprovalRuleById(rules, ruleId.trim());
+    if (!rule || rule.columnId !== task.columnId) {
+      return res.status(400).json({ error: 'Правило согласования не применимо к текущему статусу задачи' });
+    }
+
+    if (!canUserApproveRule(rule, req.userId)) {
+      return res.status(403).json({ error: 'Нет прав на решение по этому правилу согласования' });
+    }
+
+    const approval = await prisma.taskColumnApproval.upsert({
+      where: { taskId_ruleId: { taskId, ruleId: rule.id } },
+      create: {
+        taskId,
+        ruleId: rule.id,
+        columnId: task.columnId,
+        ruleName: rule.name,
+        approvedByUserId: req.userId,
+        status: decision,
+        reason: decision === 'rejected' ? reasonText : null,
+      },
+      update: {
+        columnId: task.columnId,
+        ruleName: rule.name,
+        approvedByUserId: req.userId,
+        status: decision,
+        reason: decision === 'rejected' ? reasonText : null,
+      },
+      include: {
+        approver: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+
+    broadcast({
+      type: 'task_approval_updated',
+      taskId,
+      approval: unifyApprovalRow(approval as Record<string, unknown>),
+    });
+
+    try {
+      await writeActivityLog(prisma, {
+        workspaceId: task.board.workspaceId,
+        boardId: task.boardId,
+        taskId,
+        eventType: ACTIVITY_EVENT_TYPES.APPROVAL_DECIDED,
+        actorUserId: req.userId,
+        payload: {
+          ruleId: rule.id,
+          ruleName: rule.name,
+          columnId: task.columnId,
+          decision,
+          reason: decision === 'rejected' ? reasonText : null,
+        },
+        snapshot: { title: task.title, columnId: task.columnId },
+      });
+    } catch (logErr) {
+      console.error('Activity log approval_decided error:', logErr);
+    }
+
+    res.status(201).json(unifyApprovalRow(approval as Record<string, unknown>));
+  } catch (error) {
+    console.error('Task approval error:', error);
+    res.status(500).json({ error: 'Ошибка согласования' });
+  }
+});
+
+router.post('/:id/column-actions', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Действия доступны только сотрудникам Legal Boards' });
+    }
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Требуется авторизация' });
+    }
+
+    const taskId = req.params.id;
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const { ruleId, payload, forColumnId } = req.body as {
+      ruleId?: unknown;
+      payload?: unknown;
+      forColumnId?: unknown;
+    };
+    if (typeof ruleId !== 'string' || !ruleId.trim()) {
+      return res.status(400).json({ error: 'Укажите ruleId' });
+    }
+
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: { _count: { select: { taskAttachments: true } } },
+    });
+    if (!task) {
+      return res.status(404).json({ error: 'Задача не найдена' });
+    }
+
+    const board = await prisma.board.findUnique({
+      where: { id: task.boardId },
+      select: { advancedSettings: true, workspaceId: true },
+    });
+    const rules = parseBoardColumnActionRules(board?.advancedSettings ?? {});
+    const rule = findColumnActionRuleById(rules, ruleId.trim());
+    if (!rule) {
+      return res.status(400).json({ error: 'Правило действия не найдено' });
+    }
+
+    if (rule.actionKind === 'check_task') {
+      return res.status(400).json({ error: 'Проверка задачи выполняется автоматически при смене статуса' });
+    }
+
+    const targetColumn =
+      typeof forColumnId === 'string' && forColumnId.trim() ? forColumnId.trim() : task.columnId;
+
+    if (targetColumn !== rule.columnId) {
+      return res.status(400).json({ error: 'Правило не применимо к указанной колонке' });
+    }
+
+    if (rule.trigger === 'on_exit' && task.columnId !== rule.columnId) {
+      return res.status(400).json({ error: 'Действие при выходе доступно только в текущей колонке' });
+    }
+
+    if (rule.trigger === 'on_enter' && task.columnId !== rule.columnId && targetColumn !== rule.columnId) {
+      return res.status(400).json({ error: 'Действие при входе не применимо' });
+    }
+
+    let storedPayload: Record<string, unknown> = {};
+    if (rule.actionKind === 'confirm') {
+      const v = validateConfirmPayload(rule, payload);
+      if (!v.ok) return res.status(400).json({ error: v.message });
+      storedPayload = {
+        confirmed: true,
+        checkboxConfirmed:
+          payload && typeof payload === 'object'
+            ? (payload as Record<string, unknown>).checkboxConfirmed === true
+            : false,
+      };
+    } else if (rule.actionKind === 'form') {
+      const v = validateFormPayload(rule, payload);
+      if (!v.ok) return res.status(400).json({ error: v.message });
+      storedPayload = v.data;
+    }
+
+    const completion = await prisma.taskColumnActionCompletion.upsert({
+      where: { taskId_ruleId: { taskId, ruleId: rule.id } },
+      create: {
+        taskId,
+        ruleId: rule.id,
+        columnId: rule.columnId,
+        ruleName: rule.name,
+        actionKind: rule.actionKind,
+        payload: storedPayload as Prisma.InputJsonValue,
+        completedByUserId: req.userId,
+      },
+      update: {
+        columnId: rule.columnId,
+        ruleName: rule.name,
+        actionKind: rule.actionKind,
+        payload: storedPayload as Prisma.InputJsonValue,
+        completedByUserId: req.userId,
+      },
+      include: {
+        completer: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+
+    broadcast({
+      type: 'task_column_action_updated',
+      taskId,
+      completion: unifyActionCompletionRow(completion as Record<string, unknown>),
+    });
+
+    if (board) {
+      try {
+        await writeActivityLog(prisma, {
+          workspaceId: board.workspaceId,
+          boardId: task.boardId,
+          taskId,
+          eventType: ACTIVITY_EVENT_TYPES.COLUMN_ACTION_COMPLETED,
+          actorUserId: req.userId,
+          payload: {
+            ruleId: rule.id,
+            ruleName: rule.name,
+            columnId: rule.columnId,
+            actionKind: rule.actionKind,
+            trigger: rule.trigger,
+            formPayload: rule.actionKind === 'form' ? storedPayload : undefined,
+          },
+          snapshot: { title: task.title, columnId: task.columnId },
+        });
+      } catch (logErr) {
+        console.error('Activity log column_action_completed error:', logErr);
+      }
+    }
+
+    res.status(201).json(unifyActionCompletionRow(completion as Record<string, unknown>));
+  } catch (error) {
+    console.error('Task column action error:', error);
+    res.status(500).json({ error: 'Ошибка выполнения действия' });
   }
 });
 

@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
 import { assertWorkspaceMember } from '../utils/documentAccess';
 import { workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
+import { assertColumnApprovalsComplete } from '../utils/boardApprovals';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -454,10 +455,47 @@ router.post('/:boardId/columns/:columnId/move-tasks', requireStaffUser, async (r
     if (!from) return res.status(404).json({ error: 'Колонка-источник не найдена' });
     if (!to) return res.status(404).json({ error: 'Колонка-приемник не найдена' });
 
+    const board = await prisma.board.findUnique({
+      where: { id: boardId },
+      select: { advancedSettings: true },
+    });
+    const advancedSettings = board?.advancedSettings ?? {};
+
+    const tasksInColumn = await prisma.task.findMany({
+      where: { boardId, columnId },
+      select: { id: true, title: true },
+    });
+
+    for (const task of tasksInColumn) {
+      const approvalCheck = await assertColumnApprovalsComplete(
+        prisma,
+        task.id,
+        columnId,
+        advancedSettings,
+      );
+      if (!approvalCheck.ok) {
+        return res.status(400).json({
+          error: approvalCheck.message,
+          code: 'approvals_pending',
+          taskId: task.id,
+          taskTitle: task.title,
+        });
+      }
+    }
+
     const result = await prisma.task.updateMany({
       where: { boardId, columnId },
       data: { columnId: toColumnId },
     });
+
+    if (tasksInColumn.length > 0) {
+      await prisma.taskColumnApproval.deleteMany({
+        where: {
+          taskId: { in: tasksInColumn.map((t) => t.id) },
+          columnId,
+        },
+      });
+    }
 
     res.json({ moved: result.count });
   } catch (error) {

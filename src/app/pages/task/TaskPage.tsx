@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import { boardsApi, documentsApi, tasksApi, usersApi } from '../../services/api';
 import type { Board, Document, User } from '../../types';
@@ -20,6 +20,16 @@ import { TaskIframeServicePanel } from './components/TaskIframeServicePanel';
 import { TaskIconRail } from './components/TaskIconRail';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { getBoardIframeServices, parseIframePanelId, taskIframePanelId } from './utils/boardIframeServices';
+import { getBoardApprovalRules, formatPendingApprovalsMessage, mergeApprovalDecision, normalizeApprovalRow, type TaskColumnApprovalRow } from '../../utils/boardApprovals';
+import {
+  buildColumnTransitionPlan,
+  formatColumnTransitionCheckErrors,
+  mergeActionCompletion,
+  type ColumnTransitionInteractiveStep,
+  type TaskColumnActionCompletionRow,
+} from '../../utils/boardColumnActions';
+import { ColumnActionTransitionModal } from '../../components/ColumnActionTransitionModal';
+import type { TaskActivityItem } from '../../utils/activityLog';
 import { useApp } from '../../store/AppContext';
 import { getWsUrl } from '../../utils/wsUrl';
 
@@ -89,6 +99,26 @@ export function TaskPage() {
   const [conclusionSaveError, setConclusionSaveError] = useState<string | null>(null);
   const [uploadingConclusionFile, setUploadingConclusionFile] = useState(false);
   const [conclusionUploadError, setConclusionUploadError] = useState<string | null>(null);
+  const [approvingRuleId, setApprovingRuleId] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [columnTransition, setColumnTransition] = useState<{
+    fromColumnId: string;
+    toColumnId: string;
+    steps: ColumnTransitionInteractiveStep[];
+    pendingUpdate: {
+      columnId: string;
+      typeId: string;
+      title: string;
+      description: string | null;
+      assigneeId: string | null;
+      customFields: Record<string, unknown>;
+    };
+  } | null>(null);
+  const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
+  const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const [activityItems, setActivityItems] = useState<TaskActivityItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
 
   const {
     apiBaseUrl,
@@ -108,6 +138,11 @@ export function TaskPage() {
   } = useTaskDerived(task, board, users);
 
   const boardIframeServices = useMemo(() => getBoardIframeServices(board), [board]);
+  const approvalRules = useMemo(() => getBoardApprovalRules(board), [board]);
+  const columnApprovals = useMemo(() => {
+    const raw = Array.isArray(task?.columnApprovals) ? task!.columnApprovals! : [];
+    return raw.map((row) => normalizeApprovalRow(row as TaskColumnApprovalRow));
+  }, [task?.columnApprovals, task?.id]);
 
   const sidebarRailEntries = useMemo(() => {
     const iframeEntries = boardIframeServices.map((s) => ({
@@ -208,6 +243,25 @@ export function TaskPage() {
     taskIdRef.current = taskId;
   }, [taskId]);
 
+  const loadActivity = useCallback(async () => {
+    if (!taskId) return;
+    setActivityLoading(true);
+    setActivityError(null);
+    try {
+      const res = await tasksApi.getActivity(taskId);
+      setActivityItems(res.items ?? []);
+    } catch (e: unknown) {
+      setActivityError(e instanceof Error ? e.message : 'Не удалось загрузить историю');
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [taskId]);
+
+  useEffect(() => {
+    if (activePanel !== 'activity' || !taskId) return;
+    void loadActivity();
+  }, [activePanel, taskId, loadActivity]);
+
   /** Входящие сообщения клиента по каналу «чат с клиентом» приходят через WS; REST POST только подтверждает отправку. */
   useEffect(() => {
     if (!currentUser?.id || !taskId) return;
@@ -221,7 +275,18 @@ export function TaskPage() {
       const data = raw as Record<string, unknown>;
       const tid = typeof data.taskId === 'string' ? data.taskId : '';
       if (!tid || tid !== taskIdRef.current) return;
-      if (data.type !== 'chat_message') return;
+      if (data.type !== 'chat_message') {
+        if (data.type === 'task_approval_updated') {
+          const approval = data.approval as TaskColumnApprovalRow | undefined;
+          if (!approval || typeof approval.ruleId !== 'string') return;
+          setTask((prev) => {
+            if (!prev || prev.id !== tid) return prev;
+            const list = Array.isArray(prev.columnApprovals) ? prev.columnApprovals : [];
+            return { ...prev, columnApprovals: mergeApprovalDecision(list, approval) };
+          });
+        }
+        return;
+      }
       const msg = data.message as Record<string, unknown> | undefined;
       if (!msg || typeof msg.id !== 'string') return;
       if (!isLawyerClientChannelMessage(msg)) return;
@@ -491,6 +556,51 @@ export function TaskPage() {
     await handleUploadAttachment(file);
   };
 
+  const handleApproveRule = async (ruleId: string) => {
+    if (!taskId) return;
+    setApprovalError(null);
+    setApprovingRuleId(ruleId);
+    try {
+      const created = (await tasksApi.submitApproval(taskId, ruleId, {
+        action: 'approve',
+      })) as TaskColumnApprovalRow;
+      setTask((prev) => {
+        if (!prev) return prev;
+        const list = Array.isArray(prev.columnApprovals) ? prev.columnApprovals : [];
+        return { ...prev, columnApprovals: mergeApprovalDecision(list, created) };
+      });
+      void loadActivity();
+    } catch (e: unknown) {
+      setApprovalError(e instanceof Error ? e.message : 'Не удалось согласовать');
+      throw e;
+    } finally {
+      setApprovingRuleId(null);
+    }
+  };
+
+  const handleRejectRule = async (ruleId: string, reason: string) => {
+    if (!taskId) return;
+    setApprovalError(null);
+    setApprovingRuleId(ruleId);
+    try {
+      const created = (await tasksApi.submitApproval(taskId, ruleId, {
+        action: 'reject',
+        reason,
+      })) as TaskColumnApprovalRow;
+      setTask((prev) => {
+        if (!prev) return prev;
+        const list = Array.isArray(prev.columnApprovals) ? prev.columnApprovals : [];
+        return { ...prev, columnApprovals: mergeApprovalDecision(list, created) };
+      });
+      void loadActivity();
+    } catch (e: unknown) {
+      setApprovalError(e instanceof Error ? e.message : 'Не удалось отклонить');
+      throw e;
+    } finally {
+      setApprovingRuleId(null);
+    }
+  };
+
   const cancelEditing = () => {
     if (!task) return;
     setSaveError(null);
@@ -501,6 +611,28 @@ export function TaskPage() {
     setEditTypeId(task.typeId);
     setEditAssigneeId(task.assigneeId || '');
     setEditCustomFields(task.customFields || {});
+  };
+
+  const buildPendingUpdate = () => ({
+    columnId: editColumnId,
+    typeId: editTypeId,
+    title: editTitle.trim(),
+    description: editDescription.trim() || null,
+    assigneeId: editAssigneeId || null,
+    customFields: editCustomFields,
+  });
+
+  const finishSaveWithColumnMove = async (toColumnId: string) => {
+    if (!taskId || !columnTransition) return;
+    const updated = await tasksApi.update(taskId, {
+      ...columnTransition.pendingUpdate,
+      columnId: toColumnId,
+    });
+    setTask((prev: TaskRecord | null) => (prev ? { ...prev, ...updated } : prev));
+    setIsEditing(false);
+    setColumnTransition(null);
+    setColumnTransitionError(null);
+    void loadActivity();
   };
 
   const saveEdits = async () => {
@@ -520,20 +652,65 @@ export function TaskPage() {
       setSaveError(validationError);
       return;
     }
+
+    const pendingUpdate = buildPendingUpdate();
+
+    if (task && editColumnId !== task.columnId) {
+      const pendingMsg = formatPendingApprovalsMessage(
+        approvalRules,
+        task.columnId,
+        columnApprovals,
+      );
+      if (pendingMsg) {
+        setSaveError(pendingMsg);
+        return;
+      }
+
+      const rawCompletions = Array.isArray(
+        (task as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
+          .columnActionCompletions,
+      )
+        ? (task as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
+            .columnActionCompletions!
+        : [];
+      const actionPlan = buildColumnTransitionPlan(
+        board,
+        {
+          title: pendingUpdate.title,
+          assigneeId: pendingUpdate.assigneeId,
+          description: pendingUpdate.description,
+          conclusionText: conclusionDraft,
+          customFields: pendingUpdate.customFields,
+          taskAttachments,
+          columnActionCompletions: rawCompletions,
+        },
+        task.columnId,
+        editColumnId,
+      );
+      if (actionPlan.checkErrors.length > 0) {
+        setSaveError(formatColumnTransitionCheckErrors(actionPlan.checkErrors));
+        return;
+      }
+      if (actionPlan.interactiveSteps.length > 0) {
+        setColumnTransitionError(null);
+        setColumnTransition({
+          fromColumnId: task.columnId,
+          toColumnId: editColumnId,
+          steps: actionPlan.interactiveSteps,
+          pendingUpdate,
+        });
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
-      const updated = await tasksApi.update(taskId, {
-        columnId: editColumnId,
-        typeId: editTypeId,
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
-        assigneeId: editAssigneeId || null,
-        customFields: editCustomFields,
-      });
-      setTask((prev: any) => ({ ...prev, ...updated }));
+      const updated = await tasksApi.update(taskId, pendingUpdate);
+      setTask((prev: TaskRecord | null) => (prev ? { ...prev, ...updated } : prev));
       setIsEditing(false);
-    } catch (e: any) {
-      setSaveError(e?.message || 'Не удалось сохранить изменения');
+      void loadActivity();
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : 'Не удалось сохранить изменения');
     } finally {
       setIsSaving(false);
     }
@@ -597,6 +774,13 @@ export function TaskPage() {
     isDraggingFile,
     attachmentsEnabled: board.attachmentsEnabled !== false,
     boardTimeTrackingEnabled: boardTimeTrackingIsConfigured(board),
+    approvalRules,
+    columnApprovals,
+    currentUserId: currentUser?.id,
+    approvingRuleId,
+    approvalError,
+    onApproveRule: handleApproveRule,
+    onRejectRule: handleRejectRule,
     onEditDescription: setEditDescription,
     onEditColumnId: setEditColumnId,
     onEditTypeId: setEditTypeId,
@@ -716,6 +900,9 @@ export function TaskPage() {
                   workspaceDocuments={workspaceDocuments}
                   documentsLoading={documentsLoading}
                   documentsError={documentsError}
+                  activityItems={activityItems}
+                  activityLoading={activityLoading}
+                  activityError={activityError}
                   onPreviewDoc={setPreviewDoc}
                   assistantPanelChat={assistantDisplayChat}
                   assistantChatError={assistantChatError}
@@ -743,6 +930,72 @@ export function TaskPage() {
       </ResizablePanelGroup>
 
       <DocumentPreviewModal preview={previewDoc} onClose={() => setPreviewDoc(null)} />
+
+      <ColumnActionTransitionModal
+        open={!!columnTransition}
+        steps={columnTransition?.steps ?? []}
+        targetColumnName={
+          columnTransition
+            ? board.columns?.find((c) => c.id === columnTransition.toColumnId)?.name
+            : undefined
+        }
+        submitting={columnTransitionSubmitting}
+        error={columnTransitionError}
+        onClose={() => {
+          if (columnTransitionSubmitting) return;
+          setColumnTransition(null);
+          setColumnTransitionError(null);
+        }}
+        onSubmitStep={async (step, payload) => {
+          if (!taskId || !columnTransition) return;
+          setColumnTransitionSubmitting(true);
+          setColumnTransitionError(null);
+          try {
+            const row = (await tasksApi.completeColumnAction(
+              taskId,
+              step.rule.id,
+              payload,
+              step.forColumnId,
+            )) as TaskColumnActionCompletionRow;
+            setTask((prev) => {
+              if (!prev) return prev;
+              const list = Array.isArray(
+                (prev as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
+                  .columnActionCompletions,
+              )
+                ? (prev as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
+                    .columnActionCompletions!
+                : [];
+              return {
+                ...prev,
+                columnActionCompletions: mergeActionCompletion(list, row),
+              };
+            });
+            void loadActivity();
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Не удалось выполнить действие';
+            setColumnTransitionError(msg);
+            throw e;
+          } finally {
+            setColumnTransitionSubmitting(false);
+          }
+        }}
+        onAllComplete={async () => {
+          if (!columnTransition) return;
+          setColumnTransitionSubmitting(true);
+          setColumnTransitionError(null);
+          try {
+            await finishSaveWithColumnMove(columnTransition.toColumnId);
+          } catch (e: unknown) {
+            setColumnTransitionError(
+              e instanceof Error ? e.message : 'Не удалось сохранить изменения',
+            );
+            throw e;
+          } finally {
+            setColumnTransitionSubmitting(false);
+          }
+        }}
+      />
     </div>
   );
 }
