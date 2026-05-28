@@ -20,6 +20,7 @@ import calendarEventRoutes from './routes/calendarEvents';
 import knowledgeArticleRoutes from './routes/knowledgeArticles';
 import reportRoutes from './routes/reports';
 import { initRealtime } from './realtime';
+import { setupSwagger } from './swagger/setup';
 
 dotenv.config();
 
@@ -54,6 +55,8 @@ app.use('/api/calendar-events', calendarEventRoutes);
 app.use('/api/knowledge', knowledgeArticleRoutes);
 app.use('/api/reports', reportRoutes);
 
+setupSwagger(app);
+
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected');
 
@@ -69,4 +72,7 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`WebSocket server running on ws://localhost:${PORT}/ws`);
+  if (process.env.SWAGGER_ENABLED !== 'false') {
+    console.log(`Swagger UI: http://localhost:${PORT}/api/docs`);
+  }
 });
