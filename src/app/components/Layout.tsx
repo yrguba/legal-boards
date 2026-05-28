@@ -16,6 +16,7 @@ import {
   Calendar,
   BookOpen,
   Handshake,
+  BarChart3,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
@@ -60,6 +61,8 @@ export function Layout() {
       currentUser?.role === 'admin' ||
       currentUser?.role === 'manager');
 
+  const canViewAnalytics = canManageLexClients;
+
   const navItems = useMemo(() => {
     const items: { to: string; end?: boolean; label: string; icon: typeof LayoutDashboard }[] = [
       { to: '/', end: true, label: 'Доски', icon: LayoutDashboard },
@@ -71,11 +74,18 @@ export function Layout() {
       { to: '/workspaces', label: 'Пространства', icon: Layers },
       { to: '/settings', label: 'Настройки', icon: Settings },
     ];
+    if (canViewAnalytics) {
+      items.splice(1, 0, { to: '/analytics', label: 'Аналитика', icon: BarChart3 });
+    }
     if (canManageLexClients) {
-      items.splice(6, 0, { to: '/lex-clients', label: 'Клиенты LEXPRO', icon: Handshake });
+      items.splice(canViewAnalytics ? 7 : 6, 0, {
+        to: '/lex-clients',
+        label: 'Клиенты LEXPRO',
+        icon: Handshake,
+      });
     }
     return items;
-  }, [canManageLexClients]);
+  }, [canManageLexClients, canViewAnalytics]);
 
   return (
     <div className="flex h-screen bg-slate-50">

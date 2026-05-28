@@ -5,6 +5,7 @@ export type TaskPanelType =
   | 'assistant'
   | 'comments'
   | 'documents'
+  | 'activity'
   | `iframe:${string}`;
 
 export type ClientSubPanel = 'chat' | 'history' | 'conclusion';
@@ -22,6 +23,7 @@ export type TaskRecord = Record<string, any> & {
   comments?: unknown[];
   chatMessages?: unknown[];
   clientInteractions?: unknown[];
+  columnApprovals?: import('../../utils/boardApprovals').TaskColumnApprovalRow[];
   lexClientProfile?: {
     id: string;
     name?: string;
@@ -73,6 +75,13 @@ export type TaskMainColumnProps = {
   attachmentsEnabled: boolean;
   /** Контроль времени доски включён (старт и финиш заданы) */
   boardTimeTrackingEnabled: boolean;
+  approvalRules: import('../../features/board-settings/boardAdvancedSettings.types').BoardApprovalRule[];
+  columnApprovals: import('../../utils/boardApprovals').TaskColumnApprovalRow[];
+  currentUserId: string | undefined;
+  approvingRuleId: string | null;
+  approvalError: string | null;
+  onApproveRule: (ruleId: string) => void;
+  onRejectRule: (ruleId: string, reason: string) => void;
   onEditDescription: (v: string) => void;
   onEditColumnId: (v: string) => void;
   onEditTypeId: (v: string) => void;
@@ -134,6 +143,9 @@ export type TaskSidePanelsProps = {
   workspaceDocuments: Document[];
   documentsLoading: boolean;
   documentsError: string | null;
+  activityItems: import('../../utils/activityLog').TaskActivityItem[];
+  activityLoading: boolean;
+  activityError: string | null;
   onPreviewDoc: (doc: DocumentPreviewState) => void;
   assistantPanelChat: any[];
   assistantChatError: string | null;

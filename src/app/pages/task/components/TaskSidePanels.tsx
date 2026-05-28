@@ -2,6 +2,7 @@ import { Bot, Loader2, MessageSquare, Send } from 'lucide-react';
 import type { TaskSidePanelsProps, TaskPanelType } from '../types';
 import { formatDateTime } from '../utils/format';
 import { TaskDocumentsPanel } from './TaskDocumentsPanel';
+import { TaskActivityPanel } from './TaskActivityPanel';
 
 function ChatFooter(p: {
   activePanel: TaskPanelType;
@@ -75,7 +76,13 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {activePanel === 'documents' ? (
+        {activePanel === 'activity' ? (
+          <TaskActivityPanel
+            items={p.activityItems}
+            loading={p.activityLoading}
+            error={p.activityError}
+          />
+        ) : activePanel === 'documents' ? (
           <TaskDocumentsPanel
             documents={p.workspaceDocuments}
             loading={p.documentsLoading}

@@ -7,6 +7,71 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model TaskColumnApproval {
+  id               String   @id @default(cuid())
+  taskId           String
+  ruleId           String
+  columnId         String
+  ruleName         String   @default("")
+  approvedByUserId String
+  status           String   @default("approved")
+  reason           String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  task     Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  approver User @relation("TaskColumnApprovalApprover", fields: [approvedByUserId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, ruleId])
+  @@index([taskId])
+  @@index([columnId])
+  @@index([approvedByUserId])
+  @@index([status])
+}
+
+model TaskColumnActionCompletion {
+  id               String   @id @default(cuid())
+  taskId           String
+  ruleId           String
+  columnId         String
+  ruleName         String   @default("")
+  actionKind       String
+  payload          Json     @default("{}")
+  completedByUserId String
+  createdAt        DateTime @default(now())
+
+  task      Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  completer User @relation("TaskColumnActionCompleter", fields: [completedByUserId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, ruleId])
+  @@index([taskId])
+  @@index([columnId])
+  @@index([completedByUserId])
+}
+
+/// Append-only аудит операций по задачам (отчётность и timeline)
+model ActivityLog {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  boardId          String
+  taskId           String
+  eventType        String
+  actorUserId      String?
+  actorLexClientId String?
+  occurredAt       DateTime @default(now())
+  payload          Json     @default("{}")
+  snapshot         Json?
+  source           String   @default("api")
+
+  task      Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actorUser User? @relation("ActivityLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, occurredAt])
+  @@index([boardId, eventType, occurredAt])
+  @@index([workspaceId, occurredAt])
+  @@index([actorUserId])
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -34,6 +99,9 @@ model User {
   calendarEventsCreated    CalendarEvent[]           @relation("CalendarEventCreator")
   calendarEventAttendees   CalendarEventAttendee[]
   knowledgeArticlesCreated KnowledgeArticle[]
+  taskColumnApprovals      TaskColumnApproval[] @relation("TaskColumnApprovalApprover")
+  taskColumnActionCompletions TaskColumnActionCompletion[] @relation("TaskColumnActionCompleter")
+  activityLogs             ActivityLog[] @relation("ActivityLogActor")
 
   @@index([email])
   @@index([departmentId])
@@ -258,6 +326,9 @@ model Task {
   clientInteractions   TaskClientInteraction[]
   taskAttachments      TaskAttachment[]
   statusTimelineEvents TaskStatusEvent[]
+  columnApprovals      TaskColumnApproval[]
+  columnActionCompletions TaskColumnActionCompletion[]
+  activityLogs         ActivityLog[]
 
   @@index([boardId])
   @@index([columnId])

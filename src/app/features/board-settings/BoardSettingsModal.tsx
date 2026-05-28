@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Timer, UserCog, Puzzle } from 'lucide-react';
+import { Timer, UserCog, Puzzle, ClipboardCheck, ListChecks } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,13 +16,16 @@ import type { User } from '../../types';
 import { mergeBoardAdvanced, defaultBoardAdvancedSettings } from './boardAdvancedSettings.defaults';
 import type { BoardAdvancedSettings } from './boardAdvancedSettings.types';
 import { AutoAssignmentSection } from './sections/AutoAssignmentSection';
+import { ApprovalsSection } from './sections/ApprovalsSection';
+import { ColumnActionsSection } from './sections/ColumnActionsSection';
 import { TimeTrackingSection } from './sections/TimeTrackingSection';
+import { ReportingSection } from './sections/ReportingSection';
 import { IframeServicesSection } from './sections/IframeServicesSection';
 
 type DeptLite = { id: string; name: string };
 type GroupLite = { id: string; name: string };
 
-type SettingsTab = 'assignment' | 'time' | 'services';
+type SettingsTab = 'assignment' | 'approvals' | 'actions' | 'time' | 'services';
 
 const tabTriggerClass =
   'rounded-md px-3 py-2 text-sm font-medium text-slate-600 data-[state=active]:bg-white data-[state=active]:text-brand data-[state=active]:shadow-sm';
@@ -85,7 +88,10 @@ export function BoardSettingsModal({
   }, [open, board.workspaceId]);
 
   const aa = draft.autoAssignment ?? defaultBoardAdvancedSettings().autoAssignment!;
+  const ap = draft.approvals ?? defaultBoardAdvancedSettings().approvals!;
+  const ca = draft.columnActions ?? defaultBoardAdvancedSettings().columnActions!;
   const tt = draft.timeTracking ?? defaultBoardAdvancedSettings().timeTracking!;
+  const rep = draft.reporting ?? defaultBoardAdvancedSettings().reporting!;
   const iframeList = draft.iframeServices ?? [];
 
   const handleSave = async () => {
@@ -109,7 +115,7 @@ export function BoardSettingsModal({
         if (!isOpen) onClose();
       }}
     >
-      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+      <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
         <DialogHeader className="shrink-0 border-b border-slate-100 px-6 py-4">
           <DialogTitle>Настройки доски</DialogTitle>
           <DialogDescription className="text-left">
@@ -131,6 +137,14 @@ export function BoardSettingsModal({
               <TabsTrigger value="assignment" className={cn(tabTriggerClass, 'inline-flex items-center gap-1.5')}>
                 <UserCog className="size-4 shrink-0 opacity-70" aria-hidden />
                 Автоназначение
+              </TabsTrigger>
+              <TabsTrigger value="approvals" className={cn(tabTriggerClass, 'inline-flex items-center gap-1.5')}>
+                <ClipboardCheck className="size-4 shrink-0 opacity-70" aria-hidden />
+                Согласования
+              </TabsTrigger>
+              <TabsTrigger value="actions" className={cn(tabTriggerClass, 'inline-flex items-center gap-1.5')}>
+                <ListChecks className="size-4 shrink-0 opacity-70" aria-hidden />
+                Действия
               </TabsTrigger>
               <TabsTrigger value="time" className={cn(tabTriggerClass, 'inline-flex items-center gap-1.5')}>
                 <Timer className="size-4 shrink-0 opacity-70" aria-hidden />
@@ -164,11 +178,35 @@ export function BoardSettingsModal({
               />
             </TabsContent>
 
+            <TabsContent value="approvals" className="mt-0 focus-visible:outline-none">
+              <ApprovalsSection
+                approvals={ap}
+                columns={(board.columns ?? []).map((c) => ({ id: c.id, name: c.name }))}
+                users={users.map((u) => ({ id: u.id, name: u.name }))}
+                onChange={(next) => setDraft((d) => ({ ...d, approvals: next }))}
+              />
+            </TabsContent>
+
+            <TabsContent value="actions" className="mt-0 focus-visible:outline-none">
+              <ColumnActionsSection
+                columnActions={ca}
+                columns={(board.columns ?? []).map((c) => ({ id: c.id, name: c.name }))}
+                taskFields={board.taskFields ?? []}
+                onChange={(next) => setDraft((d) => ({ ...d, columnActions: next }))}
+              />
+            </TabsContent>
+
             <TabsContent value="time" className="mt-0 focus-visible:outline-none">
               <TimeTrackingSection
                 timeTracking={tt}
                 columns={(board.columns ?? []).map((c) => ({ id: c.id, name: c.name }))}
                 onChange={(next) => setDraft((d) => ({ ...d, timeTracking: next }))}
+              />
+              <ReportingSection
+                reporting={rep}
+                timeTracking={tt}
+                columns={(board.columns ?? []).map((c) => ({ id: c.id, name: c.name }))}
+                onChange={(next) => setDraft((d) => ({ ...d, reporting: next }))}
               />
             </TabsContent>
 

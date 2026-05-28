@@ -406,6 +406,39 @@ export const tasksApi = {
   async deleteAttachment(taskId: string, attachmentId: string) {
     return fetchApi<void>(`/tasks/${taskId}/attachments/${attachmentId}`, { method: 'DELETE' });
   },
+
+  async submitApproval(
+    taskId: string,
+    ruleId: string,
+    opts?: { action?: 'approve' | 'reject'; reason?: string },
+  ) {
+    return fetchApi<any>(`/tasks/${taskId}/approvals`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ruleId,
+        action: opts?.action ?? 'approve',
+        reason: opts?.reason,
+      }),
+    });
+  },
+
+  async completeColumnAction(
+    taskId: string,
+    ruleId: string,
+    payload: Record<string, unknown>,
+    forColumnId: string,
+  ) {
+    return fetchApi<any>(`/tasks/${taskId}/column-actions`, {
+      method: 'POST',
+      body: JSON.stringify({ ruleId, payload, forColumnId }),
+    });
+  },
+
+  async getActivity(taskId: string) {
+    return fetchApi<{ items: import('../utils/activityLog').TaskActivityItem[] }>(
+      `/tasks/${taskId}/activity`,
+    );
+  },
 };
 
 // Чаты пространства / отдела / группы
@@ -630,5 +663,21 @@ export const notificationsApi = {
 
   async delete(id: string) {
     return fetchApi<void>(`/notifications/${id}`, { method: 'DELETE' });
+  },
+};
+
+export const reportsApi = {
+  async getBoardDashboard(
+    boardId: string,
+    opts?: { agingDays?: number; assigneeId?: string; periodDays?: number },
+  ) {
+    const params = new URLSearchParams();
+    if (opts?.agingDays != null) params.set('agingDays', String(opts.agingDays));
+    if (opts?.assigneeId) params.set('assigneeId', opts.assigneeId);
+    if (opts?.periodDays != null) params.set('periodDays', String(opts.periodDays));
+    const q = params.toString();
+    return fetchApi<import('../utils/boardReports').BoardDashboardReport>(
+      `/reports/boards/${encodeURIComponent(boardId)}/dashboard${q ? `?${q}` : ''}`,
+    );
   },
 };
