@@ -35,6 +35,8 @@ import {
   resolveUserNames,
   writeActivityLog,
 } from '../utils/activityLog';
+import { resolveBoardRef } from '../utils/boardResolve';
+import { enrichTaskWithKey, nextTaskNumber, resolveTaskRef } from '../utils/taskKeys';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -79,6 +81,25 @@ const taskUpload = multer({
 });
 
 router.use(authenticate);
+
+router.param('id', async (req: AuthRequest, res, next, value) => {
+  try {
+    const resolved = await resolveTaskRef(prisma, value);
+    if (!resolved) {
+      res.status(404).json({ error: 'Задача не найдена' });
+      return;
+    }
+    req.resolvedTaskId = resolved.taskId;
+    req.resolvedTaskKey = resolved.key;
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
+function taskIdParam(req: AuthRequest): string {
+  return req.resolvedTaskId ?? req.params.id;
+}
 
 function accessCtx(req: AuthRequest) {
   return { userId: req.userId, userRole: req.userRole, lexClientId: req.lexClientId };
@@ -126,15 +147,18 @@ function unifyTaskRow(task: Record<string, unknown>) {
         contactNotes: lexCreator.contactNotes ?? undefined,
       }
     : null;
-  return {
-    ...rest,
-    creator:
-      creator ??
-      (lexCreator
-        ? { id: lexCreator.id, name: lexCreator.name, email: lexCreator.email ?? undefined }
-        : null),
-    lexClientProfile,
-  };
+  return enrichTaskWithKey(
+    {
+      ...rest,
+      creator:
+        creator ??
+        (lexCreator
+          ? { id: lexCreator.id, name: lexCreator.name, email: lexCreator.email ?? undefined }
+          : null),
+      lexClientProfile,
+    },
+    (task.board as { code?: string } | undefined)?.code,
+  );
 }
 
 function unifyChatMessage(m: Record<string, unknown>) {
@@ -239,9 +263,14 @@ async function mergedTaskStatusHistory(taskId: string): Promise<{ message: strin
 
 router.get('/board/:boardId', async (req: AuthRequest, res) => {
   try {
+    const board = await resolveBoardRef(prisma, req.params.boardId);
+    if (!board) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
     const boardWhere = req.lexClientId
-      ? { boardId: req.params.boardId, lexCreatorId: req.lexClientId }
-      : { boardId: req.params.boardId };
+      ? { boardId: board.id, lexCreatorId: req.lexClientId }
+      : { boardId: board.id };
 
     const tasks = await prisma.task.findMany({
       where: boardWhere,
@@ -288,7 +317,7 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    res.json(tasks.map((t) => unifyTaskRow(t as Record<string, unknown>)));
+    res.json(tasks.map((t) => enrichTaskWithKey(unifyTaskRow(t as Record<string, unknown>), board.code)));
   } catch (error) {
     console.error('Get tasks error:', error);
     res.status(500).json({ error: 'Ошибка получения задач' });
@@ -300,7 +329,7 @@ router.post('/:id/attachments', taskUpload.single('file'), async (req: AuthReque
     if (!req.file) {
       return res.status(400).json({ error: 'Файл не предоставлен' });
     }
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -408,7 +437,7 @@ router.patch('/:id/conclusion', async (req: AuthRequest, res) => {
         .json({ error: 'Редактирование заключения доступно только сотрудникам Legal Boards' });
     }
 
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -445,7 +474,7 @@ router.patch('/:id/conclusion', async (req: AuthRequest, res) => {
 /** Unified activity / audit timeline for a task */
 router.get('/:id/activity', async (req: AuthRequest, res) => {
   try {
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -462,7 +491,7 @@ router.get('/:id/activity', async (req: AuthRequest, res) => {
 /** История смены колонки и типа: TaskStatusEvent + старые записи Notification */
 router.get('/:id/status-history', async (req: AuthRequest, res) => {
   try {
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -480,7 +509,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store, private');
 
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -489,6 +518,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
     const task = await prisma.task.findUnique({
       where: { id: taskId },
       include: {
+        board: { select: { code: true } },
         type: true,
         assignee: {
           select: { id: true, name: true, email: true, avatar: true },
@@ -581,7 +611,7 @@ router.post('/', async (req: AuthRequest, res) => {
     if (req.lexClientId) {
       const board = await prisma.board.findUnique({
         where: { id: boardId },
-        select: { workspaceId: true, advancedSettings: true },
+        select: { workspaceId: true, advancedSettings: true, code: true },
       });
       if (!board) {
         return res.status(404).json({ error: 'Доска не найдена' });
@@ -611,8 +641,11 @@ router.post('/', async (req: AuthRequest, res) => {
         advancedSettings: board.advancedSettings ?? {},
       });
 
+      const lexTaskNumber = await nextTaskNumber(prisma, boardId);
+
       const lexTask = await prisma.task.create({
         data: {
+          number: lexTaskNumber,
           boardId,
           columnId,
           typeId,
@@ -648,7 +681,7 @@ router.post('/', async (req: AuthRequest, res) => {
         });
       }
 
-      return res.json(unifyTaskRow(lexTask as Record<string, unknown>));
+      return res.json(enrichTaskWithKey(unifyTaskRow(lexTask as Record<string, unknown>), board.code));
     }
 
     if (!req.userId) {
@@ -657,7 +690,7 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const boardRow = await prisma.board.findUnique({
       where: { id: boardId },
-      select: { workspaceId: true, advancedSettings: true },
+      select: { workspaceId: true, advancedSettings: true, code: true },
     });
     const ttCfgCreate = parseBoardTimeTrackingCfg(boardRow?.advancedSettings ?? {});
     const ttInitCreate = applyTimeTrackingOnTaskCreate(columnId, ttCfgCreate, new Date());
@@ -672,8 +705,11 @@ router.post('/', async (req: AuthRequest, res) => {
       });
     }
 
+    const taskNumber = await nextTaskNumber(prisma, boardId);
+
     const task = await prisma.task.create({
       data: {
+        number: taskNumber,
         boardId,
         columnId,
         typeId,
@@ -709,7 +745,7 @@ router.post('/', async (req: AuthRequest, res) => {
       });
     }
 
-    res.json(unifyTaskRow(task as Record<string, unknown>));
+    res.json(enrichTaskWithKey(unifyTaskRow(task as Record<string, unknown>), boardRow?.code));
   } catch (error) {
     console.error('Create task error:', error);
     res.status(500).json({ error: 'Ошибка создания задачи' });
@@ -735,7 +771,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     if (customFields !== undefined) data.customFields = customFields;
 
     const oldTask = await prisma.task.findUnique({
-      where: { id: req.params.id },
+      where: { id: taskIdParam(req) },
       include: {
         board: { select: { workspaceId: true } },
         _count: { select: { taskAttachments: true } },
@@ -832,7 +868,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     }
 
     const task = await prisma.task.update({
-      where: { id: req.params.id },
+      where: { id: taskIdParam(req) },
       data,
       include: {
         type: true,
@@ -1061,7 +1097,7 @@ router.post('/:id/approvals', async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'Требуется авторизация' });
     }
 
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -1169,7 +1205,7 @@ router.post('/:id/column-actions', async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'Требуется авторизация' });
     }
 
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -1304,7 +1340,7 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     }
 
     await prisma.task.delete({
-      where: { id: req.params.id },
+      where: { id: taskIdParam(req) },
     });
 
     res.json({ message: 'Задача удалена' });
@@ -1324,7 +1360,7 @@ router.post('/:id/comments', async (req: AuthRequest, res) => {
 
     const comment = await prisma.comment.create({
       data: {
-        taskId: req.params.id,
+        taskId: taskIdParam(req),
         userId: req.userId!,
         content,
       },
@@ -1336,7 +1372,7 @@ router.post('/:id/comments', async (req: AuthRequest, res) => {
     });
 
     const task = await prisma.task.findUnique({
-      where: { id: req.params.id },
+      where: { id: taskIdParam(req) },
       select: { title: true, assigneeId: true, createdBy: true },
     });
 
@@ -1356,7 +1392,7 @@ router.post('/:id/comments', async (req: AuthRequest, res) => {
             title: 'Новый комментарий',
             message: `${actor?.name || 'Пользователь'} оставил(а) комментарий к задаче "${task.title}"`,
             userId,
-            relatedId: req.params.id,
+            relatedId: taskIdParam(req),
           })
         )
       );
@@ -1385,7 +1421,7 @@ router.post('/:id/client-interactions', async (req: AuthRequest, res) => {
     if (!CLIENT_INTERACTION_KINDS.has(kindValue)) {
       return res.status(400).json({ error: 'Некорректный тип взаимодействия' });
     }
-    const task = await prisma.task.findUnique({ where: { id: req.params.id } });
+    const task = await prisma.task.findUnique({ where: { id: taskIdParam(req) } });
     if (!task) {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
@@ -1396,7 +1432,7 @@ router.post('/:id/client-interactions', async (req: AuthRequest, res) => {
 
     const interaction = await prisma.taskClientInteraction.create({
       data: {
-        taskId: req.params.id,
+        taskId: taskIdParam(req),
         userId: req.userId!,
         kind: kindValue,
         title: String(title).trim(),
@@ -1421,7 +1457,7 @@ router.post('/:id/chat/assistant', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Ассистент доступен только сотрудникам Legal Boards' });
     }
 
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
@@ -1532,7 +1568,7 @@ router.post('/:id/chat/assistant', async (req: AuthRequest, res) => {
 
 router.post('/:id/chat', async (req: AuthRequest, res) => {
   try {
-    const taskId = req.params.id;
+    const taskId = taskIdParam(req);
     const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
     if (!gate.ok) {
       return res.status(404).json({ error: 'Задача не найдена или нет доступа' });

@@ -4,34 +4,13 @@ import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middl
 import { assertWorkspaceMember } from '../utils/documentAccess';
 import { workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
 import { assertColumnApprovalsComplete } from '../utils/boardApprovals';
+import { boardCodeValidationError, normalizeNewBoardCode } from '../utils/boardCodes';
+import { resolveBoardRef } from '../utils/boardResolve';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(authenticate);
-
-function slugify(input: string) {
-  const s = (input || '').trim().toLowerCase();
-  if (!s) return 'board';
-  return s
-    .replace(/[\s_]+/g, '-')
-    .replace(/[^a-z0-9а-яё-]/gi, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 40) || 'board';
-}
-
-async function generateUniqueBoardCode(name: string) {
-  const base = slugify(name);
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const suffix = Math.random().toString(36).slice(2, 6);
-    const code = `${base}-${suffix}`;
-    const exists = await prisma.board.findUnique({ where: { code } }).catch(() => null);
-    if (!exists) return code;
-  }
-  // very unlikely fallback
-  return `${base}-${Date.now().toString(36)}`;
-}
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
@@ -171,10 +150,13 @@ router.put(
 router.get('/:id', async (req: AuthRequest, res) => {
   try {
     const idOrCode = req.params.id;
-    const board = await prisma.board.findFirst({
-      where: {
-        OR: [{ id: idOrCode }, { code: idOrCode }],
-      },
+    const board = await resolveBoardRef(prisma, idOrCode);
+    if (!board) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
+    const full = await prisma.board.findUnique({
+      where: { id: board.id },
       include: {
         columns: { orderBy: { position: 'asc' } },
         taskFields: { orderBy: { position: 'asc' } },
@@ -182,7 +164,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
       },
     });
 
-    if (!board) {
+    if (!full) {
       return res.status(404).json({ error: 'Доска не найдена' });
     }
 
@@ -191,19 +173,19 @@ router.get('/:id', async (req: AuthRequest, res) => {
         where: {
           lexClientId_workspaceId: {
             lexClientId: req.lexClientId,
-            workspaceId: board.workspaceId,
+            workspaceId: full.workspaceId,
           },
         },
       });
-      if (!link && !workspaceAllowsLexIntake(board.workspaceId)) {
+      if (!link && !workspaceAllowsLexIntake(full.workspaceId)) {
         return res.status(403).json({ error: 'Нет доступа к этой доске' });
       }
-      const { advancedSettings: _adv, ...boardForLex } = board as Record<string, unknown>;
+      const { advancedSettings: _adv, ...boardForLex } = full as Record<string, unknown>;
       res.json(boardForLex);
       return;
     }
 
-    res.json(board);
+    res.json(full);
   } catch (error) {
     console.error('Get board error:', error);
     res.status(500).json({ error: 'Ошибка получения доски' });
@@ -225,7 +207,19 @@ router.post('/', requireStaffUser, async (req: AuthRequest, res) => {
       taskTypes = [],
     } = req.body;
 
-    const boardCode = (code && typeof code === 'string' && code.trim()) ? slugify(code) : await generateUniqueBoardCode(name);
+    const boardCode = normalizeNewBoardCode(code);
+    if (!boardCode) {
+      return res.status(400).json({
+        error: boardCodeValidationError(String(code ?? '').trim().toUpperCase()) ?? 'Укажите код доски (латиница A–Z, 2–12 символов)',
+      });
+    }
+
+    const codeTaken =
+      (await prisma.board.findUnique({ where: { code: boardCode }, select: { id: true } })) ??
+      (await prisma.boardCodeAlias.findUnique({ where: { code: boardCode }, select: { id: true } }));
+    if (codeTaken) {
+      return res.status(400).json({ error: 'Код доски уже занят' });
+    }
 
     const board = await prisma.board.create({
       data: {
@@ -284,6 +278,7 @@ router.post('/', requireStaffUser, async (req: AuthRequest, res) => {
 router.put('/:id', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const {
+      code: nextCodeRaw,
       name,
       description,
       viewMode,
@@ -297,9 +292,38 @@ router.put('/:id', requireStaffUser, async (req: AuthRequest, res) => {
     const boardId = req.params.id;
 
     const updatedBoard = await prisma.$transaction(async (tx) => {
+      const existing = await tx.board.findUnique({ where: { id: boardId } });
+      if (!existing) {
+        throw new Error('BOARD_NOT_FOUND');
+      }
+
+      let codeUpdate: { code: string } | Record<string, never> = {};
+      if (nextCodeRaw !== undefined) {
+        const raw = String(nextCodeRaw).trim();
+        if (raw !== existing.code) {
+          const nextCode = normalizeNewBoardCode(nextCodeRaw);
+          if (!nextCode) {
+            throw new Error('INVALID_BOARD_CODE');
+          }
+          const taken =
+            (await tx.board.findFirst({ where: { code: nextCode, NOT: { id: boardId } } })) ??
+            (await tx.boardCodeAlias.findUnique({ where: { code: nextCode } }));
+          if (taken) {
+            throw new Error('BOARD_CODE_TAKEN');
+          }
+          await tx.boardCodeAlias.upsert({
+            where: { code: existing.code },
+            create: { boardId, code: existing.code },
+            update: {},
+          });
+          codeUpdate = { code: nextCode };
+        }
+      }
+
       await tx.board.update({
         where: { id: boardId },
         data: {
+          ...codeUpdate,
           ...(name !== undefined ? { name } : {}),
           ...(description !== undefined ? { description } : {}),
           ...(viewMode !== undefined ? { viewMode } : {}),
@@ -428,6 +452,16 @@ router.put('/:id', requireStaffUser, async (req: AuthRequest, res) => {
 
     res.json(updatedBoard);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : '';
+    if (msg === 'BOARD_NOT_FOUND') {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+    if (msg === 'INVALID_BOARD_CODE') {
+      return res.status(400).json({ error: 'Код доски: латиница A–Z и цифры 0–9, 2–12 символов' });
+    }
+    if (msg === 'BOARD_CODE_TAKEN') {
+      return res.status(400).json({ error: 'Код доски уже занят' });
+    }
     console.error('Update board error:', error);
     res.status(500).json({ error: 'Ошибка обновления доски' });
   }

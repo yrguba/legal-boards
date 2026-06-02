@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { boardsApi, documentsApi, tasksApi, usersApi } from '../../services/api';
 import type { Board, Document, User } from '../../types';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../../components/ui/resizable';
@@ -32,11 +32,13 @@ import { ColumnActionTransitionModal } from '../../components/ColumnActionTransi
 import type { TaskActivityItem } from '../../utils/activityLog';
 import { useApp } from '../../store/AppContext';
 import { getWsUrl } from '../../utils/wsUrl';
+import { taskPath } from '../../utils/taskUrls';
 
 export function TaskPage() {
   const { currentUser } = useApp();
-  const { taskId } = useParams();
-  const taskIdRef = useRef<string | undefined>(taskId);
+  const navigate = useNavigate();
+  const { taskKey } = useParams();
+  const activeTaskIdRef = useRef<string | undefined>(undefined);
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -203,14 +205,16 @@ export function TaskPage() {
     return list;
   }, [assistantPanelChat, assistantOptimistic, isPostingAssistant, currentUser]);
 
+  const activeTaskId = task?.id ?? taskKey;
+
   useEffect(() => {
-    if (!taskId) return;
+    if (!taskKey) return;
     let cancelled = false;
     const load = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const loadedTask = (await tasksApi.getById(taskId)) as TaskRecord;
+        const loadedTask = (await tasksApi.getById(taskKey)) as TaskRecord;
         if (cancelled) return;
         setTask(loadedTask);
         const [loadedBoard, allUsers] = await Promise.all([
@@ -227,6 +231,9 @@ export function TaskPage() {
         setEditTypeId(loadedTask.typeId);
         setEditAssigneeId(loadedTask.assigneeId || '');
         setEditCustomFields(loadedTask.customFields || {});
+        if (loadedTask.key && loadedTask.key !== taskKey) {
+          navigate(taskPath(loadedTask), { replace: true });
+        }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Не удалось загрузить задачу');
       } finally {
@@ -237,34 +244,34 @@ export function TaskPage() {
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [taskKey, navigate]);
 
   useEffect(() => {
-    taskIdRef.current = taskId;
-  }, [taskId]);
+    activeTaskIdRef.current = task?.id ?? taskKey;
+  }, [task?.id, taskKey]);
 
   const loadActivity = useCallback(async () => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     setActivityLoading(true);
     setActivityError(null);
     try {
-      const res = await tasksApi.getActivity(taskId);
+      const res = await tasksApi.getActivity(activeTaskId);
       setActivityItems(res.items ?? []);
     } catch (e: unknown) {
       setActivityError(e instanceof Error ? e.message : 'Не удалось загрузить историю');
     } finally {
       setActivityLoading(false);
     }
-  }, [taskId]);
+  }, [activeTaskId]);
 
   useEffect(() => {
-    if (activePanel !== 'activity' || !taskId) return;
+    if (activePanel !== 'activity' || !activeTaskId) return;
     void loadActivity();
-  }, [activePanel, taskId, loadActivity]);
+  }, [activePanel, activeTaskId, loadActivity]);
 
   /** Входящие сообщения клиента по каналу «чат с клиентом» приходят через WS; REST POST только подтверждает отправку. */
   useEffect(() => {
-    if (!currentUser?.id || !taskId) return;
+    if (!currentUser?.id || !activeTaskId) return;
 
     let cancelled = false;
     let ws: WebSocket | null = null;
@@ -274,7 +281,7 @@ export function TaskPage() {
       if (!raw || typeof raw !== 'object') return;
       const data = raw as Record<string, unknown>;
       const tid = typeof data.taskId === 'string' ? data.taskId : '';
-      if (!tid || tid !== taskIdRef.current) return;
+      if (!tid || tid !== activeTaskIdRef.current) return;
       if (data.type !== 'chat_message') {
         if (data.type === 'task_approval_updated') {
           const approval = data.approval as TaskColumnApprovalRow | undefined;
@@ -342,7 +349,7 @@ export function TaskPage() {
         /* ignore */
       }
     };
-  }, [currentUser?.id, taskId]);
+  }, [currentUser?.id, activeTaskId]);
 
   useEffect(() => {
     if (!board?.workspaceId) return;
@@ -367,7 +374,7 @@ export function TaskPage() {
   }, [board?.workspaceId]);
 
   const postAssistantMessage = async () => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     const text = assistantMessage.trim();
     if (!text) return;
     const optimisticId = `optimistic-${crypto.randomUUID()}`;
@@ -376,7 +383,7 @@ export function TaskPage() {
     setIsPostingAssistant(true);
     setAssistantChatError(null);
     try {
-      const { userMessage, assistantMessage } = await tasksApi.postAssistantChat(taskId, text);
+      const { userMessage, assistantMessage } = await tasksApi.postAssistantChat(activeTaskId, text);
       setTask((prev) => {
         if (!prev) return prev;
         const withUser = mergeChatMessage(prev, userMessage as Record<string, unknown>);
@@ -387,7 +394,7 @@ export function TaskPage() {
       setAssistantChatError(e?.message || 'Не удалось отправить');
       setAssistantOptimistic(null);
       try {
-        const fresh = (await tasksApi.getById(taskId)) as TaskRecord;
+        const fresh = (await tasksApi.getById(activeTaskId)) as TaskRecord;
         setTask(fresh);
       } catch {
         /* ignore reload errors */
@@ -398,13 +405,13 @@ export function TaskPage() {
   };
 
   const postClientChat = async () => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     const text = clientMessage.trim();
     if (!text) return;
     setIsPostingClientChat(true);
     setClientChatError(null);
     try {
-      const created = await tasksApi.addChatMessage(taskId, 'client', text, 'user');
+      const created = await tasksApi.addChatMessage(activeTaskId, 'client', text, 'user');
       setTask((prev) => (prev ? mergeChatMessage(prev, created) : prev));
       setClientMessage('');
     } catch (e: any) {
@@ -415,7 +422,7 @@ export function TaskPage() {
   };
 
   const submitClientInteraction = async (): Promise<boolean> => {
-    if (!taskId) return false;
+    if (!activeTaskId) return false;
     const title = interactionTitle.trim();
     if (!title) {
       setInteractionError('Введите заголовок');
@@ -427,7 +434,7 @@ export function TaskPage() {
       const at = interactionOccurredAt
         ? new Date(interactionOccurredAt).toISOString()
         : new Date().toISOString();
-      const created = await tasksApi.addClientInteraction(taskId, {
+      const created = await tasksApi.addClientInteraction(activeTaskId, {
         kind: interactionKind,
         title,
         details: interactionDetails.trim() || undefined,
@@ -451,12 +458,12 @@ export function TaskPage() {
   };
 
   const postComment = async () => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     const content = commentText.trim();
     if (!content) return;
     setIsPostingComment(true);
     try {
-      const created = await tasksApi.addComment(taskId, content);
+      const created = await tasksApi.addComment(activeTaskId, content);
       setTask((prev: any) => ({
         ...prev,
         comments: [created, ...(prev?.comments || [])],
@@ -469,9 +476,9 @@ export function TaskPage() {
   };
 
   const removeTaskAttachment = async (attachmentId: string) => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     try {
-      await tasksApi.deleteAttachment(taskId, attachmentId);
+      await tasksApi.deleteAttachment(activeTaskId, attachmentId);
       setTask((prev: any) => ({
         ...prev,
         taskAttachments: (Array.isArray(prev?.taskAttachments) ? prev.taskAttachments : []).filter(
@@ -484,13 +491,13 @@ export function TaskPage() {
   };
 
   const saveConclusionTextHandler = async () => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     setConclusionSaveError(null);
     setSavingConclusion(true);
     try {
       const trimmed = conclusionDraft.trim();
       const conclusionTextPayload = trimmed.length === 0 ? null : trimmed;
-      const res = await tasksApi.patchTaskConclusion(taskId, conclusionTextPayload);
+      const res = await tasksApi.patchTaskConclusion(activeTaskId, conclusionTextPayload);
       setTask((prev: TaskRecord | null) => (prev ? { ...prev, conclusionText: res.conclusionText } : prev));
     } catch (e: unknown) {
       setConclusionSaveError(e instanceof Error ? e.message : 'Не удалось сохранить');
@@ -500,11 +507,11 @@ export function TaskPage() {
   };
 
   const uploadConclusionFileHandler = async (file: File) => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     setConclusionUploadError(null);
     setUploadingConclusionFile(true);
     try {
-      const created = (await tasksApi.uploadAttachment(taskId, file, {
+      const created = (await tasksApi.uploadAttachment(activeTaskId, file, {
         purpose: 'conclusion',
       })) as Record<string, unknown>;
       setTask((prev: any) => ({
@@ -519,9 +526,9 @@ export function TaskPage() {
   };
 
   const removeConclusionAttachment = async (attachmentId: string) => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     try {
-      await tasksApi.deleteAttachment(taskId, attachmentId);
+      await tasksApi.deleteAttachment(activeTaskId, attachmentId);
       setTask((prev: any) => ({
         ...prev,
         taskAttachments: (Array.isArray(prev?.taskAttachments) ? prev.taskAttachments : []).filter(
@@ -534,11 +541,11 @@ export function TaskPage() {
   };
 
   const handleUploadAttachment = async (file: File) => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     setUploadingFile(true);
     setUploadError(null);
     try {
-      const created = (await tasksApi.uploadAttachment(taskId, file)) as Record<string, unknown>;
+      const created = (await tasksApi.uploadAttachment(activeTaskId, file)) as Record<string, unknown>;
       setTask((prev: any) => ({
         ...prev,
         taskAttachments: [created, ...(Array.isArray(prev?.taskAttachments) ? prev.taskAttachments : [])],
@@ -557,11 +564,11 @@ export function TaskPage() {
   };
 
   const handleApproveRule = async (ruleId: string) => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     setApprovalError(null);
     setApprovingRuleId(ruleId);
     try {
-      const created = (await tasksApi.submitApproval(taskId, ruleId, {
+      const created = (await tasksApi.submitApproval(activeTaskId, ruleId, {
         action: 'approve',
       })) as TaskColumnApprovalRow;
       setTask((prev) => {
@@ -579,11 +586,11 @@ export function TaskPage() {
   };
 
   const handleRejectRule = async (ruleId: string, reason: string) => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     setApprovalError(null);
     setApprovingRuleId(ruleId);
     try {
-      const created = (await tasksApi.submitApproval(taskId, ruleId, {
+      const created = (await tasksApi.submitApproval(activeTaskId, ruleId, {
         action: 'reject',
         reason,
       })) as TaskColumnApprovalRow;
@@ -623,8 +630,8 @@ export function TaskPage() {
   });
 
   const finishSaveWithColumnMove = async (toColumnId: string) => {
-    if (!taskId || !columnTransition) return;
-    const updated = await tasksApi.update(taskId, {
+    if (!activeTaskId || !columnTransition) return;
+    const updated = await tasksApi.update(activeTaskId, {
       ...columnTransition.pendingUpdate,
       columnId: toColumnId,
     });
@@ -636,7 +643,7 @@ export function TaskPage() {
   };
 
   const saveEdits = async () => {
-    if (!taskId) return;
+    if (!activeTaskId) return;
     setSaveError(null);
     const validationError = validateTaskEdits(
       editTitle,
@@ -705,7 +712,7 @@ export function TaskPage() {
 
     setIsSaving(true);
     try {
-      const updated = await tasksApi.update(taskId, pendingUpdate);
+      const updated = await tasksApi.update(activeTaskId, pendingUpdate);
       setTask((prev: TaskRecord | null) => (prev ? { ...prev, ...updated } : prev));
       setIsEditing(false);
       void loadActivity();
@@ -947,12 +954,12 @@ export function TaskPage() {
           setColumnTransitionError(null);
         }}
         onSubmitStep={async (step, payload) => {
-          if (!taskId || !columnTransition) return;
+          if (!activeTaskId || !columnTransition) return;
           setColumnTransitionSubmitting(true);
           setColumnTransitionError(null);
           try {
             const row = (await tasksApi.completeColumnAction(
-              taskId,
+              activeTaskId,
               step.rule.id,
               payload,
               step.forColumnId,

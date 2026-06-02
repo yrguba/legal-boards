@@ -7,6 +7,9 @@ export interface AuthRequest extends Request {
   userId?: string;
   userRole?: string;
   lexClientId?: string;
+  /** Внутренний id задачи после resolveTaskRef (router.param) */
+  resolvedTaskId?: string;
+  resolvedTaskKey?: string;
 }
 
 type JwtPayload = {

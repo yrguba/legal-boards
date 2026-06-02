@@ -34,6 +34,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { filePublicUrl } from '@/utils/storageUrl';
 import { getWsUrl } from '@/utils/wsUrl';
+import { taskDisplayRef, taskPath } from '@/utils/taskUrls';
 
 export type BoardWithWorkspace = {
   id: string;
@@ -43,12 +44,7 @@ export type BoardWithWorkspace = {
 };
 
 function formatRequestRef(task: TaskListItem): string {
-  const d = new Date(task.createdAt);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const suf = task.id.replace(/-/g, '').slice(-6).toUpperCase();
-  return `№ ${y}-${m}-${day}-${suf}`;
+  return taskDisplayRef(task);
 }
 
 function formatRuDate(iso: string): string {
@@ -291,12 +287,15 @@ export function RequestsPage() {
     const seq = detailSeqRef.current;
     try {
       const t = await tasksApi.getById(taskId);
-      if (seq !== detailSeqRef.current || t.id !== taskId) return;
-      setTaskDetail((prev) => mergeChatMessagesForLexTask(taskId, t, prev, pendingWsChatRef));
+      if (seq !== detailSeqRef.current) return;
+      if (t.key && t.key !== taskId) {
+        navigate(taskPath(t), { replace: true });
+      }
+      setTaskDetail((prev) => mergeChatMessagesForLexTask(t.id, t, prev, pendingWsChatRef));
     } catch {
       /* ignore */
     }
-  }, [taskId]);
+  }, [taskId, navigate]);
 
   useEffect(() => {
     refreshDetailRef.current = refreshDetail;
@@ -558,11 +557,11 @@ export function RequestsPage() {
       return;
     }
     if (!taskId) {
-      navigate(`/r/${tasks[0].id}`, { replace: true });
+      navigate(taskPath(tasks[0]), { replace: true });
       return;
     }
     if (!tasks.some((t) => t.id === taskId)) {
-      navigate(`/r/${tasks[0].id}`, { replace: true });
+      navigate(taskPath(tasks[0]), { replace: true });
     }
   }, [tasks, taskId, navigate]);
 
@@ -793,7 +792,7 @@ export function RequestsPage() {
                   return (
                     <li key={t.id}>
                       <Link
-                        to={`/r/${t.id}`}
+                        to={taskPath(t)}
                         className={`flex items-start gap-2 rounded-lg border p-3 transition-colors ${
                           active
                             ? 'border-brand bg-brand-light shadow-sm'
@@ -1142,7 +1141,7 @@ export function RequestsPage() {
           onCreated={async (created) => {
             setCreateOpen(false);
             await reloadTasks();
-            navigate(`/r/${created.id}`, { replace: true });
+            navigate(taskPath(created), { replace: true });
             const hasContacts = Boolean(user?.phone?.trim() || user?.contactNotes?.trim());
             if (!hasContacts) setTab('contacts');
           }}
