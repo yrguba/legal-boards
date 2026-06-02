@@ -77,6 +77,7 @@ export function CreateBoardModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [boardName, setBoardName] = useState('');
+  const [boardCode, setBoardCode] = useState('');
   const [boardDescription, setBoardDescription] = useState('');
   const [attachmentsEnabled, setAttachmentsEnabled] = useState(true);
   const [visibilityType, setVisibilityType] = useState<'workspace' | 'department' | 'group'>('workspace');
@@ -111,6 +112,7 @@ export function CreateBoardModal({
     if (!initialData) return;
 
     setBoardName(initialData.name || '');
+    setBoardCode(initialData.code || '');
     setBoardDescription(initialData.description || '');
     setAttachmentsEnabled(initialData.attachmentsEnabled !== false);
 
@@ -342,8 +344,12 @@ export function CreateBoardModal({
       visibility.groupIds = selectedGroups;
     }
 
+    const normalizedCode = boardCode.trim().toUpperCase();
     const boardData = {
       name: boardName,
+      ...( !initialData?.id || normalizedCode !== String(initialData?.code || '').toUpperCase()
+        ? { code: normalizedCode }
+        : {}),
       description: boardDescription,
       attachmentsEnabled,
       visibility,
@@ -363,6 +369,7 @@ export function CreateBoardModal({
 
   const resetForm = () => {
     setBoardName('');
+    setBoardCode('');
     setBoardDescription('');
     setAttachmentsEnabled(true);
     setVisibilityType('workspace');
@@ -381,10 +388,14 @@ export function CreateBoardModal({
     setTaskTypes([{ id: 'type-temp-1', name: 'Задача', color: '#3b82f6' }]);
   };
 
+  const isCreate = !initialData?.id;
+  const boardCodeValid = /^[A-Z0-9]{2,12}$/.test(boardCode.trim().toUpperCase());
+
   const canProceed = () => {
     switch (currentStep) {
       case 'general':
-        return boardName.trim() !== '';
+        if (isCreate) return boardName.trim() !== '' && boardCodeValid;
+        return boardName.trim() !== '' && (!boardCode.trim() || boardCodeValid);
       case 'columns':
         return columns.length > 0 && columns.every((col) => col.name.trim() !== '');
       case 'fields':
@@ -455,6 +466,23 @@ export function CreateBoardModal({
                   placeholder="Введите название доски"
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Код доски {isCreate ? '*' : ''}
+                </label>
+                <input
+                  type="text"
+                  value={boardCode}
+                  onChange={(e) => setBoardCode(e.target.value.toUpperCase())}
+                  placeholder="IT"
+                  maxLength={12}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand uppercase"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Латиница A–Z и цифры, 2–12 символов. URL: /board/{boardCode.trim() || 'IT'}, задачи: /task/{boardCode.trim() || 'IT'}-19
+                </p>
               </div>
 
               <div>

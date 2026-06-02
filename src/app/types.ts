@@ -114,6 +114,11 @@ export interface TaskAttachment {
 
 export interface Task {
   id: string;
+  /** Сквозной номер на доске */
+  number?: number;
+  /** Публичный ключ IT-19 */
+  key?: string;
+  boardCode?: string;
   boardId: string;
   columnId: string;
   title: string;

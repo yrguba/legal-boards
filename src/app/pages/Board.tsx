@@ -55,6 +55,7 @@ import {
 } from '../components/ui/alert-dialog';
 import { buttonVariants } from '../components/ui/button';
 import { cn } from '../components/ui/utils';
+import { taskPath } from '../utils/taskUrls';
 
 /** После сохранения колонки API возвращает обновлённые поля учёта времени — подмешиваем в карточку без перезагрузки */
 function mergeTaskFromUpdateResponse(prev: TaskType, api: Record<string, unknown>): TaskType {
@@ -204,7 +205,7 @@ function TaskCard({
             <GripVertical className="w-4 h-4" />
           </button>
           <Link
-            to={`/task/${task.id}`}
+            to={taskPath(task)}
             className="text-sm font-medium text-slate-900 group-hover:text-brand transition-colors flex-1"
           >
             {task.title}
@@ -839,7 +840,7 @@ export function Board() {
                     >
                       <td className="px-4 py-3">
                         <Link
-                          to={`/task/${task.id}`}
+                          to={taskPath(task)}
                           className="text-sm font-medium text-slate-900 hover:text-brand"
                         >
                           {task.title}

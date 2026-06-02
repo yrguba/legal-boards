@@ -241,8 +241,21 @@ model Board {
   taskFields TaskField[]
   taskTypes  TaskType[]
   tasks      Task[]
+  codeAliases BoardCodeAlias[]
 
   @@index([workspaceId])
+}
+
+/// Старые коды доски для redirect URL после смены code
+model BoardCodeAlias {
+  id        String   @id @default(cuid())
+  boardId   String
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([boardId])
 }
 
 model BoardColumn {
@@ -293,6 +306,8 @@ model TaskType {
 
 model Task {
   id           String   @id @default(cuid())
+  /// Сквозной номер задачи на доске (1, 2, 3…); публичный ключ: {board.code}-{number}
+  number       Int
   boardId      String
   columnId     String
   typeId       String
@@ -330,6 +345,7 @@ model Task {
   columnActionCompletions TaskColumnActionCompletion[]
   activityLogs         ActivityLog[]
 
+  @@unique([boardId, number])
   @@index([boardId])
   @@index([columnId])
   @@index([typeId])

@@ -3,7 +3,7 @@ import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Boards } from './pages/Boards';
 import { Board } from './pages/Board';
-import { Task } from './pages/Task';
+import { TaskRoute } from './pages/TaskRoute';
 import { Employees } from './pages/Employees';
 import { Documents } from './pages/Documents';
 import { Settings } from './pages/Settings';
@@ -47,8 +47,8 @@ export const router = createBrowserRouter([
         element: <Board />,
       },
       {
-        path: 'task/:taskId',
-        element: <Task />,
+        path: 'task/:taskKey',
+        element: <TaskRoute />,
       },
       {
         path: 'employees',

@@ -130,6 +130,9 @@ export interface BoardDetail {
 
 export interface TaskListItem {
   id: string;
+  number?: number;
+  key?: string;
+  boardCode?: string;
   boardId: string;
   columnId: string;
   title: string;

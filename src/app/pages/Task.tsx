@@ -1,1 +1,1 @@
-export { TaskPage as Task } from './task/TaskPage';
+export { TaskRoute } from './TaskRoute';
