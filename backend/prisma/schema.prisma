@@ -80,6 +80,8 @@ model User {
   role         String         @default("member")
   avatar       String?
   departmentId String?
+  /// Значения настраиваемых полей профиля (ключ → значение)
+  profileFields Json          @default("{}")
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -102,6 +104,7 @@ model User {
   taskColumnApprovals      TaskColumnApproval[] @relation("TaskColumnApprovalApprover")
   taskColumnActionCompletions TaskColumnActionCompletion[] @relation("TaskColumnActionCompleter")
   activityLogs             ActivityLog[] @relation("ActivityLogActor")
+  ledGroups                Group[] @relation("GroupLeader")
 
   @@index([email])
   @@index([departmentId])
@@ -154,6 +157,7 @@ model Workspace {
   users       WorkspaceUser[]
   departments Department[]
   groups      Group[]
+  employeeProfileFields EmployeeProfileField[]
   boards      Board[]
   documents   Document[]
   chatChannels WorkspaceChatChannel[]
@@ -188,24 +192,57 @@ model Department {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   users     User[]
+  groups    Group[]
   chatChannels WorkspaceChatChannel[]
 
   @@index([workspaceId])
 }
 
 model Group {
-  id          String      @id @default(cuid())
-  name        String
-  description String?
-  workspaceId String
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String      @id @default(cuid())
+  name         String
+  description  String?
+  workspaceId  String
+  /// Направление / продукт внутри отдела
+  departmentId String
+  /// Руководитель направления
+  leaderId     String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
-  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  users     UserGroup[]
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  department Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  leader     User?       @relation("GroupLeader", fields: [leaderId], references: [id], onDelete: SetNull)
+  users      UserGroup[]
   chatChannels WorkspaceChatChannel[]
 
   @@index([workspaceId])
+  @@index([departmentId])
+  @@index([leaderId])
+}
+
+/// Настраиваемая схема полей карточки сотрудника (одна на workspace)
+model EmployeeProfileField {
+  id          String   @id @default(cuid())
+  workspaceId String
+  key         String
+  name        String
+  type        String
+  required    Boolean  @default(false)
+  filterable  Boolean  @default(true)
+  /// Конфиденциальное поле: видно только сотруднику, руководителю направления и администратору
+  confidential Boolean @default(false)
+  /// Маска ввода: passport | departmentCode | snils | phone | inn | digits | money
+  mask        String?
+  options     Json?
+  position    Int
+  section     String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId])
+  @@index([position])
 }
 
 model UserGroup {

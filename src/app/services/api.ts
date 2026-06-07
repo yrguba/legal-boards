@@ -157,6 +157,26 @@ export const usersApi = {
   async delete(id: string) {
     return fetchApi<void>(`/users/${id}`, { method: 'DELETE' });
   },
+
+  async getCatalog(workspaceId: string, params?: Record<string, string | undefined>) {
+    const q = new URLSearchParams();
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        if (v != null && v !== '') q.set(k, v);
+      }
+    }
+    const qs = q.toString();
+    return fetchApi<any[]>(
+      `/users/workspace/${workspaceId}/catalog${qs ? `?${qs}` : ''}`,
+    );
+  },
+
+  async updateProfile(userId: string, profileFields: Record<string, unknown>) {
+    return fetchApi<any>(`/users/${userId}/profile`, {
+      method: 'PUT',
+      body: JSON.stringify({ profileFields }),
+    });
+  },
 };
 
 // Workspaces API
@@ -192,6 +212,10 @@ export const workspacesApi = {
       method: 'POST',
       body: JSON.stringify({ userEmail }),
     });
+  },
+
+  async getEmployeeProfileFields(workspaceId: string) {
+    return fetchApi<any[]>(`/workspaces/${workspaceId}/employee-profile-fields`);
   },
 };
 
@@ -241,14 +265,24 @@ export const groupsApi = {
     return fetchApi<any>(`/groups/${id}`);
   },
 
-  async create(data: { name: string; description?: string; workspaceId: string; memberIds?: string[] }) {
+  async create(data: {
+    name: string;
+    description?: string;
+    workspaceId: string;
+    departmentId: string;
+    memberIds?: string[];
+    leaderId?: string | null;
+  }) {
     return fetchApi<any>('/groups', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
-  async update(id: string, data: { name?: string; description?: string }) {
+  async update(
+    id: string,
+    data: { name?: string; description?: string; leaderId?: string | null },
+  ) {
     return fetchApi<any>(`/groups/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

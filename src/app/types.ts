@@ -10,6 +10,31 @@ export interface User {
   avatar?: string;
   departmentId?: string;
   groupIds?: string[];
+  profileFields?: Record<string, string | null | undefined>;
+}
+
+export type ProfileFieldMask = 'passport' | 'departmentCode' | 'snils' | 'phone' | 'digits';
+
+export interface EmployeeProfileField {
+  id: string;
+  workspaceId: string;
+  key: string;
+  name: string;
+  type: 'text' | 'textarea' | 'select' | 'date' | 'money';
+  required: boolean;
+  filterable: boolean;
+  confidential?: boolean;
+  mask?: ProfileFieldMask | null;
+  options?: string[];
+  position: number;
+  section?: string | null;
+}
+
+export interface GroupLeader {
+  id: string;
+  name: string;
+  email?: string;
+  avatar?: string | null;
 }
 
 export interface Department {
@@ -24,7 +49,11 @@ export interface Group {
   name: string;
   description?: string;
   workspaceId: string;
+  departmentId: string;
   memberIds: string[];
+  leaderId?: string | null;
+  leader?: GroupLeader | null;
+  department?: { id: string; name: string };
 }
 
 export interface Workspace {

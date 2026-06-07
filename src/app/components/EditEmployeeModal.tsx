@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
 import type { User, UserRole } from '../types';
 import { useApp } from '../store/AppContext';
@@ -20,6 +20,10 @@ export function EditEmployeeModal({ isOpen, onClose, onSubmit, employee }: EditE
 
   const workspaceDepartments = departments.filter((d) => d.workspaceId === currentWorkspace?.id);
   const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
+  const groupsInDept = useMemo(() => {
+    if (!departmentId) return [];
+    return workspaceGroups.filter((g) => g.departmentId === departmentId);
+  }, [workspaceGroups, departmentId]);
 
   useEffect(() => {
     if (employee) {
@@ -93,7 +97,16 @@ export function EditEmployeeModal({ isOpen, onClose, onSubmit, employee }: EditE
             <label className="block text-sm font-medium text-slate-700 mb-1">Отдел</label>
             <select
               value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDepartmentId(next);
+                setSelectedGroups((prev) =>
+                  prev.filter((gid) => {
+                    const g = workspaceGroups.find((x) => x.id === gid);
+                    return g?.departmentId === next;
+                  }),
+                );
+              }}
               className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Без отдела</option>
@@ -106,12 +119,16 @@ export function EditEmployeeModal({ isOpen, onClose, onSubmit, employee }: EditE
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Группы</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Направления / продукты (группы отдела)
+            </label>
             <div className="border border-slate-200 rounded max-h-48 overflow-y-auto">
-              {workspaceGroups.length === 0 ? (
-                <div className="p-4 text-center text-sm text-slate-500">Нет доступных групп</div>
+              {!departmentId ? (
+                <div className="p-4 text-center text-sm text-slate-500">Сначала выберите отдел</div>
+              ) : groupsInDept.length === 0 ? (
+                <div className="p-4 text-center text-sm text-slate-500">Нет групп в этом отделе</div>
               ) : (
-                workspaceGroups.map((group) => (
+                groupsInDept.map((group) => (
                   <label
                     key={group.id}
                     className="flex items-center gap-3 p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0"

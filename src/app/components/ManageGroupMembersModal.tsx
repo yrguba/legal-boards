@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
 import type { Group } from '../types';
 import { useEmployees } from '../store/EmployeesContext';
@@ -24,6 +24,11 @@ export function ManageGroupMembersModal({
       setSelectedMembers(group.memberIds);
     }
   }, [group]);
+
+  const eligibleUsers = useMemo(
+    () => (group ? users.filter((u) => u.departmentId === group.departmentId) : []),
+    [users, group],
+  );
 
   if (!isOpen || !group) return null;
 
@@ -56,27 +61,32 @@ export function ManageGroupMembersModal({
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
+          <p className="text-xs text-slate-500 mb-2">Доступны только сотрудники из отдела направления</p>
           <div className="border border-slate-200 rounded">
-            {users.map((user) => (
-              <label
-                key={user.id}
-                className="flex items-center gap-3 p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedMembers.includes(user.id)}
-                  onChange={() => toggleMember(user.id)}
-                  className="w-4 h-4 text-brand"
-                />
-                <div className="w-8 h-8 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
-                  <span className="text-sm font-medium text-brand">{user.name.charAt(0)}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-slate-900">{user.name}</div>
-                  <div className="text-xs text-slate-500">{user.email}</div>
-                </div>
-              </label>
-            ))}
+            {eligibleUsers.length === 0 ? (
+              <p className="p-3 text-sm text-slate-500">Нет сотрудников в этом отделе</p>
+            ) : (
+              eligibleUsers.map((user) => (
+                <label
+                  key={user.id}
+                  className="flex items-center gap-3 p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedMembers.includes(user.id)}
+                    onChange={() => toggleMember(user.id)}
+                    className="w-4 h-4 text-brand"
+                  />
+                  <div className="w-8 h-8 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-medium text-brand">{user.name.charAt(0)}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-slate-900">{user.name}</div>
+                    <div className="text-xs text-slate-500">{user.email}</div>
+                  </div>
+                </label>
+              ))
+            )}
           </div>
           <div className="text-xs text-slate-500 mt-2">Выбрано: {selectedMembers.length}</div>
 
