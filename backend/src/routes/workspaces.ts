@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
 import { broadcast } from '../realtime';
 import { ensureChannelForNewWorkspace } from '../utils/workspaceChatChannels';
 import { getLexIntakeWorkspaceIds, workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
+import { ensureEmployeeProfileSchema } from '../utils/employeeProfile';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -252,5 +253,74 @@ router.post('/:id/users', requireStaffUser, async (req: AuthRequest, res) => {
     res.status(500).json({ error: 'Ошибка добавления пользователя' });
   }
 });
+
+router.get('/:workspaceId/employee-profile-fields', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, ownerId: true },
+    });
+    if (!workspace) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const isMember = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.userId } },
+    });
+    if (!isMember && workspace.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const fields = await ensureEmployeeProfileSchema(prisma, workspaceId);
+    res.json(fields);
+  } catch (error) {
+    console.error('Get employee profile fields error:', error);
+    res.status(500).json({ error: 'Ошибка получения схемы профиля' });
+  }
+});
+
+router.put(
+  '/:workspaceId/employee-profile-fields',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  async (req: AuthRequest, res) => {
+    try {
+      const workspaceId = req.params.workspaceId;
+      const incoming = req.body?.fields;
+      if (!Array.isArray(incoming)) {
+        return res.status(400).json({ error: 'fields должен быть массивом' });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.employeeProfileField.deleteMany({ where: { workspaceId } });
+        for (let idx = 0; idx < incoming.length; idx++) {
+          const f = incoming[idx] as Record<string, unknown>;
+          await tx.employeeProfileField.create({
+            data: {
+              workspaceId,
+              key: String(f.key ?? `field_${idx}`),
+              name: String(f.name ?? 'Поле'),
+              type: String(f.type ?? 'text'),
+              required: Boolean(f.required),
+              filterable: f.filterable !== false,
+              options: f.options ?? undefined,
+              section: typeof f.section === 'string' ? f.section : null,
+              position: typeof f.position === 'number' ? f.position : idx,
+            },
+          });
+        }
+      });
+
+      const fields = await prisma.employeeProfileField.findMany({
+        where: { workspaceId },
+        orderBy: { position: 'asc' },
+      });
+      res.json(fields);
+    } catch (error) {
+      console.error('Update employee profile fields error:', error);
+      res.status(500).json({ error: 'Ошибка сохранения схемы профиля' });
+    }
+  },
+);
 
 export default router;

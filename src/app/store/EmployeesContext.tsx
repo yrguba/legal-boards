@@ -16,8 +16,18 @@ interface EmployeesContextType {
     data: { name?: string; description?: string },
   ) => Promise<void>;
   deleteDepartment: (id: string) => Promise<void>;
-  createGroup: (data: { name: string; description: string; memberIds: string[]; workspaceId: string }) => Promise<void>;
-  updateGroup: (id: string, data: { name?: string; description?: string }) => Promise<void>;
+  createGroup: (data: {
+    name: string;
+    description: string;
+    memberIds: string[];
+    workspaceId: string;
+    departmentId: string;
+    leaderId?: string | null;
+  }) => Promise<void>;
+  updateGroup: (
+    id: string,
+    data: { name?: string; description?: string; leaderId?: string | null },
+  ) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ initialPassword?: string } | void>;
   updateUser: (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[] }) => Promise<void>;
@@ -79,19 +89,23 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
     await refreshData();
   };
 
-  const createGroup = async (data: { name: string; description: string; memberIds: string[]; workspaceId: string }) => {
+  const createGroup = async (data: {
+    name: string;
+    description: string;
+    memberIds: string[];
+    workspaceId: string;
+    departmentId: string;
+    leaderId?: string | null;
+  }) => {
     const newGroup = await groupsApi.create(data);
-    // normalize to expected shape
-    setGroups([
-      ...groups,
-      {
-        ...newGroup,
-        memberIds: newGroup.memberIds || data.memberIds || [],
-      },
-    ]);
+    await refreshData();
+    void newGroup;
   };
 
-  const updateGroup = async (id: string, data: { name?: string; description?: string }) => {
+  const updateGroup = async (
+    id: string,
+    data: { name?: string; description?: string; leaderId?: string | null },
+  ) => {
     await groupsApi.update(id, data);
     await refreshData();
   };

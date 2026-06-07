@@ -1,77 +1,39 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useEmployees } from '../store/EmployeesContext';
-import { Plus, Users as UsersIcon, Building, UserPlus, Edit, Settings, Trash2 } from 'lucide-react';
+import { Plus, UserPlus, Edit, Settings, Trash2, X } from 'lucide-react';
 import { CreateDepartmentModal } from '../components/CreateDepartmentModal';
 import { CreateGroupModal } from '../components/CreateGroupModal';
 import { CreateEmployeeModal } from '../components/CreateEmployeeModal';
 import { EditEmployeeModal } from '../components/EditEmployeeModal';
+import { EmployeeCatalogPanel } from '../components/EmployeeCatalogPanel';
+import { EmployeeProfileModal } from '../components/EmployeeProfileModal';
 import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMembersModal';
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
 import type { User, UserRole, Department, Group } from '../types';
-import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from '@dnd-kit/core';
-import { CSS } from '@dnd-kit/utilities';
 
-type ViewMode = 'all' | 'departments' | 'groups';
+type ViewMode = 'all' | 'catalog' | 'departments' | 'groups';
 
-function DraggableEmployee({ user, from }: { user: User; from: { kind: 'dept' | 'group' | 'none'; id?: string } }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useDraggable({
-    id: user.id,
-    data: { userId: user.id, from },
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.6 : 1,
-  };
-
+function MemberRow({ user, onRemove }: { user: User; onRemove?: () => void }) {
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-grab active:cursor-grabbing"
-      {...attributes}
-      {...listeners}
-    >
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50">
       <div className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
         <span className="text-xs font-medium text-brand">{user.name.charAt(0)}</span>
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="text-sm text-slate-900 truncate">{user.name}</div>
         <div className="text-xs text-slate-500 truncate">{user.email}</div>
       </div>
-    </div>
-  );
-}
-
-function DroppableBox({
-  id,
-  title,
-  subtitle,
-  children,
-}: {
-  id: string;
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-}) {
-  const { isOver, setNodeRef } = useDroppable({ id });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`bg-white rounded-lg border p-5 transition-colors ${
-        isOver ? 'border-brand ring-2 ring-brand/20' : 'border-slate-200'
-      }`}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="min-w-0">
-          <h3 className="font-medium text-slate-900 truncate">{title}</h3>
-          {subtitle && <p className="text-sm text-slate-600 mt-1">{subtitle}</p>}
-        </div>
-      </div>
-      <div className="space-y-1 max-h-72 overflow-y-auto">{children}</div>
+      {onRemove ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="p-1 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+          title="Убрать"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -91,8 +53,12 @@ export function Employees() {
     updateUser,
     updateDepartmentMembers,
     updateGroupMembers,
+    refreshData,
   } = useEmployees();
+  const canManageOrg = currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const [viewMode, setViewMode] = useState<ViewMode>('all');
+  const [profileEmployee, setProfileEmployee] = useState<User | null>(null);
+  const [createGroupDeptId, setCreateGroupDeptId] = useState<string>('');
   const [isDepartmentModalOpen, setIsDepartmentModalOpen] = useState(false);
   const [departmentEditing, setDepartmentEditing] = useState<Department | null>(null);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -104,11 +70,7 @@ export function Employees() {
   const [selectedEmployee, setSelectedEmployee] = useState<User | null>(null);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
-  const [dndError, setDndError] = useState<string | null>(null);
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  const canManageOrg = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const [activeDeptId, setActiveDeptId] = useState<string>('');
 
   const handleSaveDepartment = async (data: { name: string; description: string }) => {
     if (!currentWorkspace) return;
@@ -144,6 +106,8 @@ export function Employees() {
     name: string;
     description: string;
     memberIds: string[];
+    departmentId: string;
+    leaderId: string | null;
   }) => {
     if (!currentWorkspace) return;
     try {
@@ -151,6 +115,7 @@ export function Employees() {
         await updateGroup(groupEditing.id, {
           name: data.name,
           description: data.description,
+          leaderId: data.leaderId,
         });
         await updateGroupMembers(groupEditing.id, data.memberIds);
       } else {
@@ -159,10 +124,13 @@ export function Employees() {
           description: data.description,
           memberIds: data.memberIds,
           workspaceId: currentWorkspace.id,
+          departmentId: data.departmentId,
+          leaderId: data.leaderId,
         });
       }
       setIsGroupModalOpen(false);
       setGroupEditing(null);
+      setCreateGroupDeptId('');
     } catch (e: unknown) {
       window.alert(e instanceof Error ? e.message : 'Не удалось сохранить группу');
     }
@@ -223,6 +191,15 @@ export function Employees() {
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
   const departmentById = useMemo(() => new Map(departments.map((d) => [d.id, d])), [departments]);
 
+  const currentDept =
+    workspaceDepartments.find((d) => d.id === activeDeptId) ?? workspaceDepartments[0] ?? null;
+  const currentDeptMembers = currentDept
+    ? users.filter((u) => u.departmentId === currentDept.id)
+    : [];
+  const currentDeptGroups = currentDept
+    ? workspaceGroups.filter((g) => g.departmentId === currentDept.id)
+    : [];
+
   const getUserDepartment = (userId: string) => {
     const user = users.find((u) => u.id === userId);
     return user?.departmentId
@@ -258,59 +235,22 @@ export function Employees() {
     return users.filter((u) => u.departmentId === deptId).length;
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-    setDndError(null);
-    const over = event.over;
-    const active = event.active;
-    if (!over) return;
-
-    const userId = String(active.id);
-    const user = users.find((u) => u.id === userId);
-    if (!user) return;
-
-    const data: any = active.data?.current;
-    const from = data?.from as { kind: 'dept' | 'group' | 'none'; id?: string } | undefined;
-    const overId = String(over.id);
-
+  const removeFromDepartment = async (user: User) => {
+    if (!window.confirm(`Убрать «${user.name}» из отдела?`)) return;
     try {
-      if (overId.startsWith('dept:')) {
-        const deptId = overId.replace('dept:', '');
-        const nextDeptId = deptId === 'none' ? undefined : deptId;
-        if (user.departmentId === nextDeptId) return;
-        await updateUser(user.id, { departmentId: nextDeptId });
-        return;
-      }
+      await updateUser(user.id, { departmentId: undefined });
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Не удалось убрать сотрудника из отдела');
+    }
+  };
 
-      if (overId.startsWith('group:')) {
-        const targetGroupId = overId.replace('group:', '');
-        const currentIds = user.groupIds || [];
-        const fromGroupId = from?.kind === 'group' ? from.id : undefined;
-
-        let nextIds = currentIds;
-
-        if (targetGroupId === 'none') {
-          // Removing from the source group. If dragged from "no group", nothing to do.
-          if (!fromGroupId) return;
-          nextIds = currentIds.filter((id) => id !== fromGroupId);
-        } else {
-          // move if dragged from a group; otherwise just add
-          nextIds = currentIds;
-          if (!nextIds.includes(targetGroupId)) nextIds = [...nextIds, targetGroupId];
-          if (fromGroupId && fromGroupId !== targetGroupId) {
-            nextIds = nextIds.filter((id) => id !== fromGroupId);
-          }
-        }
-
-        // No-op
-        const a = [...currentIds].sort().join(',');
-        const b = [...nextIds].sort().join(',');
-        if (a === b) return;
-
-        await updateUser(user.id, { groupIds: nextIds });
-        return;
-      }
-    } catch (e: any) {
-      setDndError(e?.message || 'Не удалось переместить сотрудника');
+  const removeFromGroup = async (user: User, groupId: string) => {
+    if (!window.confirm(`Убрать «${user.name}» из направления?`)) return;
+    try {
+      const nextIds = (user.groupIds || []).filter((id) => id !== groupId);
+      await updateUser(user.id, { groupIds: nextIds });
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Не удалось убрать сотрудника из направления');
     }
   };
 
@@ -333,6 +273,16 @@ export function Employees() {
       </div>
 
       <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setViewMode('catalog')}
+          className={`px-4 py-2 text-sm rounded transition-colors ${
+            viewMode === 'catalog'
+              ? 'bg-brand-light text-brand'
+              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          Каталог договоров
+        </button>
         <button
           onClick={() => setViewMode('all')}
           className={`px-4 py-2 text-sm rounded transition-colors ${
@@ -361,15 +311,19 @@ export function Employees() {
               : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
           }`}
         >
-          Группы
+          Направления
         </button>
       </div>
 
-      {dndError && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {dndError}
-        </div>
-      )}
+      {viewMode === 'catalog' && currentWorkspace ? (
+        <EmployeeCatalogPanel
+          workspaceId={currentWorkspace.id}
+          departments={workspaceDepartments}
+          groups={workspaceGroups}
+          canManage={canManageOrg}
+          onOpenProfile={(user) => setProfileEmployee(user)}
+        />
+      ) : null}
 
       {viewMode === 'all' && (
         <div className="bg-white rounded-lg border border-slate-200">
@@ -425,12 +379,25 @@ export function Employees() {
                     <span className="text-sm text-slate-600">{getUserGroups(user.id)}</span>
                   </td>
                   <td className="px-6 py-4">
-                    <button
-                      onClick={() => openEditEmployee(user)}
-                      className="p-1.5 text-slate-600 hover:text-brand hover:bg-brand-light rounded transition-colors"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
+                    <div className="flex gap-1">
+                      {canManageOrg ? (
+                        <button
+                          type="button"
+                          onClick={() => setProfileEmployee(user)}
+                          className="p-1.5 text-slate-600 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                          title="Карточка"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      ) : null}
+                      <button
+                        onClick={() => openEditEmployee(user)}
+                        className="p-1.5 text-slate-600 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                        title="Оргструктура"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -441,8 +408,23 @@ export function Employees() {
 
       {viewMode === 'departments' && (
         <div>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-medium text-slate-900">Отделы</h2>
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-medium text-slate-900">Отдел</h2>
+              {workspaceDepartments.length > 0 ? (
+                <select
+                  value={currentDept?.id ?? ''}
+                  onChange={(e) => setActiveDeptId(e.target.value)}
+                  className="px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-brand min-w-[200px]"
+                >
+                  {workspaceDepartments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
             {canManageOrg ? (
               <button
                 type="button"
@@ -457,36 +439,27 @@ export function Employees() {
               </button>
             ) : null}
           </div>
-          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <DroppableBox id="dept:none" title="Без отдела" subtitle="Перетащите сюда, чтобы убрать отдел">
-                {users
-                  .filter((u) => !u.departmentId)
-                  .map((u) => (
-                    <DraggableEmployee key={u.id} user={u} from={{ kind: 'dept', id: 'none' }} />
-                  ))}
-              </DroppableBox>
 
-              {workspaceDepartments.map((dept) => (
-                <div key={dept.id} className="relative">
-                  <DroppableBox id={`dept:${dept.id}`} title={dept.name} subtitle={dept.description}>
-                    {users
-                      .filter((u) => u.departmentId === dept.id)
-                      .map((u) => (
-                        <DraggableEmployee key={u.id} user={u} from={{ kind: 'dept', id: dept.id }} />
-                      ))}
-                    {users.filter((u) => u.departmentId === dept.id).length === 0 && (
-                      <div className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded">
-                        Перетащите сотрудника сюда
-                      </div>
-                    )}
-                  </DroppableBox>
+          {!currentDept ? (
+            <div className="bg-white rounded-lg border border-slate-200 p-10 text-center text-sm text-slate-500">
+              Отделы ещё не созданы
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-white rounded-lg border border-slate-200 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-medium text-slate-900 truncate">{currentDept.name}</h3>
+                    {currentDept.description ? (
+                      <p className="text-sm text-slate-600 mt-1">{currentDept.description}</p>
+                    ) : null}
+                  </div>
                   {canManageOrg ? (
-                    <div className="absolute top-3 right-3 flex items-center gap-0.5">
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
                       <button
                         type="button"
                         onClick={() => {
-                          setDepartmentEditing(dept);
+                          setDepartmentEditing(currentDept);
                           setIsDepartmentModalOpen(true);
                         }}
                         className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
@@ -496,115 +469,264 @@ export function Employees() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => void confirmDeleteDepartment(dept)}
+                        onClick={() => void confirmDeleteDepartment(currentDept)}
                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                         title="Удалить отдел"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => openManageDepartmentMembers(dept)}
-                        className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
-                        title="Управление участниками"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </button>
                     </div>
                   ) : null}
                 </div>
-              ))}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                <div className="bg-white rounded-lg border border-slate-200 p-5">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h4 className="text-sm font-medium text-slate-700">
+                      Сотрудники отдела
+                      <span className="ml-1 text-slate-400">({currentDeptMembers.length})</span>
+                    </h4>
+                    {canManageOrg ? (
+                      <button
+                        type="button"
+                        onClick={() => openManageDepartmentMembers(currentDept)}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-brand hover:bg-brand-light rounded transition-colors"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Добавить в отдел
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="space-y-1 max-h-[28rem] overflow-y-auto">
+                    {currentDeptMembers.length === 0 ? (
+                      <div className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded">
+                        В отделе пока нет сотрудников
+                      </div>
+                    ) : (
+                      currentDeptMembers.map((u) => (
+                        <MemberRow
+                          key={u.id}
+                          user={u}
+                          onRemove={canManageOrg ? () => void removeFromDepartment(u) : undefined}
+                        />
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-medium text-slate-700">Направления / продукты</h4>
+                    {canManageOrg ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGroupEditing(null);
+                          setCreateGroupDeptId(currentDept.id);
+                          setIsGroupModalOpen(true);
+                        }}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-brand hover:bg-brand-light rounded transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Добавить направление
+                      </button>
+                    ) : null}
+                  </div>
+                  {currentDeptGroups.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-2 text-center">Нет направлений в этом отделе</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {currentDeptGroups.map((group) => {
+                      const members = users.filter((u) => (u.groupIds || []).includes(group.id));
+                      return (
+                        <div key={group.id} className="bg-white rounded-lg border border-slate-200 p-4">
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="min-w-0">
+                              <h5 className="font-medium text-slate-900 truncate">{group.name}</h5>
+                              {group.description ? (
+                                <p className="text-xs text-slate-500 mt-0.5">{group.description}</p>
+                              ) : null}
+                              <p className="text-xs text-slate-600 mt-0.5">
+                                Руководитель:{' '}
+                                <span className={group.leader ? 'font-medium text-slate-800' : 'text-slate-400'}>
+                                  {group.leader?.name ?? 'не назначен'}
+                                </span>
+                              </p>
+                            </div>
+                            {canManageOrg ? (
+                              <div className="flex items-center gap-0.5 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => openManageGroupMembers(group)}
+                                  className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                                  title="Добавить в направление"
+                                >
+                                  <UserPlus className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setGroupEditing(group);
+                                    setCreateGroupDeptId(currentDept.id);
+                                    setIsGroupModalOpen(true);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                                  title="Редактировать направление"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void confirmDeleteGroup(group)}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                  title="Удалить направление"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="space-y-1 max-h-60 overflow-y-auto">
+                            {members.length === 0 ? (
+                              <div className="text-sm text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded">
+                                Нет участников
+                              </div>
+                            ) : (
+                              members.map((u) => (
+                                <MemberRow
+                                  key={u.id}
+                                  user={u}
+                                  onRemove={canManageOrg ? () => void removeFromGroup(u, group.id) : undefined}
+                                />
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </DndContext>
+          )}
         </div>
       )}
 
       {viewMode === 'groups' && (
         <div>
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-medium text-slate-900">Группы</h2>
-            {canManageOrg ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setGroupEditing(null);
-                  setIsGroupModalOpen(true);
-                }}
-                className="flex items-center gap-2 px-3 py-2 text-sm bg-white text-slate-700 border border-slate-200 rounded hover:bg-slate-50 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Создать группу
-              </button>
-            ) : null}
+            <div>
+              <h2 className="text-lg font-medium text-slate-900">Направления / продукты</h2>
+              <p className="text-sm text-slate-600 mt-1">Сгруппировано по отделам</p>
+            </div>
           </div>
-          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <DroppableBox
-                id="group:none"
-                title="Без группы"
-                subtitle="Перетаскивайте отсюда в группы или сюда из группы, чтобы убрать"
-              >
-                {users
-                  .filter((u) => !u.groupIds || u.groupIds.length === 0)
-                  .map((u) => (
-                    <DraggableEmployee key={u.id} user={u} from={{ kind: 'none' }} />
-                  ))}
-                {users.filter((u) => !u.groupIds || u.groupIds.length === 0).length === 0 && (
-                  <div className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded">
-                    Все сотрудники уже в группах
-                  </div>
-                )}
-              </DroppableBox>
-
-              {workspaceGroups.map((group) => (
-                <div key={group.id} className="relative">
-                  <DroppableBox id={`group:${group.id}`} title={group.name} subtitle={group.description}>
-                    {users
-                      .filter((u) => (u.groupIds || []).includes(group.id))
-                      .map((u) => (
-                        <DraggableEmployee key={u.id} user={u} from={{ kind: 'group', id: group.id }} />
-                      ))}
-                    {users.filter((u) => (u.groupIds || []).includes(group.id)).length === 0 && (
-                      <div className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded">
-                        Перетащите сотрудника сюда
-                      </div>
-                    )}
-                  </DroppableBox>
-                  {canManageOrg ? (
-                    <div className="absolute top-3 right-3 flex items-center gap-0.5">
+          <div className="space-y-8">
+            {workspaceDepartments.map((dept) => {
+              const deptGroups = workspaceGroups.filter((g) => g.departmentId === dept.id);
+              return (
+                <div key={dept.id}>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h3 className="text-base font-medium text-slate-900">{dept.name}</h3>
+                    {canManageOrg ? (
                       <button
                         type="button"
                         onClick={() => {
-                          setGroupEditing(group);
+                          setGroupEditing(null);
+                          setCreateGroupDeptId(dept.id);
                           setIsGroupModalOpen(true);
                         }}
-                        className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
-                        title="Редактировать группу"
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-brand hover:bg-brand-light rounded transition-colors"
                       >
-                        <Edit className="w-4 h-4" />
+                        <Plus className="w-3.5 h-3.5" />
+                        Добавить направление
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void confirmDeleteGroup(group)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Удалить группу"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openManageGroupMembers(group)}
-                        className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
-                        title="Управление участниками"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </button>
+                    ) : null}
+                  </div>
+                  {deptGroups.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-2">Нет направлений в этом отделе</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {deptGroups.map((group) => {
+                        const members = users.filter((u) => (u.groupIds || []).includes(group.id));
+                        return (
+                          <div key={group.id} className="bg-white rounded-lg border border-slate-200 p-4">
+                            <div className="flex items-start justify-between gap-2 mb-3">
+                              <div className="min-w-0">
+                                <h5 className="font-medium text-slate-900 truncate">{group.name}</h5>
+                                {group.description ? (
+                                  <p className="text-xs text-slate-500 mt-0.5">{group.description}</p>
+                                ) : null}
+                                <p className="text-xs text-slate-600 mt-0.5">
+                                  Руководитель:{' '}
+                                  <span className={group.leader ? 'font-medium text-slate-800' : 'text-slate-400'}>
+                                    {group.leader?.name ?? 'не назначен'}
+                                  </span>
+                                </p>
+                              </div>
+                              {canManageOrg ? (
+                                <div className="flex items-center gap-0.5 flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => openManageGroupMembers(group)}
+                                    className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                                    title="Добавить в направление"
+                                  >
+                                    <UserPlus className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setGroupEditing(group);
+                                      setCreateGroupDeptId(dept.id);
+                                      setIsGroupModalOpen(true);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                                    title="Редактировать направление"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void confirmDeleteGroup(group)}
+                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                    title="Удалить направление"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="space-y-1 max-h-60 overflow-y-auto">
+                              {members.length === 0 ? (
+                                <div className="text-sm text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded">
+                                  Нет участников
+                                </div>
+                              ) : (
+                                members.map((u) => (
+                                  <MemberRow
+                                    key={u.id}
+                                    user={u}
+                                    onRemove={canManageOrg ? () => void removeFromGroup(u, group.id) : undefined}
+                                  />
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ) : null}
+                  )}
                 </div>
-              ))}
-            </div>
-          </DndContext>
+              );
+            })}
+            {workspaceDepartments.length === 0 ? (
+              <div className="bg-white rounded-lg border border-slate-200 p-10 text-center text-sm text-slate-500">
+                Сначала создайте отдел
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
 
@@ -621,9 +743,12 @@ export function Employees() {
       <CreateGroupModal
         isOpen={isGroupModalOpen}
         editingGroup={groupEditing}
+        departments={workspaceDepartments}
+        defaultDepartmentId={createGroupDeptId}
         onClose={() => {
           setIsGroupModalOpen(false);
           setGroupEditing(null);
+          setCreateGroupDeptId('');
         }}
         onSubmit={handleSaveGroup}
       />
@@ -662,6 +787,16 @@ export function Employees() {
         onSubmit={handleManageGroupMembers}
         group={selectedGroup}
       />
+
+      {currentWorkspace ? (
+        <EmployeeProfileModal
+          isOpen={profileEmployee != null}
+          workspaceId={currentWorkspace.id}
+          employee={profileEmployee}
+          onClose={() => setProfileEmployee(null)}
+          onSaved={() => void refreshData()}
+        />
+      ) : null}
     </div>
   );
 }
