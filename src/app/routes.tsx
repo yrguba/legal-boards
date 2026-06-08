@@ -1,6 +1,8 @@
 import { createBrowserRouter, Navigate, useLocation } from 'react-router';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
+import { Register } from './pages/Register';
+import { VerifyEmail } from './pages/VerifyEmail';
 import { Boards } from './pages/Boards';
 import { Board } from './pages/Board';
 import { TaskRoute } from './pages/TaskRoute';
@@ -29,6 +31,14 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     element: <Login />,
+  },
+  {
+    path: '/register',
+    element: <Register />,
+  },
+  {
+    path: '/verify-email',
+    element: <VerifyEmail />,
   },
   {
     path: '/',

@@ -1,17 +1,21 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { Briefcase } from 'lucide-react';
-import { ApiError } from '../services/api';
+import { ApiError, authApi } from '../services/api';
 
 export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const { login, isAuthenticated } = useApp();
   const navigate = useNavigate();
-  const location = useLocation() as any;
+  const location = useLocation() as { state?: { from?: string } };
   const from = location?.state?.from || '/';
 
   useEffect(() => {
@@ -20,10 +24,19 @@ export function Login() {
     }
   }, [isAuthenticated, navigate, from]);
 
+  useEffect(() => {
+    authApi
+      .getRegistrationConfig()
+      .then((cfg) => setRegistrationEnabled(cfg.enabled))
+      .catch(() => setRegistrationEnabled(false));
+  }, []);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setInfo(null);
+    setUnverifiedEmail(null);
     try {
       await login(email, password);
       navigate(from);
@@ -31,6 +44,9 @@ export function Login() {
       console.error('Login failed:', error);
       if (error instanceof ApiError && error.code === 'CLIENT_USE_LEXPRO') {
         setError(error.message);
+      } else if (error instanceof ApiError && error.code === 'EMAIL_NOT_VERIFIED') {
+        setError('Подтвердите email перед входом');
+        setUnverifiedEmail(email.trim());
       } else if (error instanceof ApiError && error.status === 401) {
         setError('Неверный email или пароль');
       } else if (error instanceof ApiError) {
@@ -40,6 +56,20 @@ export function Login() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!unverifiedEmail) return;
+    setResending(true);
+    setError(null);
+    try {
+      const result = await authApi.resendVerification(unverifiedEmail);
+      setInfo(result.message);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отправить письмо');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -61,7 +91,24 @@ export function Login() {
             </div>
           ) : null}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {info ? (
+            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+              {info}
+            </div>
+          ) : null}
+
+          {unverifiedEmail ? (
+            <button
+              type="button"
+              onClick={() => void handleResend()}
+              disabled={resending}
+              className="mb-4 w-full border border-slate-200 text-slate-700 py-2 px-4 rounded hover:bg-slate-50 transition-colors disabled:opacity-50 text-sm"
+            >
+              {resending ? 'Отправка…' : 'Отправить письмо подтверждения повторно'}
+            </button>
+          ) : null}
+
+          <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
                 Email
@@ -101,9 +148,18 @@ export function Login() {
             </button>
           </form>
 
-          <p className="text-xs text-slate-500 text-center mt-6">
-            Используйте ваши реальные учетные данные
-          </p>
+          {registrationEnabled ? (
+            <p className="text-sm text-slate-600 text-center mt-6">
+              Нет аккаунта?{' '}
+              <Link to="/register" className="text-brand hover:underline">
+                Зарегистрироваться
+              </Link>
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500 text-center mt-6">
+              Используйте ваши учетные данные
+            </p>
+          )}
         </div>
       </div>
     </div>

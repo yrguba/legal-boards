@@ -46,6 +46,10 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
 
 // Auth API
 export const authApi = {
+  async getRegistrationConfig() {
+    return fetchApi<{ enabled: boolean }>('/auth/registration-config');
+  },
+
   async login(email: string, password: string) {
     const data = await fetchApi<{ token: string; user: any }>('/auth/login', {
       method: 'POST',
@@ -55,12 +59,34 @@ export const authApi = {
     return data;
   },
 
-  async register(email: string, password: string, name: string, role: string = 'member') {
-    const data = await fetchApi<{ token: string; user: any }>('/auth/register', {
+  async register(email: string, password: string, name: string) {
+    return fetchApi<{
+      message: string;
+      email: string;
+      requiresVerification: boolean;
+    }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name, role }),
+      body: JSON.stringify({ email, password, name }),
     });
-    localStorage.setItem('auth_token', data.token);
+  },
+
+  async resendVerification(email: string) {
+    return fetchApi<{ message: string }>('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async verifyEmail(token: string) {
+    const data = await fetchApi<{
+      message: string;
+      token?: string;
+      user?: any;
+      alreadyVerified?: boolean;
+    }>(`/auth/verify-email?token=${encodeURIComponent(token)}`);
+    if (data.token) {
+      localStorage.setItem('auth_token', data.token);
+    }
     return data;
   },
 

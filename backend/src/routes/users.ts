@@ -575,6 +575,7 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
           password: hashedPassword,
           role,
           departmentId: departmentId || null,
+          emailVerified: true,
           profileFields: { fullName: name } as Prisma.InputJsonValue,
         },
         select: {

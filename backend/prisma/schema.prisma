@@ -80,6 +80,10 @@ model User {
   role         String         @default("member")
   avatar       String?
   departmentId String?
+  /// Подтверждён ли email (самостоятельная регистрация)
+  emailVerified Boolean       @default(false)
+  emailVerificationToken String? @unique
+  emailVerificationExpiresAt DateTime?
   /// Значения настраиваемых полей профиля (ключ → значение)
   profileFields Json          @default("{}")
   createdAt    DateTime       @default(now())
