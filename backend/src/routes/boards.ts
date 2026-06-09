@@ -6,6 +6,7 @@ import { workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
 import { assertColumnApprovalsComplete } from '../utils/boardApprovals';
 import { boardCodeValidationError, normalizeNewBoardCode } from '../utils/boardCodes';
 import { resolveBoardRef } from '../utils/boardResolve';
+import { transferTasks } from '../utils/transferTasks';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -570,6 +571,88 @@ router.post('/:boardId/types/:typeId/move-tasks', requireStaffUser, async (req: 
     res.status(500).json({ error: 'Ошибка переноса задач' });
   }
 });
+
+router.post(
+  '/:boardId/transfer-tasks',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  async (req: AuthRequest, res) => {
+    try {
+      const sourceBoard = await resolveBoardRef(prisma, req.params.boardId);
+      if (!sourceBoard) {
+        return res.status(404).json({ error: 'Исходная доска не найдена' });
+      }
+
+      const {
+        targetBoardId,
+        targetColumnId,
+        taskIds,
+        typeMapping,
+        defaultTargetTypeId,
+        force,
+      } = req.body as {
+        targetBoardId?: string;
+        targetColumnId?: string;
+        taskIds?: string[];
+        typeMapping?: Record<string, string>;
+        defaultTargetTypeId?: string;
+        force?: boolean;
+      };
+
+      if (!targetBoardId) {
+        return res.status(400).json({ error: 'targetBoardId обязателен' });
+      }
+      if (!Array.isArray(taskIds) || taskIds.length === 0) {
+        return res.status(400).json({ error: 'taskIds обязателен (непустой массив)' });
+      }
+
+      const targetBoard = await resolveBoardRef(prisma, targetBoardId);
+      if (!targetBoard) {
+        return res.status(404).json({ error: 'Целевая доска не найдена' });
+      }
+
+      const [sourceAccess, targetAccess] = await Promise.all([
+        assertWorkspaceMember(prisma, sourceBoard.workspaceId, req.userId!, req.userRole),
+        assertWorkspaceMember(prisma, targetBoard.workspaceId, req.userId!, req.userRole),
+      ]);
+      if (!sourceAccess || !targetAccess) {
+        return res.status(403).json({ error: 'Нет доступа к одному из пространств' });
+      }
+
+      const result = await transferTasks(prisma, {
+        sourceBoardId: sourceBoard.id,
+        targetBoardId: targetBoard.id,
+        targetColumnId,
+        taskIds,
+        typeMapping,
+        defaultTargetTypeId,
+        force: Boolean(force),
+        actorUserId: req.userId!,
+      });
+
+      res.json(result);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'SAME_BOARD') {
+        return res.status(400).json({ error: 'Нельзя перенести задачи на ту же доску' });
+      }
+      if (msg === 'SOURCE_BOARD_NOT_FOUND') {
+        return res.status(404).json({ error: 'Исходная доска не найдена' });
+      }
+      if (msg === 'TARGET_BOARD_NOT_FOUND') {
+        return res.status(404).json({ error: 'Целевая доска не найдена' });
+      }
+      if (msg === 'TARGET_COLUMN_NOT_FOUND') {
+        return res.status(400).json({ error: 'Целевая колонка не найдена' });
+      }
+      if (msg === 'TARGET_TYPES_EMPTY') {
+        return res.status(400).json({ error: 'На целевой доске нет типов задач' });
+      }
+      console.error('Transfer tasks error:', error);
+      res.status(500).json({ error: 'Ошибка переноса задач' });
+    }
+  },
+);
 
 router.delete('/:id', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
   try {

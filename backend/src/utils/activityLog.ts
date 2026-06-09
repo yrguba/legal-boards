@@ -6,6 +6,7 @@ export const ACTIVITY_EVENT_TYPES = {
   APPROVAL_DECIDED: 'task.approval_decided',
   COLUMN_ACTION_COMPLETED: 'task.column_action_completed',
   LEGACY_STATUS: 'legacy.status_event',
+  TRANSFERRED: 'task_transferred',
 } as const;
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -90,6 +91,15 @@ function formatActivitySummary(eventType: string, payload: Record<string, unknow
     }
     case ACTIVITY_EVENT_TYPES.LEGACY_STATUS:
       return String(payload.message ?? 'Изменение статуса');
+    case ACTIVITY_EVENT_TYPES.TRANSFERRED: {
+      const from = String(payload.fromBoardCode ?? payload.fromBoardId ?? '—');
+      const to = String(payload.toBoardCode ?? payload.toBoardId ?? '—');
+      const keyPart =
+        payload.oldKey && payload.newKey
+          ? ` (${payload.oldKey} → ${payload.newKey})`
+          : '';
+      return `Перенос на доску «${to}» из «${from}»${keyPart}`;
+    }
     default:
       return eventType;
   }

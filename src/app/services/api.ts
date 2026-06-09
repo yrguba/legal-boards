@@ -392,6 +392,27 @@ export const boardsApi = {
       body: JSON.stringify({ toTypeId }),
     });
   },
+
+  async transferTasks(
+    sourceBoardId: string,
+    data: {
+      targetBoardId: string;
+      targetColumnId?: string;
+      taskIds: string[];
+      typeMapping?: Record<string, string>;
+      defaultTargetTypeId?: string;
+      force?: boolean;
+    },
+  ) {
+    return fetchApi<{
+      moved: { taskId: string; oldKey: string; newKey: string; assigneeCleared?: boolean }[];
+      skipped: { taskId: string; reason: string; code?: string }[];
+      warnings: { taskId: string; code: string; message: string }[];
+    }>(`/boards/${sourceBoardId}/transfer-tasks`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 };
 
 // Tasks API

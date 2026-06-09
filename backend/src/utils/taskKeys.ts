@@ -1,4 +1,6 @@
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
+
+type DbClient = PrismaClient | Prisma.TransactionClient;
 import { resolveBoardRef } from './boardResolve';
 
 const CUID_LIKE_RE = /^c[a-z0-9]{20,}$/i;
@@ -72,7 +74,7 @@ export async function resolveTaskRef(
 }
 
 export async function nextTaskNumber(
-  prisma: PrismaClient,
+  prisma: DbClient,
   boardId: string,
 ): Promise<number> {
   const agg = await prisma.task.aggregate({

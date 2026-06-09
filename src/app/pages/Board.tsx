@@ -16,6 +16,7 @@ import {
   MoreHorizontal,
   GripVertical,
   Trash2,
+  ArrowRightLeft,
 } from 'lucide-react';
 import {
   DndContext,
@@ -32,6 +33,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CreateTaskModal } from '../components/CreateTaskModal';
+import { TransferTaskModal } from '../components/TransferTaskModal';
 import { ColumnActionTransitionModal } from '../components/ColumnActionTransitionModal';
 import { BoardSettingsModal } from '../features/board-settings/BoardSettingsModal';
 import {
@@ -291,6 +293,9 @@ export function Board() {
   } | null>(null);
   const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
   const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferNotice, setTransferNotice] = useState<string | null>(null);
 
   const canManageBoardSettings =
     currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -605,6 +610,48 @@ export function Board() {
     }
   };
 
+  const toggleTaskSelection = (taskId: string) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
+  const toggleAllFilteredTasks = () => {
+    const ids = filteredTasks.map((t) => t.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selectedTaskIds.has(id));
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of ids) next.delete(id);
+      } else {
+        for (const id of ids) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleTransferSuccess = (result: {
+    moved: { taskId: string }[];
+    skipped: { taskId: string; reason: string }[];
+    warnings: { message: string }[];
+  }) => {
+    const movedIds = new Set(result.moved.map((m) => m.taskId));
+    setTasks((prev) => prev.filter((t) => !movedIds.has(t.id)));
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      for (const id of movedIds) next.delete(id);
+      return next;
+    });
+    const parts: string[] = [];
+    if (result.moved.length) parts.push(`Перенесено: ${result.moved.length}`);
+    if (result.skipped.length) parts.push(`Пропущено: ${result.skipped.length}`);
+    if (result.warnings.length) parts.push(`Предупреждений: ${result.warnings.length}`);
+    setTransferNotice(parts.join(' · ') || 'Готово');
+  };
+
   const confirmDeleteBoard = async () => {
     if (!board) return;
     setDeleteBoardError(null);
@@ -744,6 +791,18 @@ export function Board() {
           {dragMoveError}
         </div>
       ) : null}
+      {transferNotice ? (
+        <div className="mx-6 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 flex justify-between gap-2">
+          <span>{transferNotice}</span>
+          <button
+            type="button"
+            className="text-emerald-700 hover:text-emerald-900 shrink-0"
+            onClick={() => setTransferNotice(null)}
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex-1 overflow-auto p-6">
         {viewMode === 'kanban' ? (
@@ -793,7 +852,19 @@ export function Board() {
           </DndContext>
         ) : (
           <div className="bg-white rounded-lg border border-slate-200">
-            <div className="flex items-center justify-end gap-2 px-4 py-3 border-b border-slate-200">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200">
+              {canManageBoardSettings && selectedTaskIds.size > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setTransferOpen(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 text-slate-800 rounded hover:bg-slate-50 transition-colors"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  Перенести ({selectedTaskIds.size})
+                </button>
+              ) : (
+                <span />
+              )}
               <button
                 type="button"
                 disabled={!columns[0]}
@@ -807,6 +878,20 @@ export function Board() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200">
+                  {canManageBoardSettings ? (
+                    <th className="w-10 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredTasks.length > 0 &&
+                          filteredTasks.every((t) => selectedTaskIds.has(t.id))
+                        }
+                        onChange={toggleAllFilteredTasks}
+                        className="rounded border-slate-300"
+                        aria-label="Выбрать все"
+                      />
+                    </th>
+                  ) : null}
                   <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
                     Задача
                   </th>
@@ -838,6 +923,17 @@ export function Board() {
                       key={task.id}
                       className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
                     >
+                      {canManageBoardSettings ? (
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedTaskIds.has(task.id)}
+                            onChange={() => toggleTaskSelection(task.id)}
+                            className="rounded border-slate-300"
+                            aria-label={`Выбрать ${task.title}`}
+                          />
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3">
                         <Link
                           to={taskPath(task)}
@@ -911,6 +1007,16 @@ export function Board() {
           onSubmit={handleCreateTask}
         />
       )}
+
+      {board && canManageBoardSettings ? (
+        <TransferTaskModal
+          open={transferOpen}
+          sourceBoard={board}
+          taskIds={[...selectedTaskIds]}
+          onClose={() => setTransferOpen(false)}
+          onSuccess={handleTransferSuccess}
+        />
+      ) : null}
 
       <ColumnActionTransitionModal
         open={!!columnTransition}
