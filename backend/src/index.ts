@@ -19,6 +19,7 @@ import workspaceChatRoutes from './routes/workspaceChats';
 import calendarEventRoutes from './routes/calendarEvents';
 import knowledgeArticleRoutes from './routes/knowledgeArticles';
 import reportRoutes from './routes/reports';
+import conferenceRoutes from './routes/conferences';
 import { initRealtime } from './realtime';
 import { setupSwagger } from './swagger/setup';
 
@@ -54,6 +55,7 @@ app.use('/api/workspace-chats', workspaceChatRoutes);
 app.use('/api/calendar-events', calendarEventRoutes);
 app.use('/api/knowledge', knowledgeArticleRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/conferences', conferenceRoutes);
 
 setupSwagger(app);
 

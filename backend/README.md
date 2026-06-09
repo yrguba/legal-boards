@@ -125,10 +125,23 @@ pnpm start
 
 ## WebSocket
 
-WebSocket сервер работает на том же порту, что и HTTP сервер, путь **`/ws`** (например `ws://localhost:5004/ws`). События:
-- `notification` - Новое уведомление
-- `chat_message` - Новое сообщение в чате задачи
-- `document_uploaded` - Загружен новый документ
+WebSocket сервер работает на том же порту, что и HTTP сервер, путь **`/ws`** (например `ws://localhost:5004/ws`).
+
+Полная документация: **[docs/WEBSOCKET.md](../docs/WEBSOCKET.md)** — подключение, переменные `VITE_WS_URL` / `VITE_API_ORIGIN`, nginx, все типы событий и примеры на клиенте.
+
+Кратко, типы событий (`type` в JSON):
+
+| Событие | Назначение |
+|---------|------------|
+| `notification` | Персональное уведомление (`userId` + объект `notification`) |
+| `chat_message` | Сообщение в чате задачи |
+| `task_status_history` | История статуса для клиента LEXPRO |
+| `task_conclusion_updated` | Обновлено заключение по задаче |
+| `task_approval_updated` | Решение согласования |
+| `task_column_action_updated` | Выполнено действие колонки |
+| `document_uploaded` | Загружен документ в пространство |
+
+Доставка — broadcast всем подключённым клиентам; фильтрация на стороне браузера.
 
 ## Groq (ассистент в чате задачи)
 

@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
 import { broadcast } from '../realtime';
+import { isLexClientsTabEnabled } from '../utils/lexClients';
 import {
   assertUserGroupsMatchDepartment,
   canManageEmployeeProfile,
@@ -18,6 +19,10 @@ import {
 
 const router = Router();
 const prisma = new PrismaClient();
+
+router.get('/lex-clients/config', (_req, res) => {
+  res.json({ enabled: isLexClientsTabEnabled() });
+});
 
 router.use(authenticate);
 router.use(requireStaffUser);
@@ -133,6 +138,9 @@ function shapeUserRow(
 
 router.get('/workspace/:workspaceId/clients', async (req: AuthRequest, res) => {
   try {
+    if (!isLexClientsTabEnabled()) {
+      return res.status(403).json({ error: 'Раздел «Клиенты LEXPRO» отключён' });
+    }
     if (!req.userId) {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
@@ -197,6 +205,9 @@ router.get('/workspace/:workspaceId/clients', async (req: AuthRequest, res) => {
 /** Каталог LEXPRO: клиенты, запросы (задачи) и взаимодействия по пространству; query: q, minTasks, maxTasks, typeId */
 router.get('/workspace/:workspaceId/lex-directory', async (req: AuthRequest, res) => {
   try {
+    if (!isLexClientsTabEnabled()) {
+      return res.status(403).json({ error: 'Раздел «Клиенты LEXPRO» отключён' });
+    }
     if (!req.userId) {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }

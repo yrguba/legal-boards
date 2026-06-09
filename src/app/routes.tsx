@@ -15,6 +15,9 @@ import { Workspaces } from './pages/Workspaces';
 import { Knowledge } from './pages/Knowledge';
 import { LexClients } from './pages/LexClients';
 import { Analytics } from './pages/Analytics';
+import { Conferences } from './pages/Conferences';
+import { ConferenceRoom } from './pages/ConferenceRoom';
+import { ConferenceJoin } from './pages/ConferenceJoin';
 import { useApp } from './store/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -39,6 +42,10 @@ export const router = createBrowserRouter([
   {
     path: '/verify-email',
     element: <VerifyEmail />,
+  },
+  {
+    path: '/conferences/join/:shareToken',
+    element: <ConferenceJoin />,
   },
   {
     path: '/',
@@ -75,6 +82,14 @@ export const router = createBrowserRouter([
       {
         path: 'calendar',
         element: <Calendar />,
+      },
+      {
+        path: 'conferences',
+        element: <Conferences />,
+      },
+      {
+        path: 'conferences/:id',
+        element: <ConferenceRoom />,
       },
       {
         path: 'knowledge/:articleId',

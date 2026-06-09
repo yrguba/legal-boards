@@ -151,6 +151,12 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
                         onClose();
                         return;
                       }
+
+                      if (notification.type === 'conference_invite') {
+                        navigate(`/conferences/${notification.relatedId}`);
+                        onClose();
+                        return;
+                      }
                     }
 
                     onClose();

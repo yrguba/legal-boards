@@ -13,6 +13,10 @@ export function isConsoleEmailMode(): boolean {
   return raw === 'true' || raw === '1' || raw === 'yes';
 }
 
+export function isEmailConfigured(): boolean {
+  return getResendConfig() !== null;
+}
+
 /** Отправка через HTTPS (обход проблем Node fetch / DNS на части окружений). */
 function sendViaHttps(
   apiKey: string,

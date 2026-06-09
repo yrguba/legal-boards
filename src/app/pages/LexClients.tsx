@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { FileSearch } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { usersApi } from '../services/api';
+import { useLexClientsConfig } from '../features/lexClients/useLexClientsConfig';
 import { CLIENT_INTERACTION_KINDS } from './task/constants';
 import {
   Dialog,
@@ -43,6 +44,7 @@ function kindLabel(kind: string) {
 
 export function LexClients() {
   const { currentWorkspace, currentUser } = useApp();
+  const { enabled: lexClientsEnabled, loading: configLoading } = useLexClientsConfig();
   const canManage =
     !!currentWorkspace &&
     (currentWorkspace.isOwner || currentUser?.role === 'admin' || currentUser?.role === 'manager');
@@ -125,6 +127,21 @@ export function LexClients() {
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
   }, [requestHistoryClient]);
+
+  if (configLoading) {
+    return <p className="p-6 text-sm text-slate-500">Загрузка…</p>;
+  }
+
+  if (!lexClientsEnabled) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-semibold text-slate-900">Клиенты LEXPRO</h1>
+        <p className="mt-3 text-sm text-slate-600">
+          Раздел отключён (LEXPRO_CLIENTS_ENABLED=false).
+        </p>
+      </div>
+    );
+  }
 
   if (!canManage) {
     return (
