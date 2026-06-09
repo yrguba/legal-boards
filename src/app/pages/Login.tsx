@@ -38,8 +38,8 @@ export function Login() {
     setInfo(null);
     setUnverifiedEmail(null);
     try {
-      await login(email, password);
-      navigate(from);
+      const user = await login(email, password);
+      navigate(user.mustChangePassword ? '/change-password' : from);
     } catch (error) {
       console.error('Login failed:', error);
       if (error instanceof ApiError && error.code === 'CLIENT_USE_LEXPRO') {

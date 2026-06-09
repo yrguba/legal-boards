@@ -94,6 +94,13 @@ export const authApi = {
     return fetchApi<{ user: any }>('/auth/verify', { method: 'POST' });
   },
 
+  async changePassword(data: { currentPassword?: string; newPassword: string }) {
+    return fetchApi<{ user: any; message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
   logout() {
     localStorage.removeItem('auth_token');
   },
@@ -181,6 +188,12 @@ export const usersApi = {
     return fetchApi<any>(`/users/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  },
+
+  async resetPassword(id: string) {
+    return fetchApi<{ message: string; initialPassword: string }>(`/users/${id}/reset-password`, {
+      method: 'POST',
     });
   },
 

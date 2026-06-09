@@ -563,11 +563,13 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
 
-    const plainPassword: string =
-      typeof password === 'string' && password.trim()
-        ? password.trim()
-        : Math.random().toString(36).slice(2, 10);
+    const adminProvidedPassword =
+      typeof password === 'string' && password.trim().length > 0;
+    const plainPassword: string = adminProvidedPassword
+      ? password.trim()
+      : Math.random().toString(36).slice(2, 10);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
+    const mustChangePassword = !adminProvidedPassword;
 
     const gids: string[] = Array.isArray(groupIds) ? groupIds : [];
     const groupGate = await assertUserGroupsMatchDepartment(
@@ -587,6 +589,7 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
           role,
           departmentId: departmentId || null,
           emailVerified: true,
+          mustChangePassword,
           profileFields: { fullName: name } as Prisma.InputJsonValue,
         },
         select: {
@@ -681,6 +684,38 @@ router.get('/', async (_req: AuthRequest, res) => {
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ error: 'Ошибка получения пользователей' });
+  }
+});
+
+router.post('/:id/reset-password', authorize('admin'), async (req: AuthRequest, res) => {
+  try {
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, email: true, name: true },
+    });
+    if (!target) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    const plainPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    await prisma.user.update({
+      where: { id: target.id },
+      data: {
+        password: hashedPassword,
+        mustChangePassword: true,
+      },
+    });
+
+    res.json({
+      message: `Пароль сброшен для ${target.name}`,
+      initialPassword: plainPassword,
+      mustChangePassword: true,
+    });
+  } catch (error) {
+    console.error('Reset user password error:', error);
+    res.status(500).json({ error: 'Ошибка сброса пароля' });
   }
 });
 

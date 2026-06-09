@@ -11,6 +11,7 @@ export interface User {
   departmentId?: string;
   groupIds?: string[];
   profileFields?: Record<string, string | null | undefined>;
+  mustChangePassword?: boolean;
 }
 
 export type ProfileFieldMask = 'passport' | 'departmentCode' | 'snils' | 'phone' | 'digits';

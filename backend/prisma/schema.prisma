@@ -84,6 +84,8 @@ model User {
   emailVerified Boolean       @default(false)
   emailVerificationToken String? @unique
   emailVerificationExpiresAt DateTime?
+  /// Требовать смену пароля при следующем входе (временный пароль от администратора)
+  mustChangePassword Boolean  @default(false)
   /// Значения настраиваемых полей профиля (ключ → значение)
   profileFields Json          @default("{}")
   createdAt    DateTime       @default(now())

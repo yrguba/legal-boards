@@ -18,6 +18,7 @@ import { Analytics } from './pages/Analytics';
 import { Conferences } from './pages/Conferences';
 import { ConferenceRoom } from './pages/ConferenceRoom';
 import { ConferenceJoin } from './pages/ConferenceJoin';
+import { ChangePassword } from './pages/ChangePassword';
 import { useApp } from './store/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -28,6 +29,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   ) : (
     <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
   );
+}
+
+function AppLayout() {
+  const { currentUser } = useApp();
+  if (currentUser?.mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
+  }
+  return <Layout />;
 }
 
 export const router = createBrowserRouter([
@@ -48,10 +57,18 @@ export const router = createBrowserRouter([
     element: <ConferenceJoin />,
   },
   {
+    path: '/change-password',
+    element: (
+      <ProtectedRoute>
+        <ChangePassword />
+      </ProtectedRoute>
+    ),
+  },
+  {
     path: '/',
     element: (
       <ProtectedRoute>
-        <Layout />
+        <AppLayout />
       </ProtectedRoute>
     ),
     children: [

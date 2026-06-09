@@ -1,13 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useEmployees } from '../store/EmployeesContext';
-import { Plus, UserPlus, Edit, Settings, Trash2, X } from 'lucide-react';
+import { Plus, UserPlus, Edit, Settings, Trash2, X, KeyRound } from 'lucide-react';
 import { CreateDepartmentModal } from '../components/CreateDepartmentModal';
 import { CreateGroupModal } from '../components/CreateGroupModal';
 import { CreateEmployeeModal } from '../components/CreateEmployeeModal';
 import { EditEmployeeModal } from '../components/EditEmployeeModal';
 import { EmployeeCatalogPanel } from '../components/EmployeeCatalogPanel';
 import { EmployeeProfileModal } from '../components/EmployeeProfileModal';
+import { ResetPasswordModal } from '../components/ResetPasswordModal';
 import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMembersModal';
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
 import type { User, UserRole, Department, Group } from '../types';
@@ -56,6 +57,7 @@ export function Employees() {
     refreshData,
   } = useEmployees();
   const canManageOrg = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const isAdmin = currentUser?.role === 'admin';
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [profileEmployee, setProfileEmployee] = useState<User | null>(null);
   const [createGroupDeptId, setCreateGroupDeptId] = useState<string>('');
@@ -71,6 +73,7 @@ export function Employees() {
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [activeDeptId, setActiveDeptId] = useState<string>('');
+  const [resetPasswordEmployee, setResetPasswordEmployee] = useState<User | null>(null);
 
   const handleSaveDepartment = async (data: { name: string; description: string }) => {
     if (!currentWorkspace) return;
@@ -158,6 +161,7 @@ export function Employees() {
   };
 
   const openEditEmployee = (user: User) => {
+    if (!canManageOrg) return;
     setSelectedEmployee(user);
     setIsEditEmployeeModalOpen(true);
   };
@@ -263,13 +267,15 @@ export function Employees() {
             Управление пользователями, отделами и группами
           </p>
         </div>
-        <button
-          onClick={() => setIsCreateEmployeeModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors"
-        >
-          <UserPlus className="w-4 h-4" />
-          Добавить сотрудника
-        </button>
+        {canManageOrg ? (
+          <button
+            onClick={() => setIsCreateEmployeeModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors"
+          >
+            <UserPlus className="w-4 h-4" />
+            Добавить сотрудника
+          </button>
+        ) : null}
       </div>
 
       <div className="flex gap-2 mb-6">
@@ -345,9 +351,11 @@ export function Employees() {
                 <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">
                   Группы
                 </th>
-                <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">
-                  Действия
-                </th>
+                {canManageOrg ? (
+                  <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">
+                    Действия
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -378,9 +386,9 @@ export function Employees() {
                   <td className="px-6 py-4">
                     <span className="text-sm text-slate-600">{getUserGroups(user.id)}</span>
                   </td>
-                  <td className="px-6 py-4">
-                    <div className="flex gap-1">
-                      {canManageOrg ? (
+                  {canManageOrg ? (
+                    <td className="px-6 py-4">
+                      <div className="flex gap-1">
                         <button
                           type="button"
                           onClick={() => setProfileEmployee(user)}
@@ -389,16 +397,27 @@ export function Employees() {
                         >
                           <Edit className="w-4 h-4" />
                         </button>
-                      ) : null}
-                      <button
-                        onClick={() => openEditEmployee(user)}
-                        className="p-1.5 text-slate-600 hover:text-brand hover:bg-brand-light rounded transition-colors"
-                        title="Оргструктура"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                        <button
+                          type="button"
+                          onClick={() => openEditEmployee(user)}
+                          className="p-1.5 text-slate-600 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                          title="Оргструктура"
+                        >
+                          <Settings className="w-4 h-4" />
+                        </button>
+                        {isAdmin && user.id !== currentUser?.id ? (
+                          <button
+                            type="button"
+                            onClick={() => setResetPasswordEmployee(user)}
+                            className="p-1.5 text-slate-600 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors"
+                            title="Сбросить пароль"
+                          >
+                            <KeyRound className="w-4 h-4" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -753,40 +772,54 @@ export function Employees() {
         onSubmit={handleSaveGroup}
       />
 
-      <CreateEmployeeModal
-        isOpen={isCreateEmployeeModalOpen}
-        onClose={() => setIsCreateEmployeeModalOpen(false)}
+      {canManageOrg ? (
+        <CreateEmployeeModal
+          isOpen={isCreateEmployeeModalOpen}
+          onClose={() => setIsCreateEmployeeModalOpen(false)}
+        />
+      ) : null}
+
+      <ResetPasswordModal
+        open={!!resetPasswordEmployee}
+        employee={resetPasswordEmployee}
+        onClose={() => setResetPasswordEmployee(null)}
       />
 
-      <EditEmployeeModal
-        isOpen={isEditEmployeeModalOpen}
-        onClose={() => {
-          setIsEditEmployeeModalOpen(false);
-          setSelectedEmployee(null);
-        }}
-        onSubmit={handleEditEmployee}
-        employee={selectedEmployee}
-      />
+      {canManageOrg ? (
+        <EditEmployeeModal
+          isOpen={isEditEmployeeModalOpen}
+          onClose={() => {
+            setIsEditEmployeeModalOpen(false);
+            setSelectedEmployee(null);
+          }}
+          onSubmit={handleEditEmployee}
+          employee={selectedEmployee}
+        />
+      ) : null}
 
-      <ManageDepartmentMembersModal
-        isOpen={isManageDepartmentMembersModalOpen}
-        onClose={() => {
-          setIsManageDepartmentMembersModalOpen(false);
-          setSelectedDepartment(null);
-        }}
-        onSubmit={handleManageDepartmentMembers}
-        department={selectedDepartment}
-      />
+      {canManageOrg ? (
+        <>
+          <ManageDepartmentMembersModal
+            isOpen={isManageDepartmentMembersModalOpen}
+            onClose={() => {
+              setIsManageDepartmentMembersModalOpen(false);
+              setSelectedDepartment(null);
+            }}
+            onSubmit={handleManageDepartmentMembers}
+            department={selectedDepartment}
+          />
 
-      <ManageGroupMembersModal
-        isOpen={isManageGroupMembersModalOpen}
-        onClose={() => {
-          setIsManageGroupMembersModalOpen(false);
-          setSelectedGroup(null);
-        }}
-        onSubmit={handleManageGroupMembers}
-        group={selectedGroup}
-      />
+          <ManageGroupMembersModal
+            isOpen={isManageGroupMembersModalOpen}
+            onClose={() => {
+              setIsManageGroupMembersModalOpen(false);
+              setSelectedGroup(null);
+            }}
+            onSubmit={handleManageGroupMembers}
+            group={selectedGroup}
+          />
+        </>
+      ) : null}
 
       {currentWorkspace ? (
         <EmployeeProfileModal

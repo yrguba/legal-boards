@@ -8,9 +8,10 @@ interface AppContextType {
   currentWorkspace: Workspace | null;
   workspaces: Workspace[];
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
   logout: () => void;
   switchWorkspace: (workspaceId: string) => void;
+  setCurrentUser: (user: User | null) => void;
   /** Перезагрузить список с сервера; при переданном id выбрать это пространство */
   refreshWorkspaces: (selectWorkspaceId?: string) => Promise<void>;
 }
@@ -32,17 +33,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setCurrentUser(user);
           setIsAuthenticated(true);
 
-          let fetchedWorkspaces = await workspacesApi.getAll();
-          if (fetchedWorkspaces.length === 0) {
-            await workspacesApi.create({
-              name: 'Моё рабочее пространство',
-              description: 'Автоматически создано при первом входе',
-            });
-            fetchedWorkspaces = await workspacesApi.getAll();
-          }
+          if (!user.mustChangePassword) {
+            let fetchedWorkspaces = await workspacesApi.getAll();
+            if (fetchedWorkspaces.length === 0) {
+              await workspacesApi.create({
+                name: 'Моё рабочее пространство',
+                description: 'Автоматически создано при первом входе',
+              });
+              fetchedWorkspaces = await workspacesApi.getAll();
+            }
 
-          setWorkspaces(fetchedWorkspaces);
-          if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
+            setWorkspaces(fetchedWorkspaces);
+            if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
+          }
         } catch (err) {
           console.error('Auth verification failed:', err);
           localStorage.removeItem('auth_token');
@@ -59,17 +62,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCurrentUser(user);
       setIsAuthenticated(true);
 
-      let fetchedWorkspaces = await workspacesApi.getAll();
-      if (fetchedWorkspaces.length === 0) {
-        await workspacesApi.create({
-          name: 'Моё рабочее пространство',
-          description: 'Автоматически создано при первом входе',
-        });
-        fetchedWorkspaces = await workspacesApi.getAll();
+      if (!user.mustChangePassword) {
+        let fetchedWorkspaces = await workspacesApi.getAll();
+        if (fetchedWorkspaces.length === 0) {
+          await workspacesApi.create({
+            name: 'Моё рабочее пространство',
+            description: 'Автоматически создано при первом входе',
+          });
+          fetchedWorkspaces = await workspacesApi.getAll();
+        }
+
+        setWorkspaces(fetchedWorkspaces);
+        if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
       }
 
-      setWorkspaces(fetchedWorkspaces);
-      if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
+      return user as User;
     } catch (err: any) {
       console.error('Login failed:', err);
       throw err;
@@ -116,6 +123,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         switchWorkspace,
+        setCurrentUser,
         refreshWorkspaces,
       }}
     >

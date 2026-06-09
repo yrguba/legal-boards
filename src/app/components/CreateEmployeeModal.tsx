@@ -97,7 +97,7 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
             <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
               Пароль для входа: <span className="font-medium">{createdPassword}</span>
               <div className="text-xs text-slate-500 mt-1">
-                Сохраните пароль и передайте сотруднику. Он отображается только один раз.
+                Передайте пароль сотруднику. При первом входе он задаст свой пароль.
               </div>
             </div>
           )}

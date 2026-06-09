@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import {
   getFrontendUrl,
   isEmailVerificationConfigured,
@@ -27,6 +28,7 @@ function publicUser(user: {
   role: string;
   departmentId?: string | null;
   avatar?: string | null;
+  mustChangePassword?: boolean;
 }) {
   return {
     id: user.id,
@@ -35,6 +37,7 @@ function publicUser(user: {
     role: user.role,
     departmentId: user.departmentId ?? undefined,
     avatar: user.avatar ?? undefined,
+    mustChangePassword: user.mustChangePassword ?? false,
   };
 }
 
@@ -273,6 +276,7 @@ router.post('/verify', async (req, res) => {
         departmentId: true,
         avatar: true,
         emailVerified: true,
+        mustChangePassword: true,
       },
     });
 
@@ -287,6 +291,64 @@ router.post('/verify', async (req, res) => {
     res.json({ user: publicUser(user) });
   } catch {
     res.status(401).json({ error: 'Недействительный токен' });
+  }
+});
+
+router.post('/change-password', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword?: string;
+      newPassword?: string;
+    };
+
+    if (typeof newPassword !== 'string' || newPassword.trim().length < 6) {
+      return res.status(400).json({ error: 'Новый пароль должен быть не короче 6 символов' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { id: true, email: true, name: true, role: true, departmentId: true, avatar: true, password: true, mustChangePassword: true },
+    });
+    if (!user) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    if (!user.mustChangePassword) {
+      if (typeof currentPassword !== 'string' || !currentPassword) {
+        return res.status(400).json({ error: 'Укажите текущий пароль' });
+      }
+      const ok = await bcrypt.compare(currentPassword, user.password);
+      if (!ok) {
+        return res.status(401).json({ error: 'Неверный текущий пароль' });
+      }
+    } else if (typeof currentPassword === 'string' && currentPassword) {
+      const ok = await bcrypt.compare(currentPassword, user.password);
+      if (!ok) {
+        return res.status(401).json({ error: 'Неверный текущий пароль' });
+      }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: await bcrypt.hash(newPassword.trim(), 10),
+        mustChangePassword: false,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        departmentId: true,
+        avatar: true,
+        mustChangePassword: true,
+      },
+    });
+
+    res.json({ user: publicUser(updated), message: 'Пароль успешно изменён' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Ошибка смены пароля' });
   }
 });
 
