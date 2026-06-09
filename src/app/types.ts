@@ -199,9 +199,41 @@ export interface TaskClientInteraction {
   user?: { id: string; name: string; avatar?: string | null };
 }
 
+export interface Conference {
+  id: string;
+  workspaceId: string;
+  title: string;
+  roomName: string;
+  shareToken: string;
+  mode: string;
+  status: string;
+  startAt: string;
+  endAt: string | null;
+  createdById: string;
+  allowGuests: boolean;
+  joinUrl: string;
+  jitsiDomain: string;
+  createdBy?: { id: string; name: string; email?: string; avatar?: string | null };
+  canJoin?: boolean;
+}
+
+export interface ConferencePublicInfo {
+  title: string;
+  roomName: string;
+  jitsiDomain: string;
+  status: string;
+}
+
 export interface Notification {
   id: string;
-  type: 'task_assigned' | 'comment' | 'status_change' | 'document' | 'mention' | 'user_added';
+  type:
+    | 'task_assigned'
+    | 'comment'
+    | 'status_change'
+    | 'document'
+    | 'mention'
+    | 'user_added'
+    | 'conference_invite';
   title: string;
   message: string;
   userId: string;

@@ -99,7 +99,30 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
       include: eventInclude,
     });
 
-    return res.json(rows.map(mapEvent));
+    const eventIds = rows.map((r) => r.id);
+    const linkedConferences =
+      eventIds.length > 0
+        ? await prisma.conference.findMany({
+            where: { calendarEventId: { in: eventIds } },
+            select: { id: true, calendarEventId: true, status: true },
+          })
+        : [];
+    const conferenceByEventId = new Map(
+      linkedConferences.map((c) => [c.calendarEventId!, c]),
+    );
+
+    return res.json(
+      rows.map((row) => {
+        const mapped = mapEvent(row);
+        const conf = conferenceByEventId.get(row.id);
+        if (!conf) return mapped;
+        return {
+          ...mapped,
+          conferenceId: conf.id,
+          conferenceStatus: conf.status,
+        };
+      }),
+    );
   } catch (e) {
     console.error('Calendar list error:', e);
     const msg = e instanceof Error ? e.message : String(e);

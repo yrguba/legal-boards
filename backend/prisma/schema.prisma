@@ -109,6 +109,7 @@ model User {
   taskColumnActionCompletions TaskColumnActionCompletion[] @relation("TaskColumnActionCompleter")
   activityLogs             ActivityLog[] @relation("ActivityLogActor")
   ledGroups                Group[] @relation("GroupLeader")
+  createdConferences       Conference[] @relation("ConferenceCreator")
 
   @@index([email])
   @@index([departmentId])
@@ -166,6 +167,7 @@ model Workspace {
   documents   Document[]
   chatChannels WorkspaceChatChannel[]
   calendarEvents CalendarEvent[]
+  conferences    Conference[]
   knowledgeArticles KnowledgeArticle[]
   lexClients LexClientWorkspace[]
 
@@ -583,6 +585,33 @@ model CalendarEventAttendee {
 
   @@unique([eventId, userId])
   @@index([userId])
+}
+
+/// Видеоконференция (Jitsi)
+model Conference {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  title         String
+  /// Имя комнаты Jitsi (уникальное)
+  roomName      String   @unique
+  /// Токен для публичной ссылки приглашения
+  shareToken    String   @unique
+  mode          String   @default("instant")
+  status        String   @default("active")
+  startAt       DateTime @default(now())
+  endAt         DateTime?
+  createdById   String
+  calendarEventId String?
+  allowGuests   Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("ConferenceCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([createdById])
 }
 
 /// Страница или раздел в базе знаний рабочего пространства (дерево: parent → children).

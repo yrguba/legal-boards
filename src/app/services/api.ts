@@ -101,6 +101,10 @@ export const authApi = {
 
 // Users API
 export const usersApi = {
+  async getLexClientsConfig() {
+    return fetchApi<{ enabled: boolean }>('/users/lex-clients/config');
+  },
+
   async getAll() {
     return fetchApi<any[]>('/users');
   },
@@ -556,6 +560,8 @@ export type CalendarEventDto = {
   createdBy: { id: string; name: string; email: string; avatar: string | null };
   attendeeUserIds: string[];
   attendees: { id: string; name: string; email: string; avatar: string | null }[];
+  conferenceId?: string;
+  conferenceStatus?: string;
 };
 
 // События календаря пространства
@@ -597,6 +603,61 @@ export const calendarEventsApi = {
 
   async remove(id: string) {
     return fetchApi<{ ok: boolean }>(`/calendar-events/${id}`, { method: 'DELETE' });
+  },
+};
+
+// Conferences API
+export const conferencesApi = {
+  async getConfig() {
+    return fetchApi<{ enabled: boolean; jitsiDomain: string }>('/conferences/config');
+  },
+
+  async getPublic(shareToken: string) {
+    return fetchApi<{
+      title: string;
+      roomName: string;
+      jitsiDomain: string;
+      status: string;
+    }>(`/conferences/public/${shareToken}`);
+  },
+
+  async listByWorkspace(workspaceId: string) {
+    return fetchApi<any[]>(`/conferences/workspace/${workspaceId}`);
+  },
+
+  async getById(id: string) {
+    return fetchApi<any>(`/conferences/${id}`);
+  },
+
+  async createInstant(workspaceId: string, title?: string) {
+    return fetchApi<any>('/conferences/instant', {
+      method: 'POST',
+      body: JSON.stringify({ workspaceId, title }),
+    });
+  },
+
+  async createScheduled(data: {
+    workspaceId: string;
+    title: string;
+    description?: string | null;
+    startAt: string;
+    endAt: string;
+    attendeeIds: string[];
+  }) {
+    return fetchApi<any>('/conferences/scheduled', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async end(id: string) {
+    return fetchApi<any>(`/conferences/${id}/end`, { method: 'POST' });
+  },
+
+  async shareToChat(id: string) {
+    return fetchApi<{ message: string; channelsCount: number }>(`/conferences/${id}/share-chat`, {
+      method: 'POST',
+    });
   },
 };
 

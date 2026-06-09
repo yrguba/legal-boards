@@ -17,10 +17,13 @@ import {
   BookOpen,
   Handshake,
   BarChart3,
+  Video,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
 import { useNotifications } from '../store/NotificationsContext';
+import { useConferencesConfig } from '../features/conferences/useConferencesConfig';
+import { useLexClientsConfig } from '../features/lexClients/useLexClientsConfig';
 
 export function Layout() {
   const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace } = useApp();
@@ -62,6 +65,8 @@ export function Layout() {
       currentUser?.role === 'manager');
 
   const canViewAnalytics = canManageLexClients;
+  const { enabled: conferencesEnabled } = useConferencesConfig();
+  const { enabled: lexClientsEnabled } = useLexClientsConfig();
 
   const navItems = useMemo(() => {
     const items: { to: string; end?: boolean; label: string; icon: typeof LayoutDashboard }[] = [
@@ -71,13 +76,16 @@ export function Layout() {
       { to: '/knowledge', label: 'База знаний', icon: BookOpen },
       { to: '/chat', label: 'Чат', icon: MessageCircle },
       { to: '/calendar', label: 'Календарь', icon: Calendar },
+      ...(conferencesEnabled
+        ? [{ to: '/conferences', label: 'Конференции', icon: Video }]
+        : []),
       { to: '/workspaces', label: 'Пространства', icon: Layers },
       { to: '/settings', label: 'Настройки', icon: Settings },
     ];
     if (canViewAnalytics) {
       items.splice(1, 0, { to: '/analytics', label: 'Аналитика', icon: BarChart3 });
     }
-    if (canManageLexClients) {
+    if (canManageLexClients && lexClientsEnabled) {
       items.splice(canViewAnalytics ? 7 : 6, 0, {
         to: '/lex-clients',
         label: 'Клиенты LEXPRO',
@@ -85,7 +93,7 @@ export function Layout() {
       });
     }
     return items;
-  }, [canManageLexClients, canViewAnalytics]);
+  }, [canManageLexClients, canViewAnalytics, conferencesEnabled, lexClientsEnabled]);
 
   return (
     <div className="flex h-screen bg-slate-50">

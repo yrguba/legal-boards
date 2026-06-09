@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
-import { Trash2, Video, X } from 'lucide-react';
-import {
-  calendarEventsApi,
-  type CalendarEventDto,
-} from '../../../services/api';
+import { X } from 'lucide-react';
+import { conferencesApi } from '../../services/api';
 
 export type WorkspaceMemberOption = {
   id: string;
@@ -19,30 +15,14 @@ type Props = {
   onClose: () => void;
   workspaceId: string;
   members: WorkspaceMemberOption[];
-  defaultDay: Date | null;
-  event: CalendarEventDto | null;
   onSaved: () => void;
-  currentUserId: string;
-  isGlobalAdmin: boolean;
 };
 
 function toLocalInput(d: Date) {
   return format(d, "yyyy-MM-dd'T'HH:mm");
 }
 
-export function EventFormModal({
-  open,
-  onClose,
-  workspaceId,
-  members,
-  defaultDay,
-  event,
-  onSaved,
-  currentUserId,
-  isGlobalAdmin,
-}: Props) {
-  const navigate = useNavigate();
-  const isEdit = !!event?.id;
+export function ScheduleConferenceModal({ open, onClose, workspaceId, members, onSaved }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [start, setStart] = useState('');
@@ -53,30 +33,21 @@ export function EventFormModal({
 
   useEffect(() => {
     if (!open) return;
-    if (event) {
-      setTitle(event.title);
-      setDescription(event.description || '');
-      setStart(toLocalInput(new Date(event.startAt)));
-      setEnd(toLocalInput(new Date(event.endAt)));
-      setAttendeeIds(new Set(event.attendeeUserIds));
-    } else {
-      const base = defaultDay ? new Date(defaultDay) : new Date();
-      const s = new Date(base);
-      s.setHours(9, 0, 0, 0);
-      const e = new Date(base);
-      e.setHours(10, 0, 0, 0);
-      setTitle('');
-      setDescription('');
-      setStart(toLocalInput(s));
-      setEnd(toLocalInput(e));
-      setAttendeeIds(new Set());
-    }
+    const base = new Date();
+    base.setMinutes(0, 0, 0);
+    base.setHours(base.getHours() + 1);
+    const s = new Date(base);
+    const e = new Date(base);
+    e.setHours(e.getHours() + 1);
+    setTitle('');
+    setDescription('');
+    setStart(toLocalInput(s));
+    setEnd(toLocalInput(e));
+    setAttendeeIds(new Set());
     setErr(null);
-  }, [open, event, defaultDay]);
+  }, [open]);
 
-  if (!open) {
-    return null;
-  }
+  if (!open) return null;
 
   const toggleAttendee = (id: string) => {
     setAttendeeIds((prev) => {
@@ -93,85 +64,55 @@ export function EventFormModal({
     const startD = new Date(start);
     const endD = new Date(end);
     if (!title.trim() || isNaN(startD.getTime()) || isNaN(endD.getTime()) || endD <= startD) {
-      setErr('Проверьте заголовок и время: конец должен быть позже начала');
+      setErr('Проверьте название и время: конец должен быть позже начала');
       return;
     }
     setSaving(true);
     try {
-      const ids = Array.from(attendeeIds);
-      if (isEdit && event) {
-        await calendarEventsApi.update(event.id, {
-          title: title.trim(),
-          description: description.trim() || null,
-          startAt: startD.toISOString(),
-          endAt: endD.toISOString(),
-          attendeeIds: ids,
-        });
-      } else {
-        await calendarEventsApi.create({
-          workspaceId,
-          title: title.trim(),
-          description: description.trim() || null,
-          startAt: startD.toISOString(),
-          endAt: endD.toISOString(),
-          attendeeIds: ids,
-        });
+      const result = await conferencesApi.createScheduled({
+        workspaceId,
+        title: title.trim(),
+        description: description.trim() || null,
+        startAt: startD.toISOString(),
+        endAt: endD.toISOString(),
+        attendeeIds: Array.from(attendeeIds),
+      });
+      const stats = result.inviteStats as
+        | { notifications?: number; emails?: number; emailsFailed?: number }
+        | undefined;
+      if (stats) {
+        const parts = [`уведомлений: ${stats.notifications ?? 0}`, `писем: ${stats.emails ?? 0}`];
+        if (stats.emailsFailed) parts.push(`ошибок email: ${stats.emailsFailed}`);
+        window.alert(`Конференция запланирована (${parts.join(', ')})`);
       }
       onSaved();
       onClose();
     } catch (x) {
-      setErr(x instanceof Error ? x.message : 'Ошибка сохранения');
+      setErr(x instanceof Error ? x.message : 'Ошибка планирования');
     } finally {
       setSaving(false);
     }
   };
-
-  const onDelete = async () => {
-    if (!event || !confirm('Удалить это событие?')) return;
-    setSaving(true);
-    try {
-      await calendarEventsApi.remove(event.id);
-      onSaved();
-      onClose();
-    } catch (x) {
-      setErr(x instanceof Error ? x.message : 'Ошибка удаления');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const canDelete = isEdit && event && (event.createdById === currentUserId || isGlobalAdmin);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} aria-hidden />
       <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
         <div className="flex justify-between items-start gap-4 mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            {isEdit ? 'Событие' : 'Новое событие'}
-          </h2>
-          <div className="flex items-center gap-1">
-            {canDelete && (
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={saving}
-                className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                title="Удалить"
-                aria-label="Удалить событие"
-              >
-                <Trash2 className="size-5" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
-              aria-label="Закрыть"
-            >
-              <X className="size-5" />
-            </button>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Запланировать конференцию</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Участники получат уведомление и письмо на email
+            </p>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
+            aria-label="Закрыть"
+          >
+            <X className="size-5" />
+          </button>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-3">
@@ -248,20 +189,6 @@ export function EventFormModal({
 
           {err && <p className="text-sm text-red-600">{err}</p>}
 
-          {isEdit && event?.conferenceId ? (
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                navigate(`/conferences/${event.conferenceId}`);
-              }}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-brand/30 bg-brand-light px-4 py-2 text-sm font-medium text-brand hover:bg-brand-light/80"
-            >
-              <Video className="size-4" />
-              Войти в конференцию
-            </button>
-          ) : null}
-
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -275,7 +202,7 @@ export function EventFormModal({
               disabled={saving}
               className="px-4 py-2 text-sm rounded-lg bg-brand text-white disabled:opacity-50"
             >
-              {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Создать'}
+              {saving ? 'Создание…' : 'Запланировать'}
             </button>
           </div>
         </form>
