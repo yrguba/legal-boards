@@ -1,4 +1,4 @@
-import { Calendar, Clock, Paperclip, Tag, User } from 'lucide-react';
+import { Calendar, Clock, Flag, Paperclip, Tag, User } from 'lucide-react';
 import { t } from '../taskPage.classes';
 import type { TaskMainColumnProps } from '../types';
 import type { TaskField } from '../../../types';
@@ -7,6 +7,13 @@ import { TaskElapsedTimeDisplay } from '../../../components/TaskElapsedTimeDispl
 import { TaskApprovalsSection } from './TaskApprovalsSection';
 import { InlineEditField } from '../../../components/inline-edit/InlineEditField';
 import type { InlineFieldKey } from '../utils/validateField';
+import { TaskPriorityBadge } from '../../../components/TaskPriorityBadge';
+import {
+  TASK_PRIORITY_KEYS,
+  TASK_PRIORITY_LABELS,
+  normalizeTaskPriority,
+} from '../../../utils/taskPriority';
+import { isLegacyPriorityTaskField } from '../../../utils/taskFieldFilters';
 
 function fieldError(
   errors: TaskMainColumnProps['fieldErrors'],
@@ -256,6 +263,39 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
         />
 
         <InlineEditField
+          fieldKey="priority"
+          label={
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <Flag className="w-4 h-4" />
+              Приоритет
+            </div>
+          }
+          layout="full"
+          saving={savingField === 'priority'}
+          locked={isFieldLocked('priority')}
+          error={fieldError(fieldErrors, 'priority')}
+          getValue={() => normalizeTaskPriority(task.priority)}
+          onSave={(v) => onSaveField('priority', v)}
+          commitOnChange
+          renderView={(v) => <TaskPriorityBadge priority={v} />}
+          renderEditor={({ value, onChange, saving, inputRef }) => (
+            <select
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={String(value)}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
+              className={t.input}
+            >
+              {TASK_PRIORITY_KEYS.map((p) => (
+                <option key={p} value={p}>
+                  {TASK_PRIORITY_LABELS[p]}
+                </option>
+              ))}
+            </select>
+          )}
+        />
+
+        <InlineEditField
           fieldKey="columnId"
           label={<div className="text-sm text-slate-600">Статус</div>}
           layout="full"
@@ -312,7 +352,12 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
         ) : null}
 
         {taskFields
-          .filter((f) => f.id !== titleFieldId && f.id !== descriptionFieldId)
+          .filter(
+            (f) =>
+              f.id !== titleFieldId &&
+              f.id !== descriptionFieldId &&
+              !isLegacyPriorityTaskField(f),
+          )
           .map((f) => (
             <CustomFieldInline
               key={f.id}

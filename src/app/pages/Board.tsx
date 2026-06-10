@@ -44,6 +44,8 @@ import {
   type TaskColumnActionCompletionRow,
 } from '../utils/boardColumnActions';
 import { TaskElapsedTimeDisplay } from '../components/TaskElapsedTimeDisplay';
+import { TaskPriorityBadge } from '../components/TaskPriorityBadge';
+import { normalizeTaskPriority } from '../utils/taskPriority';
 import { boardTimeTrackingIsConfigured } from '../utils/boardTimeTracking';
 import { useApp } from '../store/AppContext';
 import {
@@ -225,12 +227,15 @@ function TaskCard({
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 ml-6">
-        <span
-          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
-          style={{ backgroundColor: getTaskTypeColor(task.typeId) }}
-        >
-          {getTaskTypeName(task.typeId)}
-        </span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
+            style={{ backgroundColor: getTaskTypeColor(task.typeId) }}
+          >
+            {getTaskTypeName(task.typeId)}
+          </span>
+          <TaskPriorityBadge priority={normalizeTaskPriority(task.priority)} compact />
+        </div>
 
         <div className="flex items-center gap-2">
           {boardTracksTime &&
@@ -254,11 +259,6 @@ function TaskCard({
         </div>
       </div>
 
-      {task.customFields?.priority && (
-        <div className="mt-2 text-xs text-slate-600 ml-6">
-          Приоритет: {task.customFields.priority}
-        </div>
-      )}
     </div>
   );
 }
@@ -482,6 +482,7 @@ export function Board() {
     description?: string;
     typeId: string;
     assigneeId?: string;
+    priority: string;
     customFields: Record<string, any>;
   }) => {
     if (!board) throw new Error('Доска не загружена');
@@ -494,6 +495,7 @@ export function Board() {
       title: data.title,
       description: data.description,
       assigneeId: data.assigneeId,
+      priority: data.priority,
       customFields: data.customFields,
     });
 
@@ -974,9 +976,7 @@ export function Board() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-sm text-slate-600">
-                          {task.customFields?.priority || '—'}
-                        </span>
+                        <TaskPriorityBadge priority={normalizeTaskPriority(task.priority)} />
                       </td>
                     </tr>
                   );

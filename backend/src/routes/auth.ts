@@ -97,7 +97,7 @@ router.post('/register', async (req, res) => {
         email: normalizedEmail,
         password: hashedPassword,
         name: String(name).trim(),
-        role: 'member',
+        role: 'admin',
         emailVerified: false,
         emailVerificationToken: token,
         emailVerificationExpiresAt: expiresAt,

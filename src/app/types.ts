@@ -155,6 +155,7 @@ export interface Task {
   description?: string;
   typeId: string;
   assigneeId?: string;
+  priority?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

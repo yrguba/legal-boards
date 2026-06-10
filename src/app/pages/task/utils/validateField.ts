@@ -1,4 +1,5 @@
 import type { TaskField } from '../../../types';
+import { TASK_PRIORITY_KEYS } from '../../../utils/taskPriority';
 import { isEmptyValue } from './customFieldValue';
 
 export type InlineFieldKey =
@@ -7,6 +8,7 @@ export type InlineFieldKey =
   | 'columnId'
   | 'typeId'
   | 'assigneeId'
+  | 'priority'
   | `custom:${string}`;
 
 export function validateField(
@@ -36,6 +38,16 @@ export function validateField(
 
   if (key === 'typeId') {
     if (typeof value !== 'string' || !value) return 'Выберите тип задачи';
+    return null;
+  }
+
+  if (key === 'priority') {
+    if (
+      typeof value !== 'string' ||
+      !TASK_PRIORITY_KEYS.includes(value as (typeof TASK_PRIORITY_KEYS)[number])
+    ) {
+      return 'Выберите приоритет';
+    }
     return null;
   }
 

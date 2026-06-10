@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { taskPriorityLabel } from './taskPriority';
 
 export const ACTIVITY_EVENT_TYPES = {
   COLUMN_CHANGED: 'task.column_changed',
@@ -7,6 +8,7 @@ export const ACTIVITY_EVENT_TYPES = {
   COLUMN_ACTION_COMPLETED: 'task.column_action_completed',
   LEGACY_STATUS: 'legacy.status_event',
   TRANSFERRED: 'task_transferred',
+  PRIORITY_CHANGED: 'task.priority_changed',
 } as const;
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -91,6 +93,15 @@ function formatActivitySummary(eventType: string, payload: Record<string, unknow
     }
     case ACTIVITY_EVENT_TYPES.LEGACY_STATUS:
       return String(payload.message ?? 'Изменение статуса');
+    case ACTIVITY_EVENT_TYPES.PRIORITY_CHANGED: {
+      const from = taskPriorityLabel(
+        typeof payload.fromPriority === 'string' ? payload.fromPriority : null,
+      );
+      const to = taskPriorityLabel(
+        typeof payload.toPriority === 'string' ? payload.toPriority : null,
+      );
+      return `Приоритет: «${from}» → «${to}»`;
+    }
     case ACTIVITY_EVENT_TYPES.TRANSFERRED: {
       const from = String(payload.fromBoardCode ?? payload.fromBoardId ?? '—');
       const to = String(payload.toBoardCode ?? payload.toBoardId ?? '—');

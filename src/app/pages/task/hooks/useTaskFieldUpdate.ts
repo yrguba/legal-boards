@@ -31,6 +31,7 @@ export type TaskUpdatePatch = Partial<{
   columnId: string;
   typeId: string;
   assigneeId: string | null;
+  priority: string;
   customFields: Record<string, unknown>;
 }>;
 
@@ -97,6 +98,7 @@ function buildPatchForField(
   if (key === 'columnId') return { columnId: String(value) };
   if (key === 'typeId') return { typeId: String(value) };
   if (key === 'assigneeId') return { assigneeId: (value as string) || null };
+  if (key === 'priority') return { priority: String(value) };
   if (key.startsWith('custom:')) {
     const fieldId = key.slice('custom:'.length);
     return {

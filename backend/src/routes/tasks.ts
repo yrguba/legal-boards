@@ -37,6 +37,11 @@ import {
 } from '../utils/activityLog';
 import { resolveBoardRef } from '../utils/boardResolve';
 import { enrichTaskWithKey, nextTaskNumber, resolveTaskRef } from '../utils/taskKeys';
+import {
+  DEFAULT_TASK_PRIORITY,
+  parseIncomingPriority,
+  taskPriorityValidationError,
+} from '../utils/taskPriority';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -606,7 +611,8 @@ router.get('/:id', async (req: AuthRequest, res) => {
 
 router.post('/', async (req: AuthRequest, res) => {
   try {
-    const { boardId, columnId, typeId, title, description, assigneeId, customFields } = req.body;
+    const { boardId, columnId, typeId, title, description, assigneeId, customFields, priority } =
+      req.body;
 
     if (req.lexClientId) {
       const board = await prisma.board.findUnique({
@@ -654,6 +660,7 @@ router.post('/', async (req: AuthRequest, res) => {
           assigneeId: finalAssigneeLex,
           createdBy: null,
           lexCreatorId: req.lexClientId,
+          priority: DEFAULT_TASK_PRIORITY,
           customFields: customFields || {},
           trackedTimeSeconds: ttInitLex.trackedTimeSeconds,
           timeTrackingActiveSince: ttInitLex.timeTrackingActiveSince,
@@ -688,6 +695,12 @@ router.post('/', async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
+    const priorityErr = taskPriorityValidationError(priority);
+    if (priorityErr) {
+      return res.status(400).json({ error: priorityErr });
+    }
+    const staffPriority = parseIncomingPriority(priority);
+
     const boardRow = await prisma.board.findUnique({
       where: { id: boardId },
       select: { workspaceId: true, advancedSettings: true, code: true },
@@ -718,6 +731,7 @@ router.post('/', async (req: AuthRequest, res) => {
         assigneeId: finalAssigneeId,
         createdBy: req.userId,
         lexCreatorId: null,
+        priority: staffPriority,
         customFields: customFields || {},
         trackedTimeSeconds: ttInitCreate.trackedTimeSeconds,
         timeTrackingActiveSince: ttInitCreate.timeTrackingActiveSince,
@@ -758,7 +772,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Изменение задачи доступно только сотрудникам Legal Boards' });
     }
 
-    const { columnId, typeId, title, description, assigneeId, customFields } = req.body;
+    const { columnId, typeId, title, description, assigneeId, customFields, priority } = req.body;
 
     const data: Prisma.TaskUncheckedUpdateInput = {};
     if (columnId !== undefined) data.columnId = columnId;
@@ -769,6 +783,13 @@ router.put('/:id', async (req: AuthRequest, res) => {
       data.assigneeId = assigneeId ?? null;
     }
     if (customFields !== undefined) data.customFields = customFields;
+    if (priority !== undefined) {
+      const priorityErr = taskPriorityValidationError(priority);
+      if (priorityErr) {
+        return res.status(400).json({ error: priorityErr });
+      }
+      data.priority = parseIncomingPriority(priority);
+    }
 
     const oldTask = await prisma.task.findUnique({
       where: { id: taskIdParam(req) },
@@ -980,6 +1001,25 @@ router.put('/:id', async (req: AuthRequest, res) => {
             },
           });
         }
+      }
+    }
+
+    if (priority !== undefined && oldTask.priority !== task.priority) {
+      try {
+        await writeActivityLog(prisma, {
+          workspaceId: oldTask.board.workspaceId,
+          boardId: oldTask.boardId,
+          taskId: task.id,
+          eventType: ACTIVITY_EVENT_TYPES.PRIORITY_CHANGED,
+          actorUserId: req.userId,
+          payload: {
+            fromPriority: oldTask.priority,
+            toPriority: task.priority,
+          },
+          snapshot: { title: task.title, columnId: task.columnId },
+        });
+      } catch (logErr) {
+        console.error('Activity log priority_changed error:', logErr);
       }
     }
 

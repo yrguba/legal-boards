@@ -18,6 +18,7 @@ export type TaskRecord = Record<string, any> & {
   columnId: string;
   typeId: string;
   conclusionText?: string | null;
+  priority?: string;
   customFields?: Record<string, unknown>;
   taskAttachments?: unknown[];
   comments?: unknown[];

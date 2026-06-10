@@ -364,6 +364,8 @@ model Task {
   /// Автор–клиент LEXPRO (null — задачу создал сотрудник)
   lexCreatorId String?
   customFields Json     @default("{}")
+  /// Приоритет (ключ): trivial | low | medium | high | critical
+  priority     String   @default("medium")
   /// Накопленное время работы по правилам доски (секунды)
   trackedTimeSeconds       Int       @default(0)
   /// Начало текущего отрезка учёта (когда задача в «считающейся» колонке цикла)
