@@ -22,6 +22,13 @@ import {
   parseBoardApprovalRules,
 } from '../utils/boardApprovals';
 import {
+  appendTaskToColumn,
+  applyTaskOrderInColumn,
+  moveTaskToColumnAtPosition,
+  reserveTopPositionInColumn,
+  TaskPositionError,
+} from '../utils/taskPosition';
+import {
   assertColumnEnterActionsComplete,
   assertColumnExitActionsComplete,
   findColumnActionRuleById,
@@ -319,7 +326,7 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
     });
 
     res.json(tasks.map((t) => enrichTaskWithKey(unifyTaskRow(t as Record<string, unknown>), board.code)));
@@ -609,6 +616,52 @@ router.get('/:id', async (req: AuthRequest, res) => {
   }
 });
 
+router.post('/reorder', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Сортировка задач доступна только сотрудникам Legal Boards' });
+    }
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    const { boardId, columnId, taskIds } = req.body as {
+      boardId?: string;
+      columnId?: string;
+      taskIds?: string[];
+    };
+
+    if (!boardId || !columnId || !Array.isArray(taskIds) || taskIds.length === 0) {
+      return res.status(400).json({ error: 'Укажите boardId, columnId и taskIds' });
+    }
+
+    const board = await prisma.board.findUnique({
+      where: { id: boardId },
+      select: { id: true, workspaceId: true },
+    });
+    if (!board) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
+    const column = await prisma.boardColumn.findFirst({
+      where: { id: columnId, boardId },
+      select: { id: true },
+    });
+    if (!column) {
+      return res.status(404).json({ error: 'Колонка не найдена на доске' });
+    }
+
+    await applyTaskOrderInColumn(prisma, boardId, columnId, taskIds);
+    res.json({ ok: true });
+  } catch (error) {
+    if (error instanceof TaskPositionError) {
+      return res.status(400).json({ error: error.message, code: error.code });
+    }
+    console.error('Reorder tasks error:', error);
+    res.status(500).json({ error: 'Ошибка сортировки задач' });
+  }
+});
+
 router.post('/', async (req: AuthRequest, res) => {
   try {
     const { boardId, columnId, typeId, title, description, assigneeId, customFields, priority } =
@@ -649,33 +702,37 @@ router.post('/', async (req: AuthRequest, res) => {
 
       const lexTaskNumber = await nextTaskNumber(prisma, boardId);
 
-      const lexTask = await prisma.task.create({
-        data: {
-          number: lexTaskNumber,
-          boardId,
-          columnId,
-          typeId,
-          title,
-          description,
-          assigneeId: finalAssigneeLex,
-          createdBy: null,
-          lexCreatorId: req.lexClientId,
-          priority: DEFAULT_TASK_PRIORITY,
-          customFields: customFields || {},
-          trackedTimeSeconds: ttInitLex.trackedTimeSeconds,
-          timeTrackingActiveSince: ttInitLex.timeTrackingActiveSince,
-          timeTrackingCycleOpen: ttInitLex.timeTrackingCycleOpen,
-        },
-        include: {
-          type: true,
-          assignee: {
-            select: { id: true, name: true, email: true, avatar: true },
+      const lexTask = await prisma.$transaction(async (tx) => {
+        const position = await reserveTopPositionInColumn(tx, columnId);
+        return tx.task.create({
+          data: {
+            number: lexTaskNumber,
+            boardId,
+            columnId,
+            typeId,
+            title,
+            description,
+            assigneeId: finalAssigneeLex,
+            createdBy: null,
+            lexCreatorId: req.lexClientId,
+            priority: DEFAULT_TASK_PRIORITY,
+            position,
+            customFields: customFields || {},
+            trackedTimeSeconds: ttInitLex.trackedTimeSeconds,
+            timeTrackingActiveSince: ttInitLex.timeTrackingActiveSince,
+            timeTrackingCycleOpen: ttInitLex.timeTrackingCycleOpen,
           },
-          creator: {
-            select: { id: true, name: true, email: true },
+          include: {
+            type: true,
+            assignee: {
+              select: { id: true, name: true, email: true, avatar: true },
+            },
+            creator: {
+              select: { id: true, name: true, email: true },
+            },
+            lexCreator: LEX_CREATOR_FOR_TASK,
           },
-          lexCreator: LEX_CREATOR_FOR_TASK,
-        },
+        });
       });
 
       if (finalAssigneeLex) {
@@ -720,33 +777,37 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const taskNumber = await nextTaskNumber(prisma, boardId);
 
-    const task = await prisma.task.create({
-      data: {
-        number: taskNumber,
-        boardId,
-        columnId,
-        typeId,
-        title,
-        description,
-        assigneeId: finalAssigneeId,
-        createdBy: req.userId,
-        lexCreatorId: null,
-        priority: staffPriority,
-        customFields: customFields || {},
-        trackedTimeSeconds: ttInitCreate.trackedTimeSeconds,
-        timeTrackingActiveSince: ttInitCreate.timeTrackingActiveSince,
-        timeTrackingCycleOpen: ttInitCreate.timeTrackingCycleOpen,
-      },
-      include: {
-        type: true,
-        assignee: {
-          select: { id: true, name: true, email: true, avatar: true },
+    const task = await prisma.$transaction(async (tx) => {
+      const position = await reserveTopPositionInColumn(tx, columnId);
+      return tx.task.create({
+        data: {
+          number: taskNumber,
+          boardId,
+          columnId,
+          typeId,
+          title,
+          description,
+          assigneeId: finalAssigneeId,
+          createdBy: req.userId,
+          lexCreatorId: null,
+          priority: staffPriority,
+          position,
+          customFields: customFields || {},
+          trackedTimeSeconds: ttInitCreate.trackedTimeSeconds,
+          timeTrackingActiveSince: ttInitCreate.timeTrackingActiveSince,
+          timeTrackingCycleOpen: ttInitCreate.timeTrackingCycleOpen,
         },
-        creator: {
-          select: { id: true, name: true, email: true },
+        include: {
+          type: true,
+          assignee: {
+            select: { id: true, name: true, email: true, avatar: true },
+          },
+          creator: {
+            select: { id: true, name: true, email: true },
+          },
+          lexCreator: LEX_CREATOR_FOR_TASK,
         },
-        lexCreator: LEX_CREATOR_FOR_TASK,
-      },
+      });
     });
 
     if (finalAssigneeId && finalAssigneeId !== req.userId) {
@@ -772,10 +833,10 @@ router.put('/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Изменение задачи доступно только сотрудникам Legal Boards' });
     }
 
-    const { columnId, typeId, title, description, assigneeId, customFields, priority } = req.body;
+    const { columnId, typeId, title, description, assigneeId, customFields, priority, position } =
+      req.body;
 
     const data: Prisma.TaskUncheckedUpdateInput = {};
-    if (columnId !== undefined) data.columnId = columnId;
     if (typeId !== undefined) data.typeId = typeId;
     if (title !== undefined) data.title = title;
     if (description !== undefined) data.description = description;
@@ -803,7 +864,12 @@ router.put('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
-    if (columnId !== undefined && oldTask.columnId !== columnId) {
+    const hasPosition = typeof position === 'number' && Number.isFinite(position);
+    const wantsColumnChange = columnId !== undefined && columnId !== oldTask.columnId;
+    const wantsPositionChange = hasPosition && Math.floor(position) !== oldTask.position;
+    const needsReorder = wantsColumnChange || wantsPositionChange;
+
+    if (wantsColumnChange) {
       const boardCfgRow = await prisma.board.findUnique({
         where: { id: oldTask.boardId },
         select: {
@@ -884,38 +950,79 @@ router.put('/:id', async (req: AuthRequest, res) => {
       }
     }
 
-    if (Object.keys(data).length === 0) {
+    if (Object.keys(data).length === 0 && !needsReorder) {
       return res.status(400).json({ error: 'Нет полей для обновления' });
     }
 
-    const task = await prisma.task.update({
-      where: { id: taskIdParam(req) },
-      data,
-      include: {
-        type: true,
-        assignee: {
-          select: { id: true, name: true, email: true, avatar: true },
-        },
-        taskAttachments: {
-          orderBy: { createdAt: 'desc' },
-          include: {
-            uploader: { select: { id: true, name: true, email: true, avatar: true } },
-          },
-        },
-        columnApprovals: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            approver: { select: { id: true, name: true, email: true, avatar: true } },
-          },
-        },
-        columnActionCompletions: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            completer: { select: { id: true, name: true, email: true, avatar: true } },
-          },
+    const taskInclude = {
+      type: true,
+      assignee: {
+        select: { id: true, name: true, email: true, avatar: true },
+      },
+      taskAttachments: {
+        orderBy: { createdAt: 'desc' as const },
+        include: {
+          uploader: { select: { id: true, name: true, email: true, avatar: true } },
         },
       },
-    });
+      columnApprovals: {
+        orderBy: { createdAt: 'asc' as const },
+        include: {
+          approver: { select: { id: true, name: true, email: true, avatar: true } },
+        },
+      },
+      columnActionCompletions: {
+        orderBy: { createdAt: 'asc' as const },
+        include: {
+          completer: { select: { id: true, name: true, email: true, avatar: true } },
+        },
+      },
+    };
+
+    let task;
+    try {
+      if (needsReorder) {
+        const toColumnId = columnId ?? oldTask.columnId;
+        if (wantsColumnChange) {
+          if (hasPosition) {
+            await moveTaskToColumnAtPosition(
+              prisma,
+              oldTask.id,
+              oldTask.columnId,
+              toColumnId,
+              position,
+            );
+          } else {
+            await appendTaskToColumn(prisma, oldTask.id, oldTask.columnId, toColumnId);
+          }
+        } else if (hasPosition) {
+          await moveTaskToColumnAtPosition(
+            prisma,
+            oldTask.id,
+            oldTask.columnId,
+            oldTask.columnId,
+            position,
+          );
+        }
+      }
+
+      task =
+        Object.keys(data).length > 0
+          ? await prisma.task.update({
+              where: { id: taskIdParam(req) },
+              data,
+              include: taskInclude,
+            })
+          : await prisma.task.findUniqueOrThrow({
+              where: { id: taskIdParam(req) },
+              include: taskInclude,
+            });
+    } catch (error) {
+      if (error instanceof TaskPositionError) {
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
+      throw error;
+    }
 
     if (columnId !== undefined && oldTask.columnId !== columnId) {
       await prisma.taskColumnApproval.deleteMany({

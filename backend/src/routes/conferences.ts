@@ -10,11 +10,60 @@ import {
   isConferencesEnabled,
 } from '../utils/conferences';
 import { postConferenceToAllChannels } from '../utils/conferenceChat';
-import { sendScheduledConferenceInvites } from '../utils/conferenceInvites';
+import {
+  sendScheduledConferenceInvites,
+  sendConferenceCancellationNotices,
+  sendConferenceUpdateNotices,
+} from '../utils/conferenceInvites';
 import { getWorkspaceMemberIds } from '../utils/workspaceMembers';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+function canManageConference(c: { createdById: string }, req: AuthRequest): boolean {
+  return c.createdById === req.userId || req.userRole === 'admin';
+}
+
+async function loadCalendarMeta(calendarEventId: string | null) {
+  if (!calendarEventId) {
+    return { description: null as string | null, attendeeIds: [] as string[] };
+  }
+  const ev = await prisma.calendarEvent.findUnique({
+    where: { id: calendarEventId },
+    include: { attendees: { select: { userId: true } } },
+  });
+  if (!ev) return { description: null, attendeeIds: [] };
+  return {
+    description: ev.description,
+    attendeeIds: ev.attendees.map((a) => a.userId),
+  };
+}
+
+async function mapConferenceEnriched(c: {
+  id: string;
+  workspaceId: string;
+  title: string;
+  roomName: string;
+  shareToken: string;
+  mode: string;
+  status: string;
+  startAt: Date;
+  endAt: Date | null;
+  createdById: string;
+  calendarEventId: string | null;
+  allowGuests: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: { id: string; name: string; email: string; avatar: string | null };
+}) {
+  const { description, attendeeIds } = await loadCalendarMeta(c.calendarEventId);
+  return {
+    ...mapConference(c),
+    description,
+    attendeeIds,
+    attendeeCount: attendeeIds.length,
+  };
+}
 
 function mapConference(c: {
   id: string;
@@ -144,7 +193,7 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
       take: 50,
     });
 
-    res.json(rows.map(mapConference));
+    res.json(rows.map((c) => mapConference(c)));
   } catch (error) {
     console.error('List conferences error:', error);
     res.status(500).json({ error: 'Ошибка загрузки конференций' });
@@ -165,7 +214,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Нет доступа' });
     }
 
-    res.json(mapConference(conference));
+    res.json(await mapConferenceEnriched(conference));
   } catch (error) {
     console.error('Get conference error:', error);
     res.status(500).json({ error: 'Ошибка загрузки конференции' });
@@ -299,6 +348,210 @@ router.post('/instant', async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Create instant conference error:', error);
     res.status(500).json({ error: 'Ошибка создания конференции' });
+  }
+});
+
+router.put('/:id', async (req: AuthRequest, res) => {
+  try {
+    const conference = await prisma.conference.findUnique({
+      where: { id: req.params.id },
+      include: {
+        createdBy: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+    if (!conference) return res.status(404).json({ error: 'Конференция не найдена' });
+    if (!(await assertWorkspaceMember(prisma, conference.workspaceId, req.userId!, req.userRole))) {
+      return res.status(403).json({ error: 'Нет доступа' });
+    }
+    if (!canManageConference(conference, req)) {
+      return res.status(403).json({ error: 'Только организатор может изменить конференцию' });
+    }
+    if (conference.mode !== 'scheduled' || conference.status !== 'scheduled') {
+      return res.status(400).json({ error: 'Редактировать можно только запланированную конференцию' });
+    }
+    if (!conference.calendarEventId) {
+      return res.status(400).json({ error: 'Нет связанного события календаря' });
+    }
+
+    const { title, description, startAt, endAt, attendeeIds } = req.body as {
+      title?: string;
+      description?: string | null;
+      startAt?: string;
+      endAt?: string;
+      attendeeIds?: string[];
+    };
+
+    const start = startAt != null ? new Date(startAt) : conference.startAt;
+    const end = endAt != null ? new Date(endAt) : conference.endAt;
+    if (!end || isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
+      return res.status(400).json({ error: 'Некорректный интервал времени' });
+    }
+    if (start.getTime() < Date.now() - 60_000) {
+      return res.status(400).json({ error: 'Нельзя перенести конференцию в прошлое' });
+    }
+
+    const trimmedTitle =
+      title !== undefined ? String(title).trim() : conference.title;
+    if (!trimmedTitle) {
+      return res.status(400).json({ error: 'Укажите название' });
+    }
+
+    const memberIds = await getWorkspaceMemberIds(prisma, conference.workspaceId);
+    const rawIds = attendeeIds !== undefined && Array.isArray(attendeeIds) ? attendeeIds : null;
+    const validAttendee = rawIds ? rawIds.filter((id) => memberIds.has(id)) : null;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.calendarEvent.update({
+        where: { id: conference.calendarEventId! },
+        data: {
+          title: trimmedTitle,
+          description:
+            description === undefined
+              ? undefined
+              : description
+                ? String(description).trim()
+                : null,
+          startAt: start,
+          endAt: end,
+          ...(validAttendee
+            ? {
+                attendees: {
+                  deleteMany: {},
+                  create: validAttendee.map((userId) => ({ userId })),
+                },
+              }
+            : {}),
+        },
+      });
+
+      return tx.conference.update({
+        where: { id: conference.id },
+        data: {
+          title: trimmedTitle,
+          startAt: start,
+          endAt: end,
+        },
+        include: {
+          createdBy: { select: { id: true, name: true, email: true, avatar: true } },
+        },
+      });
+    });
+
+    const meta = await loadCalendarMeta(updated.calendarEventId);
+    const notifyIds = [...new Set([req.userId!, ...meta.attendeeIds])];
+    const creatorName = updated.createdBy?.name ?? 'Организатор';
+    const notifyStats = await sendConferenceUpdateNotices(prisma, {
+      conferenceId: updated.id,
+      creatorId: req.userId!,
+      creatorName,
+      title: trimmedTitle,
+      shareToken: updated.shareToken,
+      startAt: start,
+      endAt: end,
+      attendeeIds: notifyIds,
+    });
+
+    res.json({ ...(await mapConferenceEnriched(updated)), notifyStats });
+  } catch (error) {
+    console.error('Update conference error:', error);
+    res.status(500).json({ error: 'Ошибка обновления конференции' });
+  }
+});
+
+router.post('/:id/cancel', async (req: AuthRequest, res) => {
+  try {
+    const conference = await prisma.conference.findUnique({
+      where: { id: req.params.id },
+      include: {
+        createdBy: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+    if (!conference) return res.status(404).json({ error: 'Конференция не найдена' });
+    if (!(await assertWorkspaceMember(prisma, conference.workspaceId, req.userId!, req.userRole))) {
+      return res.status(403).json({ error: 'Нет доступа' });
+    }
+    if (!canManageConference(conference, req)) {
+      return res.status(403).json({ error: 'Только организатор может отменить конференцию' });
+    }
+    if (conference.mode !== 'scheduled' || conference.status !== 'scheduled') {
+      return res.status(400).json({ error: 'Отменить можно только запланированную конференцию' });
+    }
+
+    const meta = await loadCalendarMeta(conference.calendarEventId);
+    const endAt = conference.endAt ?? conference.startAt;
+    const creatorName = conference.createdBy?.name ?? 'Организатор';
+    const notifyIds = [...new Set([conference.createdById, ...meta.attendeeIds])];
+
+    await prisma.$transaction(async (tx) => {
+      if (conference.calendarEventId) {
+        await tx.calendarEvent.delete({ where: { id: conference.calendarEventId } });
+      }
+      await tx.conference.update({
+        where: { id: conference.id },
+        data: { status: 'cancelled', endAt: new Date() },
+      });
+    });
+
+    const notifyStats = await sendConferenceCancellationNotices(prisma, {
+      conferenceId: conference.id,
+      creatorId: conference.createdById,
+      creatorName,
+      title: conference.title,
+      startAt: conference.startAt,
+      endAt,
+      attendeeIds: notifyIds,
+    });
+
+    res.json({
+      message: 'Конференция отменена',
+      notifyStats,
+    });
+  } catch (error) {
+    console.error('Cancel conference error:', error);
+    res.status(500).json({ error: 'Ошибка отмены конференции' });
+  }
+});
+
+router.delete('/:id', async (req: AuthRequest, res) => {
+  try {
+    const conference = await prisma.conference.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!conference) return res.status(404).json({ error: 'Конференция не найдена' });
+    if (!(await assertWorkspaceMember(prisma, conference.workspaceId, req.userId!, req.userRole))) {
+      return res.status(403).json({ error: 'Нет доступа' });
+    }
+    if (!canManageConference(conference, req)) {
+      return res.status(403).json({ error: 'Только организатор может удалить конференцию' });
+    }
+
+    if (conference.mode === 'instant') {
+      await prisma.conference.delete({ where: { id: conference.id } });
+      return res.json({ message: 'Конференция удалена' });
+    }
+
+    if (conference.mode === 'scheduled' && conference.status === 'scheduled') {
+      const meta = await loadCalendarMeta(conference.calendarEventId);
+      const hasInvitees = meta.attendeeIds.some((id) => id !== conference.createdById);
+      if (hasInvitees) {
+        return res.status(400).json({
+          error: 'У запланированной конференции с участниками используйте «Отменить» — участники получат уведомление',
+          code: 'USE_CANCEL',
+        });
+      }
+      await prisma.$transaction(async (tx) => {
+        if (conference.calendarEventId) {
+          await tx.calendarEvent.delete({ where: { id: conference.calendarEventId } });
+        }
+        await tx.conference.delete({ where: { id: conference.id } });
+      });
+      return res.json({ message: 'Конференция удалена' });
+    }
+
+    return res.status(400).json({ error: 'Эту конференцию нельзя удалить' });
+  } catch (error) {
+    console.error('Delete conference error:', error);
+    res.status(500).json({ error: 'Ошибка удаления конференции' });
   }
 });
 

@@ -118,7 +118,7 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
   const createUser = async (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => {
     const created = await usersApi.create(data);
     await refreshData();
-    return { initialPassword: created?.initialPassword };
+    return { email: created?.email as string | undefined, inviteSent: !!created?.inviteSent };
   };
 
   const updateUser = async (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[] }) => {

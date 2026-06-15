@@ -252,6 +252,7 @@ export async function transferTasks(
 
   await prisma.$transaction(async (tx) => {
     let nextNum = await nextTaskNumber(tx, targetBoardId);
+    let nextPosition = await tx.task.count({ where: { columnId: resolvedColumnId } });
 
     for (const item of pending) {
       const { task, targetTypeId, newAssigneeId, assigneeCleared } = item;
@@ -272,6 +273,7 @@ export async function transferTasks(
           columnId: resolvedColumnId,
           typeId: targetTypeId,
           number: newNumber,
+          position: nextPosition++,
           assigneeId: newAssigneeId,
           customFields: mappedCustomFields as Prisma.InputJsonValue,
           trackedTimeSeconds: 0,

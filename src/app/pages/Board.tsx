@@ -45,7 +45,7 @@ import {
 } from '../utils/boardColumnActions';
 import { TaskElapsedTimeDisplay } from '../components/TaskElapsedTimeDisplay';
 import { TaskPriorityBadge } from '../components/TaskPriorityBadge';
-import { normalizeTaskPriority } from '../utils/taskPriority';
+import { TASK_PRIORITY_KEYS, normalizeTaskPriority } from '../utils/taskPriority';
 import { boardTimeTrackingIsConfigured } from '../utils/boardTimeTracking';
 import { useApp } from '../store/AppContext';
 import {
@@ -60,6 +60,12 @@ import {
 import { buttonVariants } from '../components/ui/button';
 import { cn } from '../components/ui/utils';
 import { taskPath } from '../utils/taskUrls';
+import {
+  applyDragReorder,
+  columnIdsEqual,
+  getColumnTaskIds,
+  sortTasksByPosition,
+} from '../utils/kanbanTaskOrder';
 
 /** После сохранения колонки API возвращает обновлённые поля учёта времени — подмешиваем в карточку без перезагрузки */
 function mergeTaskFromUpdateResponse(prev: TaskType, api: Record<string, unknown>): TaskType {
@@ -79,6 +85,7 @@ function mergeTaskFromUpdateResponse(prev: TaskType, api: Record<string, unknown
   }
   if (api.assignee !== undefined) merged.assignee = api.assignee as TaskType['assignee'];
   if (typeof api.updatedAt === 'string') merged.updatedAt = api.updatedAt;
+  if (typeof api.position === 'number') merged.position = api.position;
   if (Array.isArray(api.columnApprovals)) {
     (merged as TaskType & { columnApprovals?: unknown[] }).columnApprovals = api.columnApprovals;
   }
@@ -277,9 +284,14 @@ export function Board() {
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [createTaskColumnId, setCreateTaskColumnId] = useState<string>('');
   const [assigneeFilterIds, setAssigneeFilterIds] = useState<string[]>([]);
+  const [typeFilterIds, setTypeFilterIds] = useState<string[]>([]);
+  const [priorityFilterKeys, setPriorityFilterKeys] = useState<string[]>([]);
+  const [columnFilterIds, setColumnFilterIds] = useState<string[]>([]);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const filterPanelRef = useRef<HTMLDivElement>(null);
   const dragOriginColumnRef = useRef<string | null>(null);
+  const dragOriginOrderRef = useRef<string[] | null>(null);
+  const dragSnapshotRef = useRef<TaskType[] | null>(null);
   const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
   const [deleteBoardDialogOpen, setDeleteBoardDialogOpen] = useState(false);
   const [isDeletingBoard, setIsDeletingBoard] = useState(false);
@@ -353,17 +365,48 @@ export function Board() {
 
   const boardTasks = tasks;
 
+  const activeFilterCount =
+    assigneeFilterIds.length +
+    typeFilterIds.length +
+    priorityFilterKeys.length +
+    columnFilterIds.length;
+
   const filteredTasks = useMemo(() => {
-    if (assigneeFilterIds.length === 0) return boardTasks;
-    return boardTasks.filter((t) => {
-      if (assigneeFilterIds.includes(UNASSIGNED_FILTER) && !t.assigneeId) return true;
-      if (t.assigneeId && assigneeFilterIds.includes(t.assigneeId)) return true;
-      return false;
+    return boardTasks
+      .filter((t) => {
+        if (columnFilterIds.length > 0 && !columnFilterIds.includes(t.columnId)) return false;
+        if (typeFilterIds.length > 0 && !typeFilterIds.includes(t.typeId)) return false;
+
+        if (priorityFilterKeys.length > 0) {
+          const key = normalizeTaskPriority(t.priority);
+          if (!priorityFilterKeys.includes(key)) return false;
+        }
+
+        if (assigneeFilterIds.length > 0) {
+          if (assigneeFilterIds.includes(UNASSIGNED_FILTER) && !t.assigneeId) return true;
+          if (t.assigneeId && assigneeFilterIds.includes(t.assigneeId)) return true;
+          return false;
+        }
+
+        return true;
+      })
+      .sort(sortTasksByPosition);
+  }, [boardTasks, assigneeFilterIds, typeFilterIds, priorityFilterKeys, columnFilterIds]);
+
+  const filtersHideAllTasks =
+    activeFilterCount > 0 && boardTasks.length > 0 && filteredTasks.length === 0;
+
+  useEffect(() => {
+    const visible = new Set(filteredTasks.map((t) => t.id));
+    setSelectedTaskIds((prev) => {
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
     });
-  }, [boardTasks, assigneeFilterIds]);
+  }, [filteredTasks]);
 
   const taskTypes = useMemo(() => board?.taskTypes || [], [board?.taskTypes]);
   const columns = useMemo(() => board?.columns || [], [board?.columns]);
+  const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
   const boardTracksTime = useMemo(() => boardTimeTrackingIsConfigured(board), [board]);
   const approvalRules = useMemo(() => getBoardApprovalRules(board), [board]);
 
@@ -391,11 +434,17 @@ export function Board() {
     );
   };
 
-  const finishColumnMove = async (taskId: string, targetColumnId: string, originColumnId: string) => {
+  const finishColumnMove = async (
+    taskId: string,
+    targetColumnId: string,
+    originColumnId: string,
+    position?: number,
+    revertSnapshot?: TaskType[] | null,
+  ) => {
     try {
-      const updated = (await tasksApi.update(taskId, {
-        columnId: targetColumnId,
-      })) as Record<string, unknown>;
+      const payload: { columnId: string; position?: number } = { columnId: targetColumnId };
+      if (typeof position === 'number') payload.position = position;
+      const updated = (await tasksApi.update(taskId, payload)) as Record<string, unknown>;
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
           task.id === taskId ? mergeTaskFromUpdateResponse(task, updated) : task,
@@ -406,7 +455,11 @@ export function Board() {
       const message =
         error instanceof ApiError ? error.message : 'Не удалось изменить статус задачи';
       setDragMoveError(message);
-      revertTaskColumn(taskId, originColumnId);
+      if (revertSnapshot) {
+        setTasks(revertSnapshot);
+      } else {
+        revertTaskColumn(taskId, originColumnId);
+      }
       throw error;
     }
   };
@@ -445,7 +498,9 @@ export function Board() {
   }
 
   const getTasksByColumn = (columnId: string) => {
-    return filteredTasks.filter((t) => t.columnId === columnId);
+    return filteredTasks
+      .filter((t) => t.columnId === columnId)
+      .sort(sortTasksByPosition);
   };
 
   const getCreatorName = (task: TaskType) => {
@@ -453,10 +508,18 @@ export function Board() {
     return users.find((u) => u.id === task.createdBy)?.name ?? '—';
   };
 
-  const toggleAssigneeFilter = (id: string) => {
-    setAssigneeFilterIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+  const toggleFilterValue = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    id: string,
+  ) => {
+    setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const clearAllFilters = () => {
+    setAssigneeFilterIds([]);
+    setTypeFilterIds([]);
+    setPriorityFilterKeys([]);
+    setColumnFilterIds([]);
   };
 
   const getTaskTypeName = (typeId: string) => {
@@ -499,14 +562,25 @@ export function Board() {
       customFields: data.customFields,
     });
 
-    setTasks((prev) => [created, ...prev]);
+    setTasks((prev) => {
+      const next = prev.map((t) =>
+        t.columnId === createTaskColumnId
+          ? { ...t, position: (typeof t.position === 'number' ? t.position : 0) + 1 }
+          : t,
+      );
+      return [{ ...created, position: created.position ?? 0 }, ...next];
+    });
   };
 
   const handleDragStart = (event: DragStartEvent) => {
     setDragMoveError(null);
     const { active } = event;
     const task = tasks.find((t) => t.id === active.id);
+    dragSnapshotRef.current = tasks;
     dragOriginColumnRef.current = task?.columnId ?? null;
+    dragOriginOrderRef.current = task?.columnId
+      ? getColumnTaskIds(tasks, task.columnId)
+      : null;
     setActiveTask(task);
   };
 
@@ -516,25 +590,15 @@ export function Board() {
 
     const activeTaskId = active.id as string;
     const overId = over.id as string;
-
     const activeTask = tasks.find((t) => t.id === activeTaskId);
-    const overTask = tasks.find((t) => t.id === overId);
-
     if (!activeTask) return;
 
-    const activeColumn = activeTask.columnId;
-    const overColumn = overTask ? overTask.columnId : overId;
+    const overTask = tasks.find((t) => t.id === overId);
+    if (activeFilterCount > 0 && overTask && activeTask.columnId === overTask.columnId) {
+      return;
+    }
 
-    if (activeColumn === overColumn) return;
-
-    setTasks((prevTasks) => {
-      return prevTasks.map((task) => {
-        if (task.id === activeTaskId) {
-          return { ...task, columnId: overColumn };
-        }
-        return task;
-      });
-    });
+    setTasks((prevTasks) => applyDragReorder(prevTasks, activeTaskId, overId, columnIds));
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -543,27 +607,44 @@ export function Board() {
 
     const activeTaskId = active.id as string;
     const originColumnId = dragOriginColumnRef.current;
+    const originOrder = dragOriginOrderRef.current;
+    const snapshot = dragSnapshotRef.current;
     dragOriginColumnRef.current = null;
+    dragOriginOrderRef.current = null;
+    dragSnapshotRef.current = null;
 
     if (!over) {
-      if (originColumnId) {
-        setTasks((prevTasks) =>
-          prevTasks.map((task) =>
-            task.id === activeTaskId ? { ...task, columnId: originColumnId } : task,
-          ),
-        );
-      }
+      if (snapshot) setTasks(snapshot);
       return;
     }
 
     const targetColumnId = resolveDropColumnId(over.id as string);
-    if (!originColumnId || !targetColumnId || originColumnId === targetColumnId) {
-      if (originColumnId) {
-        setTasks((prevTasks) =>
-          prevTasks.map((task) =>
-            task.id === activeTaskId ? { ...task, columnId: originColumnId } : task,
-          ),
-        );
+    if (!originColumnId || !targetColumnId) {
+      if (snapshot) setTasks(snapshot);
+      return;
+    }
+
+    if (originColumnId === targetColumnId) {
+      if (activeFilterCount > 0) {
+        if (snapshot) setTasks(snapshot);
+        return;
+      }
+      const newOrder = getColumnTaskIds(tasks, originColumnId);
+      if (!originOrder || columnIdsEqual(originOrder, newOrder)) {
+        return;
+      }
+      if (!board) {
+        if (snapshot) setTasks(snapshot);
+        return;
+      }
+      try {
+        await tasksApi.reorderInColumn(board.id, originColumnId, newOrder);
+      } catch (error) {
+        console.error('Error reordering tasks:', error);
+        const message =
+          error instanceof ApiError ? error.message : 'Не удалось изменить порядок задач';
+        setDragMoveError(message);
+        if (snapshot) setTasks(snapshot);
       }
       return;
     }
@@ -605,8 +686,16 @@ export function Board() {
       return;
     }
 
+    const targetPosition = getColumnTaskIds(tasks, targetColumnId).indexOf(activeTaskId);
+
     try {
-      await finishColumnMove(activeTaskId, targetColumnId, originColumnId);
+      await finishColumnMove(
+        activeTaskId,
+        targetColumnId,
+        originColumnId,
+        targetPosition >= 0 ? targetPosition : undefined,
+        snapshot,
+      );
     } catch {
       /* ошибка уже показана */
     }
@@ -708,19 +797,92 @@ export function Board() {
                 type="button"
                 onClick={() => setFilterPanelOpen((o) => !o)}
                 className={`flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors ${
-                  assigneeFilterIds.length > 0
+                  activeFilterCount > 0
                     ? 'bg-brand-light text-brand font-medium'
                     : 'text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <Filter className="w-4 h-4" />
                 Фильтр
-                {assigneeFilterIds.length > 0 ? (
-                  <span className="text-xs opacity-80">({assigneeFilterIds.length})</span>
+                {activeFilterCount > 0 ? (
+                  <span className="text-xs opacity-80">({activeFilterCount})</span>
                 ) : null}
               </button>
               {filterPanelOpen && (
-                <div className="absolute right-0 mt-2 w-72 rounded-lg border border-slate-200 bg-white shadow-lg z-50 p-3 max-h-80 overflow-y-auto">
+                <div className="absolute right-0 mt-2 w-80 rounded-lg border border-slate-200 bg-white shadow-lg z-50 p-3 max-h-[min(28rem,calc(100dvh-8rem))] overflow-y-auto">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                    Тип задачи
+                  </div>
+                  {taskTypes.length === 0 ? (
+                    <p className="text-sm text-slate-400 px-1">Нет типов</p>
+                  ) : (
+                    taskTypes.map((ty) => (
+                      <label
+                        key={ty.id}
+                        className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={typeFilterIds.includes(ty.id)}
+                          onChange={() => toggleFilterValue(setTypeFilterIds, ty.id)}
+                          className="rounded border-slate-300"
+                        />
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white shrink-0"
+                          style={{ backgroundColor: ty.color }}
+                        >
+                          {ty.name}
+                        </span>
+                      </label>
+                    ))
+                  )}
+
+                  <div className="border-t border-slate-100 my-3" />
+
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                    Приоритет
+                  </div>
+                  {TASK_PRIORITY_KEYS.map((key) => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={priorityFilterKeys.includes(key)}
+                        onChange={() => toggleFilterValue(setPriorityFilterKeys, key)}
+                        className="rounded border-slate-300"
+                      />
+                      <TaskPriorityBadge priority={key} compact />
+                    </label>
+                  ))}
+
+                  <div className="border-t border-slate-100 my-3" />
+
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                    Статус
+                  </div>
+                  {columns.length === 0 ? (
+                    <p className="text-sm text-slate-400 px-1">Нет колонок</p>
+                  ) : (
+                    columns.map((col) => (
+                      <label
+                        key={col.id}
+                        className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={columnFilterIds.includes(col.id)}
+                          onChange={() => toggleFilterValue(setColumnFilterIds, col.id)}
+                          className="rounded border-slate-300"
+                        />
+                        {col.name}
+                      </label>
+                    ))
+                  )}
+
+                  <div className="border-t border-slate-100 my-3" />
+
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
                     Исполнитель
                   </div>
@@ -728,7 +890,7 @@ export function Board() {
                     <input
                       type="checkbox"
                       checked={assigneeFilterIds.includes(UNASSIGNED_FILTER)}
-                      onChange={() => toggleAssigneeFilter(UNASSIGNED_FILTER)}
+                      onChange={() => toggleFilterValue(setAssigneeFilterIds, UNASSIGNED_FILTER)}
                       className="rounded border-slate-300"
                     />
                     Без исполнителя
@@ -742,19 +904,19 @@ export function Board() {
                       <input
                         type="checkbox"
                         checked={assigneeFilterIds.includes(u.id)}
-                        onChange={() => toggleAssigneeFilter(u.id)}
+                        onChange={() => toggleFilterValue(setAssigneeFilterIds, u.id)}
                         className="rounded border-slate-300"
                       />
                       {u.name}
                     </label>
                   ))}
-                  {assigneeFilterIds.length > 0 && (
+                  {activeFilterCount > 0 && (
                     <button
                       type="button"
                       className="mt-3 w-full text-xs text-slate-600 hover:text-slate-900 py-1.5 border border-slate-200 rounded"
-                      onClick={() => setAssigneeFilterIds([])}
+                      onClick={clearAllFilters}
                     >
-                      Сбросить фильтр
+                      Сбросить все фильтры
                     </button>
                   )}
                 </div>
@@ -807,6 +969,18 @@ export function Board() {
       ) : null}
 
       <div className="flex-1 overflow-auto p-6">
+        {filtersHideAllTasks ? (
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-2">
+            <span>Нет задач по выбранным фильтрам.</span>
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="text-brand hover:underline text-sm font-medium"
+            >
+              Сбросить фильтры
+            </button>
+          </div>
+        ) : null}
         {viewMode === 'kanban' ? (
           <DndContext
             sensors={sensors}
@@ -918,6 +1092,18 @@ export function Board() {
                 </tr>
               </thead>
               <tbody>
+                {filteredTasks.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={canManageBoardSettings ? 8 : 7}
+                      className="px-4 py-10 text-center text-sm text-slate-500"
+                    >
+                      {activeFilterCount > 0
+                        ? 'Нет задач по выбранным фильтрам'
+                        : 'На доске пока нет задач'}
+                    </td>
+                  </tr>
+                ) : null}
                 {filteredTasks.map((task) => {
                   const column = columns.find((c) => c.id === task.columnId);
                   return (

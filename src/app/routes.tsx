@@ -19,6 +19,7 @@ import { Conferences } from './pages/Conferences';
 import { ConferenceRoom } from './pages/ConferenceRoom';
 import { ConferenceJoin } from './pages/ConferenceJoin';
 import { ChangePassword } from './pages/ChangePassword';
+import { Invite } from './pages/Invite';
 import { useApp } from './store/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -51,6 +52,10 @@ export const router = createBrowserRouter([
   {
     path: '/verify-email',
     element: <VerifyEmail />,
+  },
+  {
+    path: '/invite',
+    element: <Invite />,
   },
   {
     path: '/conferences/join/:shareToken',

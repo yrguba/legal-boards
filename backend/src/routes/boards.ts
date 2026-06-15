@@ -518,9 +518,20 @@ router.post('/:boardId/columns/:columnId/move-tasks', requireStaffUser, async (r
       }
     }
 
-    const result = await prisma.task.updateMany({
-      where: { boardId, columnId },
-      data: { columnId: toColumnId },
+    const result = await prisma.$transaction(async (tx) => {
+      const tasksOrdered = await tx.task.findMany({
+        where: { boardId, columnId },
+        orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
+        select: { id: true },
+      });
+      let nextPos = await tx.task.count({ where: { columnId: toColumnId } });
+      for (const row of tasksOrdered) {
+        await tx.task.update({
+          where: { id: row.id },
+          data: { columnId: toColumnId, position: nextPos++ },
+        });
+      }
+      return { count: tasksOrdered.length };
     });
 
     if (tasksInColumn.length > 0) {

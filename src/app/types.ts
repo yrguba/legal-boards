@@ -151,6 +151,8 @@ export interface Task {
   boardCode?: string;
   boardId: string;
   columnId: string;
+  /** Порядок внутри колонки (0 — сверху) */
+  position?: number;
   title: string;
   description?: string;
   typeId: string;
@@ -215,6 +217,9 @@ export interface Conference {
   allowGuests: boolean;
   joinUrl: string;
   jitsiDomain: string;
+  description?: string | null;
+  attendeeIds?: string[];
+  attendeeCount?: number;
   createdBy?: { id: string; name: string; email?: string; avatar?: string | null };
   canJoin?: boolean;
 }
@@ -235,7 +240,9 @@ export interface Notification {
     | 'document'
     | 'mention'
     | 'user_added'
-    | 'conference_invite';
+    | 'conference_invite'
+    | 'conference_updated'
+    | 'conference_cancelled';
   title: string;
   message: string;
   userId: string;

@@ -77,6 +77,18 @@ export const authApi = {
     });
   },
 
+  async acceptInvite(token: string) {
+    const data = await fetchApi<{
+      message: string;
+      token?: string;
+      user?: any;
+    }>(`/auth/invite?token=${encodeURIComponent(token)}`);
+    if (data.token) {
+      localStorage.setItem('auth_token', data.token);
+    }
+    return data;
+  },
+
   async verifyEmail(token: string) {
     const data = await fetchApi<{
       message: string;
@@ -192,7 +204,7 @@ export const usersApi = {
   },
 
   async resetPassword(id: string) {
-    return fetchApi<{ message: string; initialPassword: string }>(`/users/${id}/reset-password`, {
+    return fetchApi<{ message: string; inviteSent: boolean }>(`/users/${id}/reset-password`, {
       method: 'POST',
     });
   },
@@ -436,6 +448,13 @@ export const tasksApi = {
     return fetchApi<any>(`/tasks/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  },
+
+  async reorderInColumn(boardId: string, columnId: string, taskIds: string[]) {
+    return fetchApi<{ ok: boolean }>('/tasks/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ boardId, columnId, taskIds }),
     });
   },
 
@@ -686,6 +705,33 @@ export const conferencesApi = {
 
   async end(id: string) {
     return fetchApi<any>(`/conferences/${id}/end`, { method: 'POST' });
+  },
+
+  async update(
+    id: string,
+    data: {
+      title?: string;
+      description?: string | null;
+      startAt?: string;
+      endAt?: string;
+      attendeeIds?: string[];
+    },
+  ) {
+    return fetchApi<any>(`/conferences/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async cancel(id: string) {
+    return fetchApi<{ message: string; notifyStats?: { notifications: number; emails: number } }>(
+      `/conferences/${id}/cancel`,
+      { method: 'POST' },
+    );
+  },
+
+  async delete(id: string) {
+    return fetchApi<{ message: string }>(`/conferences/${id}`, { method: 'DELETE' });
   },
 
   async shareToChat(id: string) {

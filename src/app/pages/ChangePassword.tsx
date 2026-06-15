@@ -57,9 +57,7 @@ export function ChangePassword() {
             {forced ? 'Смена пароля' : 'Новый пароль'}
           </h1>
           <p className="text-sm text-slate-600 mt-1 text-center">
-            {forced
-              ? 'При первом входе задайте свой пароль вместо временного от администратора.'
-              : 'Введите текущий пароль и новый.'}
+            {forced ? 'Задайте пароль для входа в систему.' : 'Введите текущий пароль и новый.'}
           </p>
         </div>
 
@@ -70,19 +68,19 @@ export function ChangePassword() {
         ) : null}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              {forced ? 'Временный пароль' : 'Текущий пароль'}
-            </label>
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required={!forced}
-              className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
-              autoComplete="current-password"
-            />
-          </div>
+          {!forced ? (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Текущий пароль</label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required={!forced}
+                className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                autoComplete="current-password"
+              />
+            </div>
+          ) : null}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Новый пароль</label>
             <input

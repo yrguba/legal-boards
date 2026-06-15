@@ -19,11 +19,18 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
     departmentId: '',
     groupIds: [] as string[],
   });
-  const [createdPassword, setCreatedPassword] = useState<string | null>(null);
+  const [inviteSentTo, setInviteSentTo] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const workspaceDepartments = departments.filter(d => d.workspaceId === currentWorkspace?.id);
-  const workspaceGroups = groups.filter(g => g.workspaceId === currentWorkspace?.id);
+  const workspaceDepartments = departments.filter((d) => d.workspaceId === currentWorkspace?.id);
+  const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
+
+  const handleClose = () => {
+    setInviteSentTo(null);
+    setSubmitError(null);
+    onClose();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +46,7 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
     }
 
     setSubmitError(null);
+    setSubmitting(true);
     try {
       const res = await createUser({
         name: formData.name,
@@ -49,7 +57,7 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
         groupIds: formData.groupIds,
       });
 
-      setCreatedPassword(res?.initialPassword || null);
+      setInviteSentTo(res?.email ?? formData.email);
       setFormData({
         name: '',
         email: '',
@@ -59,14 +67,16 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
       });
     } catch (e: any) {
       setSubmitError(e?.message || 'Не удалось добавить сотрудника');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const toggleGroup = (groupId: string) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       groupIds: prev.groupIds.includes(groupId)
-        ? prev.groupIds.filter(id => id !== groupId)
+        ? prev.groupIds.filter((id) => id !== groupId)
         : [...prev.groupIds, groupId],
     }));
   };
@@ -78,134 +88,131 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-slate-900">Добавить сотрудника</h2>
-          <button
-            onClick={onClose}
-            className="p-1 hover:bg-slate-100 rounded transition-colors"
-          >
+          <button onClick={handleClose} className="p-1 hover:bg-slate-100 rounded transition-colors">
             <X className="w-5 h-5 text-slate-600" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          {submitError && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {submitError}
-            </div>
-          )}
-
-          {createdPassword && (
-            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              Пароль для входа: <span className="font-medium">{createdPassword}</span>
-              <div className="text-xs text-slate-500 mt-1">
-                Передайте пароль сотруднику. При первом входе он задаст свой пароль.
-              </div>
-            </div>
-          )}
-
+        {inviteSentTo ? (
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Имя *
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
-                placeholder="Иван Иванов"
-                required
-              />
+            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+              Приглашение отправлено на <span className="font-medium">{inviteSentTo}</span>.
+              <p className="text-xs text-green-700 mt-2">
+                Сотрудник получит ссылку для активации аккаунта и создания пароля.
+              </p>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Email *
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
-                placeholder="ivan@example.com"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Роль *
-              </label>
-              <select
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
-                className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="member">Сотрудник</option>
-                <option value="manager">Менеджер</option>
-                <option value="admin">Администратор</option>
-                <option value="guest">Гость</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Отдел
-              </label>
-              <select
-                value={formData.departmentId}
-                onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">Не указано</option>
-                {workspaceDepartments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>
-                    {dept.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {workspaceGroups.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Группы
-                </label>
-                <div className="space-y-2 max-h-40 overflow-y-auto">
-                  {workspaceGroups.map((group) => (
-                    <label
-                      key={group.id}
-                      className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={formData.groupIds.includes(group.id)}
-                        onChange={() => toggleGroup(group.id)}
-                        className="w-4 h-4 text-brand border-slate-300 rounded focus:ring-brand"
-                      />
-                      <span className="text-sm text-slate-700">{group.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3 mt-6">
             <button
               type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
+              onClick={handleClose}
+              className="w-full px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors"
             >
-              Отмена
-            </button>
-            <button
-              type="submit"
-              className="flex-1 px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors"
-            >
-              Добавить
+              Закрыть
             </button>
           </div>
-        </form>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            {submitError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Имя *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                  placeholder="Иван Иванов"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                  placeholder="ivan@example.com"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Роль *</label>
+                <select
+                  value={formData.role}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="member">Сотрудник</option>
+                  <option value="manager">Менеджер</option>
+                  <option value="admin">Администратор</option>
+                  <option value="guest">Гость</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Отдел</label>
+                <select
+                  value={formData.departmentId}
+                  onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="">Не указано</option>
+                  {workspaceDepartments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {workspaceGroups.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Группы</label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {workspaceGroups.map((group) => (
+                      <label
+                        key={group.id}
+                        className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formData.groupIds.includes(group.id)}
+                          onChange={() => toggleGroup(group.id)}
+                          className="w-4 h-4 text-brand border-slate-300 rounded focus:ring-brand"
+                        />
+                        <span className="text-sm text-slate-700">{group.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="flex-1 px-4 py-2 text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex-1 px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors disabled:opacity-50"
+              >
+                {submitting ? 'Отправка…' : 'Добавить'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

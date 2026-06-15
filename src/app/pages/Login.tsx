@@ -47,6 +47,9 @@ export function Login() {
       } else if (error instanceof ApiError && error.code === 'EMAIL_NOT_VERIFIED') {
         setError('Подтвердите email перед входом');
         setUnverifiedEmail(email.trim());
+      } else if (error instanceof ApiError && error.code === 'PASSWORD_INVITE_REQUIRED') {
+        setError(error.message);
+        setInfo('Проверьте почту — вам должно прийти письмо со ссылкой для активации аккаунта.');
       } else if (error instanceof ApiError && error.status === 401) {
         setError('Неверный email или пароль');
       } else if (error instanceof ApiError) {

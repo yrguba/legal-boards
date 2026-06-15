@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { X } from 'lucide-react';
 import { conferencesApi } from '../../services/api';
+import type { Conference } from '../../types';
 
 export type WorkspaceMemberOption = {
   id: string;
@@ -16,13 +17,33 @@ type Props = {
   workspaceId: string;
   members: WorkspaceMemberOption[];
   onSaved: () => void;
+  conference?: Conference | null;
 };
 
 function toLocalInput(d: Date) {
   return format(d, "yyyy-MM-dd'T'HH:mm");
 }
 
-export function ScheduleConferenceModal({ open, onClose, workspaceId, members, onSaved }: Props) {
+function formatNotifyStats(stats?: {
+  notifications?: number;
+  emails?: number;
+  emailsFailed?: number;
+}): string | null {
+  if (!stats) return null;
+  const parts = [`уведомлений: ${stats.notifications ?? 0}`, `писем: ${stats.emails ?? 0}`];
+  if (stats.emailsFailed) parts.push(`ошибок email: ${stats.emailsFailed}`);
+  return parts.join(', ');
+}
+
+export function ScheduleConferenceModal({
+  open,
+  onClose,
+  workspaceId,
+  members,
+  onSaved,
+  conference,
+}: Props) {
+  const isEdit = !!conference;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [start, setStart] = useState('');
@@ -33,19 +54,27 @@ export function ScheduleConferenceModal({ open, onClose, workspaceId, members, o
 
   useEffect(() => {
     if (!open) return;
-    const base = new Date();
-    base.setMinutes(0, 0, 0);
-    base.setHours(base.getHours() + 1);
-    const s = new Date(base);
-    const e = new Date(base);
-    e.setHours(e.getHours() + 1);
-    setTitle('');
-    setDescription('');
-    setStart(toLocalInput(s));
-    setEnd(toLocalInput(e));
-    setAttendeeIds(new Set());
+    if (conference) {
+      setTitle(conference.title);
+      setDescription(conference.description ?? '');
+      setStart(toLocalInput(new Date(conference.startAt)));
+      setEnd(conference.endAt ? toLocalInput(new Date(conference.endAt)) : '');
+      setAttendeeIds(new Set(conference.attendeeIds ?? []));
+    } else {
+      const base = new Date();
+      base.setMinutes(0, 0, 0);
+      base.setHours(base.getHours() + 1);
+      const s = new Date(base);
+      const e = new Date(base);
+      e.setHours(e.getHours() + 1);
+      setTitle('');
+      setDescription('');
+      setStart(toLocalInput(s));
+      setEnd(toLocalInput(e));
+      setAttendeeIds(new Set());
+    }
     setErr(null);
-  }, [open]);
+  }, [open, conference]);
 
   if (!open) return null;
 
@@ -69,26 +98,32 @@ export function ScheduleConferenceModal({ open, onClose, workspaceId, members, o
     }
     setSaving(true);
     try {
-      const result = await conferencesApi.createScheduled({
-        workspaceId,
-        title: title.trim(),
-        description: description.trim() || null,
-        startAt: startD.toISOString(),
-        endAt: endD.toISOString(),
-        attendeeIds: Array.from(attendeeIds),
-      });
-      const stats = result.inviteStats as
-        | { notifications?: number; emails?: number; emailsFailed?: number }
-        | undefined;
-      if (stats) {
-        const parts = [`уведомлений: ${stats.notifications ?? 0}`, `писем: ${stats.emails ?? 0}`];
-        if (stats.emailsFailed) parts.push(`ошибок email: ${stats.emailsFailed}`);
-        window.alert(`Конференция запланирована (${parts.join(', ')})`);
+      if (isEdit && conference) {
+        const result = await conferencesApi.update(conference.id, {
+          title: title.trim(),
+          description: description.trim() || null,
+          startAt: startD.toISOString(),
+          endAt: endD.toISOString(),
+          attendeeIds: Array.from(attendeeIds),
+        });
+        const statsMsg = formatNotifyStats(result.notifyStats);
+        if (statsMsg) window.alert(`Изменения сохранены (${statsMsg})`);
+      } else {
+        const result = await conferencesApi.createScheduled({
+          workspaceId,
+          title: title.trim(),
+          description: description.trim() || null,
+          startAt: startD.toISOString(),
+          endAt: endD.toISOString(),
+          attendeeIds: Array.from(attendeeIds),
+        });
+        const statsMsg = formatNotifyStats(result.inviteStats);
+        if (statsMsg) window.alert(`Конференция запланирована (${statsMsg})`);
       }
       onSaved();
       onClose();
     } catch (x) {
-      setErr(x instanceof Error ? x.message : 'Ошибка планирования');
+      setErr(x instanceof Error ? x.message : isEdit ? 'Ошибка сохранения' : 'Ошибка планирования');
     } finally {
       setSaving(false);
     }
@@ -100,9 +135,13 @@ export function ScheduleConferenceModal({ open, onClose, workspaceId, members, o
       <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
         <div className="flex justify-between items-start gap-4 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Запланировать конференцию</h2>
+            <h2 className="text-lg font-semibold text-slate-900">
+              {isEdit ? 'Изменить конференцию' : 'Запланировать конференцию'}
+            </h2>
             <p className="text-sm text-slate-500 mt-1">
-              Участники получат уведомление и письмо на email
+              {isEdit
+                ? 'Участники получат уведомление об изменениях'
+                : 'Участники получат уведомление и письмо на email'}
             </p>
           </div>
           <button
@@ -195,14 +234,14 @@ export function ScheduleConferenceModal({ open, onClose, workspaceId, members, o
               onClick={onClose}
               className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-800 hover:bg-slate-50"
             >
-              Отмена
+              Закрыть
             </button>
             <button
               type="submit"
               disabled={saving}
               className="px-4 py-2 text-sm rounded-lg bg-brand text-white disabled:opacity-50"
             >
-              {saving ? 'Создание…' : 'Запланировать'}
+              {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Запланировать'}
             </button>
           </div>
         </form>

@@ -220,6 +220,60 @@ router.get('/verify-email', async (req, res) => {
   }
 });
 
+router.get('/invite', async (req, res) => {
+  try {
+    const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+    if (!token) {
+      return res.status(400).json({ error: 'Токен приглашения не указан' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { passwordInviteToken: token },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        departmentId: true,
+        avatar: true,
+        mustChangePassword: true,
+        passwordInviteExpiresAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        error: 'Недействительная ссылка приглашения',
+        code: 'INVITE_INVALID',
+      });
+    }
+
+    if (!user.mustChangePassword) {
+      return res.status(400).json({
+        error: 'Ссылка уже использована. Вы можете войти со своим паролем.',
+        code: 'INVITE_INACTIVE',
+        alreadyActivated: true,
+      });
+    }
+
+    if (!user.passwordInviteExpiresAt || user.passwordInviteExpiresAt < new Date()) {
+      return res.status(400).json({
+        error: 'Срок действия ссылки истёк. Обратитесь к администратору за новым приглашением.',
+        code: 'INVITE_EXPIRED',
+      });
+    }
+
+    res.json({
+      message: 'Перейдите к созданию пароля',
+      token: issueToken(user),
+      user: publicUser(user),
+    });
+  } catch (error) {
+    console.error('Accept invite error:', error);
+    res.status(500).json({ error: 'Ошибка активации приглашения' });
+  }
+});
+
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -232,6 +286,13 @@ router.post('/login', async (req, res) => {
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Неверные учетные данные' });
+    }
+
+    if (user.mustChangePassword) {
+      return res.status(403).json({
+        error: 'Активируйте аккаунт по ссылке из письма-приглашения, затем задайте свой пароль',
+        code: 'PASSWORD_INVITE_REQUIRED',
+      });
     }
 
     if (isRegistrationEnabled() && !user.emailVerified) {
@@ -333,6 +394,8 @@ router.post('/change-password', authenticate, async (req: AuthRequest, res) => {
       data: {
         password: await bcrypt.hash(newPassword.trim(), 10),
         mustChangePassword: false,
+        passwordInviteToken: null,
+        passwordInviteExpiresAt: null,
       },
       select: {
         id: true,
