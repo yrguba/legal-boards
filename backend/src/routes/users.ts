@@ -8,6 +8,7 @@ import { isEmailConfigured } from '../utils/email';
 import {
   assignPasswordInviteToken,
   buildPasswordInviteUrl,
+  isEmployeeInviteEmailEnabled,
   sendPasswordInviteEmail,
 } from '../utils/passwordInvite';
 import {
@@ -575,7 +576,8 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
       ? password.trim()
       : Math.random().toString(36).slice(2, 10);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
-    const mustChangePassword = !adminProvidedPassword;
+    const sendInviteEmail = !adminProvidedPassword && isEmployeeInviteEmailEnabled();
+    const mustChangePassword = sendInviteEmail;
 
     const gids: string[] = Array.isArray(groupIds) ? groupIds : [];
     const groupGate = await assertUserGroupsMatchDepartment(
@@ -635,7 +637,23 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
       select: { id: true, name: true },
     });
 
-    if (mustChangePassword) {
+    const notification = await prisma.notification.create({
+      data: {
+        type: 'user_added',
+        title: 'Добро пожаловать',
+        message: `Вас добавили в рабочее пространство "${ws?.name || 'пространство'}"`,
+        userId: result.user.id,
+        relatedId: workspaceId,
+      },
+    });
+
+    broadcast({
+      type: 'notification',
+      userId: result.user.id,
+      notification,
+    });
+
+    if (sendInviteEmail) {
       if (!isEmailConfigured()) {
         await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
         return res.status(503).json({
@@ -660,22 +678,6 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
         return res.status(500).json({ error: msg });
       }
 
-      const notification = await prisma.notification.create({
-        data: {
-          type: 'user_added',
-          title: 'Добро пожаловать',
-          message: `Вас добавили в рабочее пространство "${ws?.name || 'пространство'}"`,
-          userId: result.user.id,
-          relatedId: workspaceId,
-        },
-      });
-
-      broadcast({
-        type: 'notification',
-        userId: result.user.id,
-        notification,
-      });
-
       return res.json({
         ...result.user,
         inviteSent: true,
@@ -683,23 +685,11 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
       });
     }
 
-    const notification = await prisma.notification.create({
-      data: {
-        type: 'user_added',
-        title: 'Добро пожаловать',
-        message: `Вас добавили в рабочее пространство "${ws?.name || 'пространство'}"`,
-        userId: result.user.id,
-        relatedId: workspaceId,
-      },
+    res.json({
+      ...result.user,
+      inviteSent: false,
+      ...(!adminProvidedPassword ? { initialPassword: plainPassword } : {}),
     });
-
-    broadcast({
-      type: 'notification',
-      userId: result.user.id,
-      notification,
-    });
-
-    res.json({ ...result.user, inviteSent: false });
   } catch (error) {
     console.error('Create user error:', error);
     res.status(500).json({ error: 'Ошибка создания пользователя' });
@@ -753,10 +743,41 @@ router.post('/:id/reset-password', authorize('admin'), async (req: AuthRequest, 
 
     const plainPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
+    const sendInviteEmail = isEmployeeInviteEmailEnabled();
 
-    if (!isEmailConfigured()) {
-      return res.status(503).json({
-        error: 'Email-сервис не настроен (RESEND_API_KEY, RESEND_FROM). Невозможно отправить приглашение.',
+    if (sendInviteEmail) {
+      if (!isEmailConfigured()) {
+        return res.status(503).json({
+          error: 'Email-сервис не настроен (RESEND_API_KEY, RESEND_FROM). Невозможно отправить приглашение.',
+        });
+      }
+
+      await prisma.user.update({
+        where: { id: target.id },
+        data: {
+          password: hashedPassword,
+          mustChangePassword: true,
+        },
+      });
+
+      try {
+        const inviteToken = await assignPasswordInviteToken(prisma, target.id);
+        const inviteUrl = buildPasswordInviteUrl(inviteToken);
+        await sendPasswordInviteEmail({
+          to: target.email,
+          name: target.name,
+          inviteUrl,
+          kind: 'reset',
+        });
+      } catch (mailErr) {
+        console.error('Reset password invite email error:', mailErr);
+        const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
+        return res.status(500).json({ error: msg });
+      }
+
+      return res.json({
+        message: `Приглашение со ссылкой для смены пароля отправлено на ${target.email}`,
+        inviteSent: true,
       });
     }
 
@@ -764,28 +785,16 @@ router.post('/:id/reset-password', authorize('admin'), async (req: AuthRequest, 
       where: { id: target.id },
       data: {
         password: hashedPassword,
-        mustChangePassword: true,
+        mustChangePassword: false,
+        passwordInviteToken: null,
+        passwordInviteExpiresAt: null,
       },
     });
 
-    try {
-      const inviteToken = await assignPasswordInviteToken(prisma, target.id);
-      const inviteUrl = buildPasswordInviteUrl(inviteToken);
-      await sendPasswordInviteEmail({
-        to: target.email,
-        name: target.name,
-        inviteUrl,
-        kind: 'reset',
-      });
-    } catch (mailErr) {
-      console.error('Reset password invite email error:', mailErr);
-      const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
-      return res.status(500).json({ error: msg });
-    }
-
     res.json({
-      message: `Приглашение со ссылкой для смены пароля отправлено на ${target.email}`,
-      inviteSent: true,
+      message: 'Пароль сброшен',
+      inviteSent: false,
+      initialPassword: plainPassword,
     });
   } catch (error) {
     console.error('Reset user password error:', error);

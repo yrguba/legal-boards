@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { Check, Copy, X } from 'lucide-react';
 import type { UserRole } from '../types';
 import { useEmployees } from '../store/EmployeesContext';
 import { useApp } from '../store/AppContext';
@@ -8,6 +8,10 @@ interface CreateEmployeeModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+type SuccessState =
+  | { kind: 'invite'; email: string }
+  | { kind: 'password'; email: string; initialPassword: string };
 
 export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProps) {
   const { currentWorkspace } = useApp();
@@ -19,7 +23,8 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
     departmentId: '',
     groupIds: [] as string[],
   });
-  const [inviteSentTo, setInviteSentTo] = useState<string | null>(null);
+  const [success, setSuccess] = useState<SuccessState | null>(null);
+  const [copied, setCopied] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -27,9 +32,20 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
   const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
 
   const handleClose = () => {
-    setInviteSentTo(null);
+    setSuccess(null);
+    setCopied(false);
     setSubmitError(null);
     onClose();
+  };
+
+  const handleCopyPassword = async (password: string) => {
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setSubmitError('Не удалось скопировать пароль');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,7 +73,14 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
         groupIds: formData.groupIds,
       });
 
-      setInviteSentTo(res?.email ?? formData.email);
+      const email = res?.email ?? formData.email;
+
+      if (res?.initialPassword) {
+        setSuccess({ kind: 'password', email, initialPassword: res.initialPassword });
+      } else {
+        setSuccess({ kind: 'invite', email });
+      }
+
       setFormData({
         name: '',
         email: '',
@@ -93,14 +116,38 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
           </button>
         </div>
 
-        {inviteSentTo ? (
+        {success ? (
           <div className="space-y-4">
-            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-              Приглашение отправлено на <span className="font-medium">{inviteSentTo}</span>.
-              <p className="text-xs text-green-700 mt-2">
-                Сотрудник получит ссылку для активации аккаунта и создания пароля.
-              </p>
-            </div>
+            {success.kind === 'invite' ? (
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+                Приглашение отправлено на <span className="font-medium">{success.email}</span>.
+                <p className="text-xs text-green-700 mt-2">
+                  Сотрудник получит ссылку для активации аккаунта и создания пароля.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p>
+                  Сотрудник <span className="font-medium">{success.email}</span> создан.
+                </p>
+                <p className="text-xs text-amber-800 mt-2">
+                  Передайте временный пароль сотруднику — письмо не отправлялось.
+                </p>
+                <div className="mt-3 flex items-center gap-2">
+                  <code className="flex-1 rounded border border-amber-300 bg-white px-3 py-2 font-mono text-sm text-slate-900">
+                    {success.initialPassword}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyPassword(success.initialPassword)}
+                    className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-amber-100"
+                  >
+                    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                    {copied ? 'Скопировано' : 'Копировать'}
+                  </button>
+                </div>
+              </div>
+            )}
             <button
               type="button"
               onClick={handleClose}
@@ -208,7 +255,7 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
                 disabled={submitting}
                 className="flex-1 px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors disabled:opacity-50"
               >
-                {submitting ? 'Отправка…' : 'Добавить'}
+                {submitting ? 'Сохранение…' : 'Добавить'}
               </button>
             </div>
           </form>

@@ -204,9 +204,12 @@ export const usersApi = {
   },
 
   async resetPassword(id: string) {
-    return fetchApi<{ message: string; inviteSent: boolean }>(`/users/${id}/reset-password`, {
-      method: 'POST',
-    });
+    return fetchApi<{ message: string; inviteSent: boolean; initialPassword?: string }>(
+      `/users/${id}/reset-password`,
+      {
+        method: 'POST',
+      },
+    );
   },
 
   async delete(id: string) {
