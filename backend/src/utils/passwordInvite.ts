@@ -5,11 +5,10 @@ import { buildPasswordInviteEmailHtml, isConsoleEmailMode, sendEmail } from './e
 
 export const PASSWORD_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** По умолчанию true: письмо со ссылкой. false — пароль показывается администратору в UI. */
+/** По умолчанию false: пароль в UI. true — письмо со ссылкой. */
 export function isEmployeeInviteEmailEnabled(): boolean {
   const raw = process.env.EMPLOYEE_INVITE_EMAIL?.trim().toLowerCase();
-  if (raw === 'false' || raw === '0' || raw === 'no') return false;
-  return true;
+  return raw === 'true' || raw === '1' || raw === 'yes';
 }
 
 export function createPasswordInviteToken(): string {
