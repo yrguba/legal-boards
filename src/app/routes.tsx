@@ -22,6 +22,7 @@ import { ChangePassword } from './pages/ChangePassword';
 import { Invite } from './pages/Invite';
 import { WorkspaceInvite } from './pages/WorkspaceInvite';
 import { useApp } from './store/AppContext';
+import { FeatureTabGuard } from './components/FeatureTabGuard';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useApp();
@@ -100,15 +101,27 @@ export const router = createBrowserRouter([
       },
       {
         path: 'documents',
-        element: <Documents />,
+        element: (
+          <FeatureTabGuard tab="documents">
+            <Documents />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'chat',
-        element: <Chat />,
+        element: (
+          <FeatureTabGuard tab="chat">
+            <Chat />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'calendar',
-        element: <Calendar />,
+        element: (
+          <FeatureTabGuard tab="calendar">
+            <Calendar />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'conferences',
@@ -120,11 +133,19 @@ export const router = createBrowserRouter([
       },
       {
         path: 'knowledge/:articleId',
-        element: <Knowledge />,
+        element: (
+          <FeatureTabGuard tab="knowledge">
+            <Knowledge />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'knowledge',
-        element: <Knowledge />,
+        element: (
+          <FeatureTabGuard tab="knowledge">
+            <Knowledge />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'workspaces',

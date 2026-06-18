@@ -44,6 +44,17 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   return response.json();
 }
 
+export const configApi = {
+  async getFeatureTabs() {
+    return fetchApi<{
+      documents: boolean;
+      knowledge: boolean;
+      chat: boolean;
+      calendar: boolean;
+    }>('/config/tabs');
+  },
+};
+
 // Auth API
 export const authApi = {
   async getRegistrationConfig() {

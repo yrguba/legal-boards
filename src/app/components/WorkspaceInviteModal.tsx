@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { ApiError, invitesApi } from '../services/api';
 import { useApp } from '../store/AppContext';
@@ -79,9 +80,9 @@ export function WorkspaceInviteModal({ inviteId, onClose, onDone }: WorkspaceInv
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+      <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-900">Приглашение в пространство</h2>
           <button type="button" onClick={onClose} className="p-1 hover:bg-slate-100 rounded">
@@ -128,6 +129,7 @@ export function WorkspaceInviteModal({ inviteId, onClose, onDone }: WorkspaceInv
           <p className="text-sm text-red-700">{error}</p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

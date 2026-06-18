@@ -1,20 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { X, Bell, CheckCheck, FileText, MessageSquare, ArrowRightLeft, AtSign, UserPlus, Video } from 'lucide-react';
 import type { Notification } from '../types';
 import { useNavigate } from 'react-router';
 import { useNotifications } from '../store/NotificationsContext';
-import { WorkspaceInviteModal } from './WorkspaceInviteModal';
-
 interface NotificationsPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenInvite: (inviteId: string) => void;
 }
 
-export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps) {
+export function NotificationsPanel({ isOpen, onClose, onOpenInvite }: NotificationsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { items, isLoading, refresh, markAsRead, markAllAsRead } = useNotifications();
-  const [activeInviteId, setActiveInviteId] = useState<string | null>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -167,8 +165,7 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
                       }
 
                       if (notification.type === 'workspace_invite' && notification.relatedId) {
-                        setActiveInviteId(notification.relatedId);
-                        onClose();
+                        onOpenInvite(notification.relatedId);
                         return;
                       }
 
@@ -219,14 +216,6 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
           )}
         </div>
       </div>
-
-      {activeInviteId && (
-        <WorkspaceInviteModal
-          inviteId={activeInviteId}
-          onClose={() => setActiveInviteId(null)}
-          onDone={() => void refresh()}
-        />
-      )}
     </div>
   );
 }
