@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { Plus, LayoutGrid, List, Pencil, Trash2 } from 'lucide-react';
+import { Plus, LayoutGrid, List, Pencil, Trash2, Layers } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { CreateBoardModal } from '../components/CreateBoardModal';
+import { CreateAggregatedBoardModal } from '../components/CreateAggregatedBoardModal';
 import { boardsApi, tasksApi } from '../services/api';
 import type { Board } from '../types';
 import {
@@ -20,6 +21,9 @@ import { cn } from '../components/ui/utils';
 export function Boards() {
   const { currentWorkspace, currentUser } = useApp();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreateAggregatedOpen, setIsCreateAggregatedOpen] = useState(false);
+  const [isEditAggregatedOpen, setIsEditAggregatedOpen] = useState(false);
+  const [editingAggregatedBoard, setEditingAggregatedBoard] = useState<Board | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingBoard, setEditingBoard] = useState<Board | null>(null);
   const [editingBoardColumnTaskCounts, setEditingBoardColumnTaskCounts] = useState<
@@ -91,6 +95,99 @@ export function Boards() {
       cancelled = true;
     };
   }, [editingBoard?.id, isEditModalOpen]);
+
+  const handleCreateAggregatedBoard = async (boardData: {
+    name: string;
+    code: string;
+    description?: string;
+    visibility: Record<string, unknown>;
+    sourceBoardIds: string[];
+  }) => {
+    const workspaceId = currentWorkspace?.id;
+    if (!workspaceId) {
+      const err = new Error('Не выбрано рабочее пространство');
+      setError(err.message);
+      throw err;
+    }
+
+    setError(null);
+    try {
+      const created = await boardsApi.createAggregated({ ...boardData, workspaceId });
+      setWorkspaceBoards((prev) => [
+        {
+          ...created,
+          kind: 'aggregated',
+          viewMode: 'kanban',
+          columns: [],
+          taskFields: [],
+          taskTypes: [],
+          visibility: created?.visibility || {},
+          sources: created?.sources || [],
+        },
+        ...prev,
+      ]);
+    } catch (e: any) {
+      setError(e?.message || 'Не удалось создать сводную доску');
+      throw e;
+    }
+  };
+
+  const handleEditAggregatedBoard = async (boardData: {
+    name: string;
+    code: string;
+    description?: string;
+    visibility: Record<string, unknown>;
+    sourceBoardIds: string[];
+  }) => {
+    if (!editingAggregatedBoard) {
+      const err = new Error('Не выбрана доска для редактирования');
+      setError(err.message);
+      throw err;
+    }
+
+    setError(null);
+    try {
+      const updated = await boardsApi.updateAggregated(editingAggregatedBoard.id, boardData);
+      setWorkspaceBoards((prev) =>
+        prev.map((b) =>
+          b.id === editingAggregatedBoard.id
+            ? {
+                ...updated,
+                kind: 'aggregated',
+                viewMode: 'kanban',
+                columns: [],
+                taskFields: [],
+                taskTypes: [],
+                visibility: updated?.visibility || {},
+                sources: updated?.sources || [],
+              }
+            : b,
+        ),
+      );
+    } catch (e: any) {
+      setError(e?.message || 'Не удалось обновить сводную доску');
+      throw e;
+    }
+  };
+
+  const openEditBoard = async (board: Board) => {
+    if (board.kind === 'aggregated') {
+      try {
+        const full = await boardsApi.getById(board.id);
+        setEditingAggregatedBoard(full);
+        setIsEditAggregatedOpen(true);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : 'Не удалось загрузить сводную доску');
+      }
+      return;
+    }
+    setEditingBoardColumnTaskCounts({});
+    setEditingBoardTypeTaskCounts({});
+    setEditingBoard(board);
+    setIsEditModalOpen(true);
+  };
+
+  const standardBoards = workspaceBoards.filter((b) => b.kind !== 'aggregated');
 
   const handleCreateBoard = async (boardData: any) => {
     const workspaceId = currentWorkspace?.id;
@@ -177,13 +274,22 @@ export function Boards() {
           </p>
         </div>
         {canCreateBoards && (
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Создать доску
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsCreateAggregatedOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 border border-brand text-brand rounded hover:bg-brand-light transition-colors"
+            >
+              <Layers className="w-4 h-4" />
+              Сводная доска
+            </button>
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Создать доску
+            </button>
+          </div>
         )}
       </div>
 
@@ -229,10 +335,18 @@ export function Boards() {
                     >
                       {board.name}
                     </Link>
+                    {board.kind === 'aggregated' ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-brand mb-1">
+                        <Layers className="size-3" />
+                        Сводная
+                      </span>
+                    ) : null}
                     <p className="text-sm text-slate-600 line-clamp-2">{board.description}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {(board.viewMode || 'kanban') === 'kanban' ? (
+                    {board.kind === 'aggregated' ? (
+                      <Layers className="w-5 h-5 text-brand" />
+                    ) : (board.viewMode || 'kanban') === 'kanban' ? (
                       <LayoutGrid className="w-5 h-5 text-slate-400" />
                     ) : (
                       <List className="w-5 h-5 text-slate-400" />
@@ -244,10 +358,7 @@ export function Boards() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            setEditingBoardColumnTaskCounts({});
-                            setEditingBoardTypeTaskCounts({});
-                            setEditingBoard(board);
-                            setIsEditModalOpen(true);
+                            void openEditBoard(board);
                           }}
                           className="p-2 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
                           aria-label="Редактировать доску"
@@ -272,8 +383,16 @@ export function Boards() {
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>{board.columns?.length || 0} колонок</span>
-                  <span>{board.taskTypes?.length || 0} типов задач</span>
+                  {board.kind === 'aggregated' ? (
+                    <span>{board._count?.aggregatedSources ?? board.sources?.length ?? 0} досок</span>
+                  ) : (
+                    <span>{board.columns?.length || 0} колонок</span>
+                  )}
+                  {board.kind === 'aggregated' ? (
+                    <span>все задачи</span>
+                  ) : (
+                    <span>{board.taskTypes?.length || 0} типов задач</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -285,6 +404,25 @@ export function Boards() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSubmit={handleCreateBoard}
+      />
+
+      <CreateAggregatedBoardModal
+        isOpen={isCreateAggregatedOpen}
+        onClose={() => setIsCreateAggregatedOpen(false)}
+        onSubmit={handleCreateAggregatedBoard}
+        availableBoards={standardBoards}
+      />
+
+      <CreateAggregatedBoardModal
+        isOpen={isEditAggregatedOpen}
+        onClose={() => {
+          setIsEditAggregatedOpen(false);
+          setEditingAggregatedBoard(null);
+        }}
+        onSubmit={handleEditAggregatedBoard}
+        availableBoards={standardBoards}
+        initialData={editingAggregatedBoard}
+        submitLabel="Сохранить изменения"
       />
 
       <CreateBoardModal
@@ -312,7 +450,9 @@ export function Boards() {
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить доску?</AlertDialogTitle>
             <AlertDialogDescription>
-              Доска «{boardPendingDelete?.name}» и все связанные задачи будут удалены без возможности восстановления.
+              {boardPendingDelete?.kind === 'aggregated'
+                ? `Сводная доска «${boardPendingDelete?.name}» будет удалена. Исходные доски и их задачи не затрагиваются.`
+                : `Доска «${boardPendingDelete?.name}» и все связанные задачи будут удалены без возможности восстановления.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

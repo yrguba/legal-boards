@@ -9,7 +9,7 @@ import { boardTimeTrackingIsConfigured } from '../../utils/boardTimeTracking';
 import { renderCustomFieldValue } from './utils/customFieldValue';
 import { formatTaskDate, toDatetimeLocalValue } from './utils/format';
 import { mergeChatMessage, isLawyerClientChannelMessage } from './utils/chatMessages';
-import { validateTaskEdits } from './utils/validateTaskEdits';
+import { useTaskFieldUpdate } from './hooks/useTaskFieldUpdate';
 import type { TaskPanelType, TaskRecord, DocumentPreviewState, ClientSubPanel } from './types';
 import { TaskPageHeader } from './components/TaskPageHeader';
 import { TaskDetailsCard } from './components/TaskDetailsCard';
@@ -20,19 +20,19 @@ import { TaskIframeServicePanel } from './components/TaskIframeServicePanel';
 import { TaskIconRail } from './components/TaskIconRail';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { getBoardIframeServices, parseIframePanelId, taskIframePanelId } from './utils/boardIframeServices';
-import { getBoardApprovalRules, formatPendingApprovalsMessage, mergeApprovalDecision, normalizeApprovalRow, type TaskColumnApprovalRow } from '../../utils/boardApprovals';
+import { getBoardApprovalRules, mergeApprovalDecision, normalizeApprovalRow, type TaskColumnApprovalRow } from '../../utils/boardApprovals';
 import {
-  buildColumnTransitionPlan,
-  formatColumnTransitionCheckErrors,
   mergeActionCompletion,
   type ColumnTransitionInteractiveStep,
   type TaskColumnActionCompletionRow,
 } from '../../utils/boardColumnActions';
 import { ColumnActionTransitionModal } from '../../components/ColumnActionTransitionModal';
+import { TransferTaskModal } from '../../components/TransferTaskModal';
 import type { TaskActivityItem } from '../../utils/activityLog';
 import { useApp } from '../../store/AppContext';
 import { getWsUrl } from '../../utils/wsUrl';
 import { taskPath } from '../../utils/taskUrls';
+import { isExternalClientTask } from './utils/externalClientTask';
 
 export function TaskPage() {
   const { currentUser } = useApp();
@@ -44,15 +44,6 @@ export function TaskPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editColumnId, setEditColumnId] = useState('');
-  const [editTypeId, setEditTypeId] = useState('');
-  const [editAssigneeId, setEditAssigneeId] = useState('');
-  const [editCustomFields, setEditCustomFields] = useState<Record<string, unknown>>({});
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
   const [activePanel, setActivePanel] = useState<TaskPanelType>('comments');
   const [clientSubPanel, setClientSubPanel] = useState<ClientSubPanel>('chat');
   const [assistantMessage, setAssistantMessage] = useState('');
@@ -82,7 +73,8 @@ export function TaskPage() {
     null,
   );
 
-  const showLexConclusionTab = Boolean(task?.lexCreatorId ?? task?.lexClientProfile?.id);
+  const showClientPanel = isExternalClientTask(task);
+  const showLexConclusionTab = showClientPanel;
   const [conclusionDraft, setConclusionDraft] = useState('');
   useEffect(() => {
     if (!task) {
@@ -94,8 +86,14 @@ export function TaskPage() {
   }, [task?.id, task?.conclusionText]);
 
   useEffect(() => {
-    if (!showLexConclusionTab && clientSubPanel === 'conclusion') setClientSubPanel('chat');
-  }, [showLexConclusionTab, clientSubPanel]);
+    if (!showClientPanel && clientSubPanel === 'conclusion') setClientSubPanel('chat');
+  }, [showClientPanel, clientSubPanel]);
+
+  useEffect(() => {
+    if (!showClientPanel && activePanel === 'client') {
+      setActivePanel('comments');
+    }
+  }, [showClientPanel, activePanel]);
 
   const [savingConclusion, setSavingConclusion] = useState(false);
   const [conclusionSaveError, setConclusionSaveError] = useState<string | null>(null);
@@ -107,17 +105,14 @@ export function TaskPage() {
     fromColumnId: string;
     toColumnId: string;
     steps: ColumnTransitionInteractiveStep[];
-    pendingUpdate: {
-      columnId: string;
-      typeId: string;
-      title: string;
-      description: string | null;
-      assigneeId: string | null;
-      customFields: Record<string, unknown>;
-    };
+    pendingUpdate: import('./hooks/useTaskFieldUpdate').TaskSnapshot;
   } | null>(null);
   const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
   const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+
+  const canTransfer =
+    currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const [activityItems, setActivityItems] = useState<TaskActivityItem[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -160,8 +155,11 @@ export function TaskPage() {
           }
         })(),
     }));
-    return [...TASK_SIDEBAR_STATIC_ENTRIES, ...iframeEntries];
-  }, [boardIframeServices]);
+    const staticEntries = showClientPanel
+      ? TASK_SIDEBAR_STATIC_ENTRIES
+      : TASK_SIDEBAR_STATIC_ENTRIES.filter((e) => e.id !== 'client');
+    return [...staticEntries, ...iframeEntries];
+  }, [boardIframeServices, showClientPanel]);
 
   const iframeServiceForPanel = useMemo(() => {
     const sid = parseIframePanelId(activePanel);
@@ -224,13 +222,6 @@ export function TaskPage() {
         if (cancelled) return;
         setBoard(loadedBoard);
         setUsers(allUsers);
-        setIsEditing(false);
-        setEditTitle(loadedTask.title || '');
-        setEditDescription(loadedTask.description || '');
-        setEditColumnId(loadedTask.columnId);
-        setEditTypeId(loadedTask.typeId);
-        setEditAssigneeId(loadedTask.assigneeId || '');
-        setEditCustomFields(loadedTask.customFields || {});
         if (loadedTask.key && loadedTask.key !== taskKey) {
           navigate(taskPath(loadedTask), { replace: true });
         }
@@ -263,6 +254,23 @@ export function TaskPage() {
       setActivityLoading(false);
     }
   }, [activeTaskId]);
+
+  const { savingField, fieldErrors, saveField, isFieldLocked, finishColumnTransition } =
+    useTaskFieldUpdate({
+      task,
+      board,
+      taskFields,
+      titleFieldId,
+      descriptionFieldId,
+      taskAttachments,
+      conclusionDraft,
+      approvalRules,
+      columnApprovals,
+      activeTaskId: task?.id ?? taskKey,
+      setTask,
+      setColumnTransition,
+      loadActivity,
+    });
 
   useEffect(() => {
     if (activePanel !== 'activity' || !activeTaskId) return;
@@ -608,121 +616,6 @@ export function TaskPage() {
     }
   };
 
-  const cancelEditing = () => {
-    if (!task) return;
-    setSaveError(null);
-    setIsEditing(false);
-    setEditTitle(task.title || '');
-    setEditDescription(task.description || '');
-    setEditColumnId(task.columnId);
-    setEditTypeId(task.typeId);
-    setEditAssigneeId(task.assigneeId || '');
-    setEditCustomFields(task.customFields || {});
-  };
-
-  const buildPendingUpdate = () => ({
-    columnId: editColumnId,
-    typeId: editTypeId,
-    title: editTitle.trim(),
-    description: editDescription.trim() || null,
-    assigneeId: editAssigneeId || null,
-    customFields: editCustomFields,
-  });
-
-  const finishSaveWithColumnMove = async (toColumnId: string) => {
-    if (!activeTaskId || !columnTransition) return;
-    const updated = await tasksApi.update(activeTaskId, {
-      ...columnTransition.pendingUpdate,
-      columnId: toColumnId,
-    });
-    setTask((prev: TaskRecord | null) => (prev ? { ...prev, ...updated } : prev));
-    setIsEditing(false);
-    setColumnTransition(null);
-    setColumnTransitionError(null);
-    void loadActivity();
-  };
-
-  const saveEdits = async () => {
-    if (!activeTaskId) return;
-    setSaveError(null);
-    const validationError = validateTaskEdits(
-      editTitle,
-      editDescription,
-      editColumnId,
-      editTypeId,
-      editCustomFields,
-      taskFields,
-      titleFieldId,
-      descriptionFieldId,
-    );
-    if (validationError) {
-      setSaveError(validationError);
-      return;
-    }
-
-    const pendingUpdate = buildPendingUpdate();
-
-    if (task && editColumnId !== task.columnId) {
-      const pendingMsg = formatPendingApprovalsMessage(
-        approvalRules,
-        task.columnId,
-        columnApprovals,
-      );
-      if (pendingMsg) {
-        setSaveError(pendingMsg);
-        return;
-      }
-
-      const rawCompletions = Array.isArray(
-        (task as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
-          .columnActionCompletions,
-      )
-        ? (task as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
-            .columnActionCompletions!
-        : [];
-      const actionPlan = buildColumnTransitionPlan(
-        board,
-        {
-          title: pendingUpdate.title,
-          assigneeId: pendingUpdate.assigneeId,
-          description: pendingUpdate.description,
-          conclusionText: conclusionDraft,
-          customFields: pendingUpdate.customFields,
-          taskAttachments,
-          columnActionCompletions: rawCompletions,
-        },
-        task.columnId,
-        editColumnId,
-      );
-      if (actionPlan.checkErrors.length > 0) {
-        setSaveError(formatColumnTransitionCheckErrors(actionPlan.checkErrors));
-        return;
-      }
-      if (actionPlan.interactiveSteps.length > 0) {
-        setColumnTransitionError(null);
-        setColumnTransition({
-          fromColumnId: task.columnId,
-          toColumnId: editColumnId,
-          steps: actionPlan.interactiveSteps,
-          pendingUpdate,
-        });
-        return;
-      }
-    }
-
-    setIsSaving(true);
-    try {
-      const updated = await tasksApi.update(activeTaskId, pendingUpdate);
-      setTask((prev: TaskRecord | null) => (prev ? { ...prev, ...updated } : prev));
-      setIsEditing(false);
-      void loadActivity();
-    } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : 'Не удалось сохранить изменения');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="p-6">
@@ -767,13 +660,10 @@ export function TaskPage() {
     assignee,
     creator,
     column,
-    isEditing,
-    editDescription,
-    editColumnId,
-    editTypeId,
-    editAssigneeId,
-    editCustomFields,
-    saveError,
+    savingField,
+    fieldErrors,
+    isFieldLocked,
+    onSaveField: saveField,
     taskAttachments,
     apiBaseUrl,
     uploadingFile,
@@ -788,12 +678,6 @@ export function TaskPage() {
     approvalError,
     onApproveRule: handleApproveRule,
     onRejectRule: handleRejectRule,
-    onEditDescription: setEditDescription,
-    onEditColumnId: setEditColumnId,
-    onEditTypeId: setEditTypeId,
-    onEditAssigneeId: setEditAssigneeId,
-    onEditCustomField: (fieldId: string, value: unknown) =>
-      setEditCustomFields((p) => ({ ...p, [fieldId]: value })),
     onDropFiles: handleDropFiles,
     onUploadInputChange: async (files: FileList | null) => {
       const file = files?.[0];
@@ -810,16 +694,13 @@ export function TaskPage() {
     <div className="h-full flex flex-col">
       <TaskPageHeader
         boardCodeOrId={((board as any).code || board.id) as string}
-        title={isEditing ? editTitle : task.title}
-        isEditing={isEditing}
-        isSaving={isSaving}
-        onEditTitle={setEditTitle}
-        onStartEdit={() => {
-          setSaveError(null);
-          setIsEditing(true);
-        }}
-        onCancelEdit={cancelEditing}
-        onSave={saveEdits}
+        title={task.title}
+        savingField={savingField}
+        fieldError={fieldErrors.title ?? null}
+        titleLocked={isFieldLocked('title')}
+        onSaveTitle={(v) => saveField('title', v)}
+        canTransfer={canTransfer}
+        onTransfer={() => setTransferOpen(true)}
       />
 
       <ResizablePanelGroup
@@ -992,7 +873,11 @@ export function TaskPage() {
           setColumnTransitionSubmitting(true);
           setColumnTransitionError(null);
           try {
-            await finishSaveWithColumnMove(columnTransition.toColumnId);
+            await finishColumnTransition(
+              columnTransition.toColumnId,
+              columnTransition.pendingUpdate,
+            );
+            setColumnTransitionError(null);
           } catch (e: unknown) {
             setColumnTransitionError(
               e instanceof Error ? e.message : 'Не удалось сохранить изменения',
@@ -1003,6 +888,23 @@ export function TaskPage() {
           }
         }}
       />
+
+      {board && task && canTransfer ? (
+        <TransferTaskModal
+          open={transferOpen}
+          sourceBoard={board}
+          taskIds={[task.id]}
+          onClose={() => setTransferOpen(false)}
+          onSuccess={(result) => {
+            const moved = result.moved[0];
+            if (moved?.newKey) {
+              navigate(`/task/${moved.newKey}`, { replace: true });
+            } else if (result.skipped[0]) {
+              setError(result.skipped[0].reason);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

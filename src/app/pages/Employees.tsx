@@ -8,6 +8,7 @@ import { CreateEmployeeModal } from '../components/CreateEmployeeModal';
 import { EditEmployeeModal } from '../components/EditEmployeeModal';
 import { EmployeeCatalogPanel } from '../components/EmployeeCatalogPanel';
 import { EmployeeProfileModal } from '../components/EmployeeProfileModal';
+import { PendingWorkspaceInvites } from '../components/PendingWorkspaceInvites';
 import { ResetPasswordModal } from '../components/ResetPasswordModal';
 import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMembersModal';
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
@@ -52,6 +53,7 @@ export function Employees() {
     updateGroup,
     deleteGroup,
     updateUser,
+    removeMemberFromWorkspace,
     updateDepartmentMembers,
     updateGroupMembers,
     refreshData,
@@ -74,6 +76,7 @@ export function Employees() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [activeDeptId, setActiveDeptId] = useState<string>('');
   const [resetPasswordEmployee, setResetPasswordEmployee] = useState<User | null>(null);
+  const [invitesReload, setInvitesReload] = useState(0);
 
   const handleSaveDepartment = async (data: { name: string; description: string }) => {
     if (!currentWorkspace) return;
@@ -258,6 +261,23 @@ export function Employees() {
     }
   };
 
+  const removeFromWorkspace = async (user: User) => {
+    if (
+      !window.confirm(
+        `Исключить «${user.name}» из пространства «${currentWorkspace?.name}»? Доступ к доскам и задачам этого пространства будет закрыт.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await removeMemberFromWorkspace(user.id);
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Не удалось исключить из пространства');
+    }
+  };
+
+  const isWorkspaceOwner = (userId: string) => currentWorkspace?.ownerId === userId;
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
@@ -320,6 +340,10 @@ export function Employees() {
           Направления
         </button>
       </div>
+
+      {canManageOrg && currentWorkspace ? (
+        <PendingWorkspaceInvites workspaceId={currentWorkspace.id} reloadToken={invitesReload} />
+      ) : null}
 
       {viewMode === 'catalog' && currentWorkspace ? (
         <EmployeeCatalogPanel
@@ -413,6 +437,18 @@ export function Employees() {
                             title="Сбросить пароль"
                           >
                             <KeyRound className="w-4 h-4" />
+                          </button>
+                        ) : null}
+                        {canManageOrg &&
+                        user.id !== currentUser?.id &&
+                        !isWorkspaceOwner(user.id) ? (
+                          <button
+                            type="button"
+                            onClick={() => void removeFromWorkspace(user)}
+                            className="p-1.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Исключить из пространства"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         ) : null}
                       </div>
@@ -776,6 +812,7 @@ export function Employees() {
         <CreateEmployeeModal
           isOpen={isCreateEmployeeModalOpen}
           onClose={() => setIsCreateEmployeeModalOpen(false)}
+          onSuccess={() => setInvitesReload((n) => n + 1)}
         />
       ) : null}
 

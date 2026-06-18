@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { X, Bell, CheckCheck, FileText, MessageSquare, ArrowRightLeft, AtSign, UserPlus } from 'lucide-react';
+import { X, Bell, CheckCheck, FileText, MessageSquare, ArrowRightLeft, AtSign, UserPlus, Video } from 'lucide-react';
 import type { Notification } from '../types';
 import { useNavigate } from 'react-router';
 import { useNotifications } from '../store/NotificationsContext';
-
 interface NotificationsPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenInvite: (inviteId: string) => void;
 }
 
-export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps) {
+export function NotificationsPanel({ isOpen, onClose, onOpenInvite }: NotificationsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { items, isLoading, refresh, markAsRead, markAllAsRead } = useNotifications();
@@ -50,7 +50,13 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
       case 'mention':
         return <AtSign className="w-5 h-5 text-pink-600" />;
       case 'user_added':
+      case 'workspace_invite':
         return <UserPlus className="w-5 h-5 text-emerald-600" />;
+      case 'conference_invite':
+      case 'conference_updated':
+        return <Video className="w-5 h-5 text-brand" />;
+      case 'conference_cancelled':
+        return <Video className="w-5 h-5 text-slate-400" />;
       default:
         return <Bell className="w-5 h-5 text-slate-600" />;
     }
@@ -147,13 +153,33 @@ export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps)
                       }
 
                       if (notification.type === 'user_added') {
-                        navigate('/');
+                        navigate('/workspaces');
                         onClose();
                         return;
                       }
 
-                      if (notification.type === 'conference_invite') {
+                      if (notification.type === 'workspace_member_removed') {
+                        navigate('/workspaces');
+                        onClose();
+                        return;
+                      }
+
+                      if (notification.type === 'workspace_invite' && notification.relatedId) {
+                        onOpenInvite(notification.relatedId);
+                        return;
+                      }
+
+                      if (
+                        notification.type === 'conference_invite' ||
+                        notification.type === 'conference_updated'
+                      ) {
                         navigate(`/conferences/${notification.relatedId}`);
+                        onClose();
+                        return;
+                      }
+
+                      if (notification.type === 'conference_cancelled') {
+                        navigate('/conferences');
                         onClose();
                         return;
                       }

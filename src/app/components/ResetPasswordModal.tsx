@@ -12,20 +12,24 @@ type Props = {
 export function ResetPasswordModal({ open, employee, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [newPassword, setNewPassword] = useState<string | null>(null);
+  const [inviteSent, setInviteSent] = useState(false);
 
   if (!open || !employee) return null;
 
   const handleReset = async () => {
-    if (!confirm(`Сбросить пароль для ${employee.name}? Сотрудник должен будет задать новый при входе.`)) {
+    if (
+      !confirm(
+        `Сбросить пароль для ${employee.name}? На ${employee.email} будет отправлена ссылка для создания нового пароля.`,
+      )
+    ) {
       return;
     }
     setLoading(true);
     setError(null);
-    setNewPassword(null);
+    setInviteSent(false);
     try {
-      const result = await usersApi.resetPassword(employee.id);
-      setNewPassword(result.initialPassword);
+      await usersApi.resetPassword(employee.id);
+      setInviteSent(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Не удалось сбросить пароль');
     } finally {
@@ -35,7 +39,7 @@ export function ResetPasswordModal({ open, employee, onClose }: Props) {
 
   const handleClose = () => {
     setError(null);
-    setNewPassword(null);
+    setInviteSent(false);
     onClose();
   };
 
@@ -48,21 +52,27 @@ export function ResetPasswordModal({ open, employee, onClose }: Props) {
             <h2 className="text-lg font-semibold text-slate-900">Сброс пароля</h2>
             <p className="text-sm text-slate-600 mt-1">{employee.name}</p>
           </div>
-          <button type="button" onClick={handleClose} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
+          <button
+            type="button"
+            onClick={handleClose}
+            className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
+          >
             <X className="size-5" />
           </button>
         </div>
 
-        {newPassword ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            Новый временный пароль: <span className="font-mono font-medium">{newPassword}</span>
-            <p className="text-xs text-slate-500 mt-2">
-              Передайте сотруднику. При первом входе он задаст свой пароль.
+        {inviteSent ? (
+          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+            Приглашение отправлено на <span className="font-medium">{employee.email}</span>.
+            <p className="text-xs text-green-700 mt-2">
+              Сотрудник перейдёт по ссылке из письма и задаст новый пароль. Старая ссылка перестанет
+              действовать после активации.
             </p>
           </div>
         ) : (
           <p className="text-sm text-slate-600 mb-4">
-            Будет сгенерирован новый временный пароль. Сотрудник обязан сменить его при следующем входе.
+            На email сотрудника будет отправлена ссылка для создания нового пароля. Временный пароль в
+            интерфейсе показан не будет.
           </p>
         )}
 
@@ -74,16 +84,16 @@ export function ResetPasswordModal({ open, employee, onClose }: Props) {
             onClick={handleClose}
             className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-800 hover:bg-slate-50"
           >
-            {newPassword ? 'Закрыть' : 'Отмена'}
+            {inviteSent ? 'Закрыть' : 'Отмена'}
           </button>
-          {!newPassword ? (
+          {!inviteSent ? (
             <button
               type="button"
               disabled={loading}
               onClick={() => void handleReset()}
               className="px-4 py-2 text-sm rounded-lg bg-brand text-white disabled:opacity-50"
             >
-              {loading ? 'Сброс…' : 'Сбросить пароль'}
+              {loading ? 'Отправка…' : 'Сбросить пароль'}
             </button>
           ) : null}
         </div>

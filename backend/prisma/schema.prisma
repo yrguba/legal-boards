@@ -86,6 +86,9 @@ model User {
   emailVerificationExpiresAt DateTime?
   /// Требовать смену пароля при следующем входе (временный пароль от администратора)
   mustChangePassword Boolean  @default(false)
+  /// Одноразовая ссылка-приглашение для активации / сброса пароля
+  passwordInviteToken String? @unique
+  passwordInviteExpiresAt DateTime?
   /// Значения настраиваемых полей профиля (ключ → значение)
   profileFields Json          @default("{}")
   createdAt    DateTime       @default(now())
@@ -112,6 +115,8 @@ model User {
   activityLogs             ActivityLog[] @relation("ActivityLogActor")
   ledGroups                Group[] @relation("GroupLeader")
   createdConferences       Conference[] @relation("ConferenceCreator")
+  workspaceInvitesReceived WorkspaceInvite[] @relation("WorkspaceInvitee")
+  workspaceInvitesSent     WorkspaceInvite[] @relation("WorkspaceInviter")
 
   @@index([email])
   @@index([departmentId])
@@ -172,22 +177,53 @@ model Workspace {
   conferences    Conference[]
   knowledgeArticles KnowledgeArticle[]
   lexClients LexClientWorkspace[]
+  invites           WorkspaceInvite[]
 
   @@index([ownerId])
 }
 
 model WorkspaceUser {
-  id          String   @id @default(cuid())
-  workspaceId String
-  userId      String
-  joinedAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  workspaceId   String
+  userId        String
+  role          String   @default("member")
+  departmentId  String?
+  profileFields Json     @default("{}")
+  joinedAt      DateTime @default(now())
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, userId])
   @@index([workspaceId])
   @@index([userId])
+  @@index([departmentId])
+}
+
+model WorkspaceInvite {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  userId       String
+  invitedById  String
+  role         String    @default("member")
+  departmentId String?
+  groupIds     Json      @default("[]")
+  status       String    @default("pending")
+  token        String    @unique
+  expiresAt    DateTime
+  respondedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user       User        @relation("WorkspaceInvitee", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy  User        @relation("WorkspaceInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([userId, status])
+  @@index([status])
 }
 
 model Department {
@@ -202,6 +238,8 @@ model Department {
   users     User[]
   groups    Group[]
   chatChannels WorkspaceChatChannel[]
+  workspaceMembers WorkspaceUser[]
+  workspaceInvites WorkspaceInvite[]
 
   @@index([workspaceId])
 }
@@ -274,6 +312,8 @@ model Board {
   description String?
   workspaceId String
   viewMode    String   @default("kanban")
+  /// standard — обычная доска; aggregated — сводная над выбранными досками
+  kind        String   @default("standard")
   visibility  Json     @default("{}")
   attachmentsEnabled Boolean @default(true)
   /// Расширенные настройки доски (JSON): авто-назначение, учёт времени по статусам, iframe-сервисы
@@ -287,8 +327,26 @@ model Board {
   taskTypes  TaskType[]
   tasks      Task[]
   codeAliases BoardCodeAlias[]
+  aggregatedSources AggregatedBoardSource[] @relation("AggregatedBoard")
+  aggregatedIn      AggregatedBoardSource[] @relation("SourceBoard")
 
   @@index([workspaceId])
+  @@index([kind])
+}
+
+/// Исходные доски, входящие в сводную
+model AggregatedBoardSource {
+  id                String @id @default(cuid())
+  aggregatedBoardId String
+  sourceBoardId     String
+  position          Int
+
+  aggregatedBoard Board @relation("AggregatedBoard", fields: [aggregatedBoardId], references: [id], onDelete: Cascade)
+  sourceBoard     Board @relation("SourceBoard", fields: [sourceBoardId], references: [id], onDelete: Cascade)
+
+  @@unique([aggregatedBoardId, sourceBoardId])
+  @@index([aggregatedBoardId])
+  @@index([sourceBoardId])
 }
 
 /// Старые коды доски для redirect URL после смены code
@@ -364,6 +422,10 @@ model Task {
   /// Автор–клиент LEXPRO (null — задачу создал сотрудник)
   lexCreatorId String?
   customFields Json     @default("{}")
+  /// Приоритет (ключ): trivial | low | medium | high | critical
+  priority     String   @default("medium")
+  /// Порядок внутри колонки (0 — сверху)
+  position     Int      @default(0)
   /// Накопленное время работы по правилам доски (секунды)
   trackedTimeSeconds       Int       @default(0)
   /// Начало текущего отрезка учёта (когда задача в «считающейся» колонке цикла)
@@ -393,6 +455,7 @@ model Task {
   @@unique([boardId, number])
   @@index([boardId])
   @@index([columnId])
+  @@index([columnId, position])
   @@index([typeId])
   @@index([assigneeId])
   @@index([createdBy])

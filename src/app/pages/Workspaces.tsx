@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { workspacesApi } from '../services/api';
-import { Building2, Check, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Building2, Check, LogOut, Pencil, Plus, Trash2 } from 'lucide-react';
 
 function formatDate(iso: string) {
   try {
@@ -28,6 +28,7 @@ export function Workspaces() {
   const [editDesc, setEditDesc] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [leavingId, setLeavingId] = useState<string | null>(null);
 
   const startEdit = (ws: { id: string; name: string; description?: string | null }) => {
     setEditingId(ws.id);
@@ -99,6 +100,26 @@ export function Workspaces() {
       alert(err?.message || 'Не удалось удалить');
     } finally {
       setDeleteId(null);
+    }
+  };
+
+  const handleLeave = async (ws: { id: string; name: string; isOwner?: boolean }) => {
+    if (ws.isOwner) return;
+    if (
+      !confirm(
+        `Покинуть пространство «${ws.name}»? Вы потеряете доступ к его доскам и задачам.`,
+      )
+    ) {
+      return;
+    }
+    setLeavingId(ws.id);
+    try {
+      await workspacesApi.leave(ws.id);
+      await refreshWorkspaces();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Не удалось покинуть пространство');
+    } finally {
+      setLeavingId(null);
     }
   };
 
@@ -248,6 +269,17 @@ export function Workspaces() {
                         >
                           <Check className="size-3.5" />
                           Сделать текущим
+                        </button>
+                      )}
+                      {!ws.isOwner && (
+                        <button
+                          type="button"
+                          onClick={() => void handleLeave(ws)}
+                          disabled={leavingId === ws.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-700 border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          <LogOut className="size-3.5" />
+                          {leavingId === ws.id ? 'Выход…' : 'Покинуть'}
                         </button>
                       )}
                       {ws.isOwner && (

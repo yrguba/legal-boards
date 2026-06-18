@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Board, TaskField, TaskType, User } from '../types';
 import { useApp } from '../store/AppContext';
+import { DEFAULT_TASK_PRIORITY, TASK_PRIORITY_KEYS, TASK_PRIORITY_LABELS } from '../utils/taskPriority';
+import { withoutLegacyPriorityFields } from '../utils/taskFieldFilters';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 
 interface CreateTaskModalProps {
@@ -15,6 +17,7 @@ interface CreateTaskModalProps {
     typeId: string;
     assigneeId?: string;
     customFields: Record<string, any>;
+    priority: string;
   }) => Promise<void> | void;
 }
 
@@ -33,13 +36,14 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
   const { currentUser } = useApp();
   const [typeId, setTypeId] = useState<string>(() => board.taskTypes?.[0]?.id || '');
   const [assigneeId, setAssigneeId] = useState('');
+  const [priority, setPriority] = useState(DEFAULT_TASK_PRIORITY);
   const [customFields, setCustomFields] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const taskTypes: TaskType[] = useMemo(() => board.taskTypes || [], [board.taskTypes]);
   const taskFields: TaskField[] = useMemo(
-    () => [...(board.taskFields || [])].sort((a, b) => a.position - b.position),
+    () => withoutLegacyPriorityFields([...(board.taskFields || [])]).sort((a, b) => a.position - b.position),
     [board.taskFields]
   );
 
@@ -61,6 +65,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
   useEffect(() => {
     if (!isOpen) return;
     setAssigneeId('');
+    setPriority(DEFAULT_TASK_PRIORITY);
     setTypeId(board.taskTypes?.[0]?.id || '');
   }, [isOpen, columnId, board.taskTypes]);
 
@@ -69,6 +74,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
   const reset = () => {
     setTypeId(board.taskTypes?.[0]?.id || '');
     setAssigneeId('');
+    setPriority(DEFAULT_TASK_PRIORITY);
     setCustomFields({});
     setError(null);
   };
@@ -117,6 +123,7 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
         description: description || undefined,
         typeId,
         assigneeId: assigneeId || undefined,
+        priority,
         customFields: restCustomFields,
       });
       handleClose();
@@ -179,6 +186,21 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Приоритет</label>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+              className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
+            >
+              {TASK_PRIORITY_KEYS.map((p) => (
+                <option key={p} value={p}>
+                  {TASK_PRIORITY_LABELS[p]}
                 </option>
               ))}
             </select>

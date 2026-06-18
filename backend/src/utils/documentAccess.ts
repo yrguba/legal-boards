@@ -6,17 +6,13 @@ export type UserDocAccess = {
   groupIds: string[];
 };
 
-/** Участник пространства или глобальный admin (с доступом к любому существующему workspace). */
+/** Участник пространства (owner или WorkspaceUser). */
 export async function assertWorkspaceMember(
   prisma: PrismaClient,
   workspaceId: string,
   userId: string,
-  userRole?: string
+  _userRole?: string
 ): Promise<boolean> {
-  if (userRole === 'admin') {
-    const ws = await prisma.workspace.findUnique({ where: { id: workspaceId } });
-    return !!ws;
-  }
   const ws = await prisma.workspace.findUnique({
     where: { id: workspaceId },
     select: { ownerId: true },
@@ -38,16 +34,28 @@ export async function getUserDocumentAccess(
   userId: string,
   workspaceId: string
 ): Promise<UserDocAccess> {
-  const [user, groupRows] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId } }),
+  const [membership, groupRows] = await Promise.all([
+    prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+      select: { departmentId: true },
+    }),
     prisma.userGroup.findMany({
       where: { userId, group: { workspaceId } },
       select: { groupId: true },
     }),
   ]);
+  const ws = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { ownerId: true },
+  });
+  let departmentId = membership?.departmentId ?? null;
+  if (!membership && ws?.ownerId === userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { departmentId: true } });
+    departmentId = user?.departmentId ?? null;
+  }
   return {
     userId,
-    departmentId: user?.departmentId ?? null,
+    departmentId,
     groupIds: groupRows.map((r) => r.groupId),
   };
 }

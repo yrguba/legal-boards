@@ -1,11 +1,20 @@
 import { Router, type Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
-import { assertWorkspaceMember } from '../utils/documentAccess';
+import { assertWorkspaceMember, getUserDocumentAccess } from '../utils/documentAccess';
 import { workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
 import { assertColumnApprovalsComplete } from '../utils/boardApprovals';
 import { boardCodeValidationError, normalizeNewBoardCode } from '../utils/boardCodes';
 import { resolveBoardRef } from '../utils/boardResolve';
+import { transferTasks } from '../utils/transferTasks';
+import { canSeeAggregatedBoard } from '../utils/boardAccess';
+import {
+  BOARD_KIND_AGGREGATED,
+  assertAggregatedBoardView,
+  isAggregatedBoard,
+  loadAggregatedSourcesDto,
+  validateAggregatedSourceBoardIds,
+} from '../utils/aggregatedBoard';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -34,12 +43,15 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
         columns: { orderBy: { position: 'asc' } },
         taskFields: { orderBy: { position: 'asc' } },
         taskTypes: true,
-        _count: { select: { tasks: true } },
+        aggregatedSources: { orderBy: { position: 'asc' }, select: { id: true, sourceBoardId: true, position: true } },
+        _count: { select: { tasks: true, aggregatedSources: true } },
       },
     });
 
     if (req.lexClientId) {
-      const sanitized = boards.map((b) => {
+      const sanitized = boards
+        .filter((b) => b.kind !== BOARD_KIND_AGGREGATED)
+        .map((b) => {
         const { advancedSettings: _a, ...rest } = b as Record<string, unknown>;
         return rest;
       });
@@ -47,7 +59,25 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
       return;
     }
 
-    res.json(boards);
+    let visibleBoards = boards;
+    if (req.userId) {
+      const [access, workspace] = await Promise.all([
+        getUserDocumentAccess(prisma, req.userId, req.params.workspaceId),
+        prisma.workspace.findUnique({
+          where: { id: req.params.workspaceId },
+          select: { ownerId: true },
+        }),
+      ]);
+      visibleBoards = boards.filter((b) => {
+        if (!isAggregatedBoard(b)) return true;
+        return canSeeAggregatedBoard(b.visibility, access, {
+          isAdmin: req.userRole === 'admin',
+          isWorkspaceOwner: workspace?.ownerId === req.userId,
+        });
+      });
+    }
+
+    res.json(visibleBoards);
   } catch (error) {
     console.error('Get boards error:', error);
     res.status(500).json({ error: 'Ошибка получения досок' });
@@ -168,6 +198,11 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Доска не найдена' });
     }
 
+    const viewGate = await assertAggregatedBoardView(prisma, req, full);
+    if (!viewGate.ok) {
+      return res.status(viewGate.status).json({ error: viewGate.error });
+    }
+
     if (req.lexClientId) {
       const link = await prisma.lexClientWorkspace.findUnique({
         where: {
@@ -185,10 +220,187 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return;
     }
 
+    if (isAggregatedBoard(full)) {
+      const sources = await loadAggregatedSourcesDto(prisma, full.id);
+      res.json({ ...full, sources });
+      return;
+    }
+
     res.json(full);
   } catch (error) {
     console.error('Get board error:', error);
     res.status(500).json({ error: 'Ошибка получения доски' });
+  }
+});
+
+router.post('/aggregated', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+  try {
+    const { code, name, description, workspaceId, visibility, sourceBoardIds } = req.body as {
+      code?: string;
+      name?: string;
+      description?: string;
+      workspaceId?: string;
+      visibility?: Record<string, unknown>;
+      sourceBoardIds?: string[];
+    };
+
+    if (!name?.trim() || !workspaceId) {
+      return res.status(400).json({ error: 'name и workspaceId обязательны' });
+    }
+
+    const member = await assertWorkspaceMember(prisma, workspaceId, req.userId!, req.userRole);
+    if (!member) {
+      return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+    }
+
+    const boardCode = normalizeNewBoardCode(code);
+    if (!boardCode) {
+      return res.status(400).json({
+        error:
+          boardCodeValidationError(String(code ?? '').trim().toUpperCase()) ??
+          'Укажите код доски (латиница A–Z, 2–12 символов)',
+      });
+    }
+
+    const codeTaken =
+      (await prisma.board.findUnique({ where: { code: boardCode }, select: { id: true } })) ??
+      (await prisma.boardCodeAlias.findUnique({ where: { code: boardCode }, select: { id: true } }));
+    if (codeTaken) {
+      return res.status(400).json({ error: 'Код доски уже занят' });
+    }
+
+    const ids: string[] = Array.isArray(sourceBoardIds) ? sourceBoardIds : [];
+    const sourceGate = await validateAggregatedSourceBoardIds(prisma, workspaceId, ids);
+    if (!sourceGate.ok) {
+      return res.status(400).json({ error: sourceGate.error });
+    }
+
+    const board = await prisma.board.create({
+      data: {
+        code: boardCode,
+        name: name.trim(),
+        description: description?.trim() || null,
+        workspaceId,
+        kind: BOARD_KIND_AGGREGATED,
+        viewMode: 'kanban',
+        visibility: (visibility || {}) as Prisma.InputJsonValue,
+        attachmentsEnabled: false,
+        aggregatedSources: {
+          create: ids.map((sourceBoardId, index) => ({
+            sourceBoardId,
+            position: index,
+          })),
+        },
+      },
+    });
+
+    const sources = await loadAggregatedSourcesDto(prisma, board.id);
+    res.json({ ...board, columns: [], taskFields: [], taskTypes: [], sources });
+  } catch (error) {
+    console.error('Create aggregated board error:', error);
+    res.status(500).json({ error: 'Ошибка создания сводной доски' });
+  }
+});
+
+router.put('/:id/aggregated', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+  try {
+    const boardId = req.params.id;
+    const existing = await prisma.board.findUnique({ where: { id: boardId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+    if (!isAggregatedBoard(existing)) {
+      return res.status(400).json({ error: 'Это не сводная доска' });
+    }
+
+    const member = await assertWorkspaceMember(
+      prisma,
+      existing.workspaceId,
+      req.userId!,
+      req.userRole,
+    );
+    if (!member) {
+      return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+    }
+
+    const {
+      code: nextCodeRaw,
+      name,
+      description,
+      visibility,
+      sourceBoardIds,
+    } = req.body as {
+      code?: string;
+      name?: string;
+      description?: string;
+      visibility?: Record<string, unknown>;
+      sourceBoardIds?: string[];
+    };
+
+    if (sourceBoardIds !== undefined) {
+      const ids: string[] = Array.isArray(sourceBoardIds) ? sourceBoardIds : [];
+      const sourceGate = await validateAggregatedSourceBoardIds(
+        prisma,
+        existing.workspaceId,
+        ids,
+        boardId,
+      );
+      if (!sourceGate.ok) {
+        return res.status(400).json({ error: sourceGate.error });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.aggregatedBoardSource.deleteMany({ where: { aggregatedBoardId: boardId } });
+        if (ids.length > 0) {
+          await tx.aggregatedBoardSource.createMany({
+            data: ids.map((sourceBoardId, index) => ({
+              aggregatedBoardId: boardId,
+              sourceBoardId,
+              position: index,
+            })),
+          });
+        }
+      });
+    }
+
+    let codeUpdate: { code: string } | Record<string, never> = {};
+    if (nextCodeRaw !== undefined) {
+      const raw = String(nextCodeRaw).trim();
+      if (raw !== existing.code) {
+        const nextCode = normalizeNewBoardCode(nextCodeRaw);
+        if (!nextCode) {
+          return res.status(400).json({ error: 'Код доски: латиница A–Z и цифры 0–9, 2–12 символов' });
+        }
+        const taken =
+          (await prisma.board.findFirst({ where: { code: nextCode, NOT: { id: boardId } } })) ??
+          (await prisma.boardCodeAlias.findUnique({ where: { code: nextCode } }));
+        if (taken) {
+          return res.status(400).json({ error: 'Код доски уже занят' });
+        }
+        await prisma.boardCodeAlias.upsert({
+          where: { code: existing.code },
+          create: { boardId, code: existing.code },
+          update: {},
+        });
+        codeUpdate = { code: nextCode };
+      }
+    }
+
+    const updated = await prisma.board.update({
+      where: { id: boardId },
+      data: {
+        ...codeUpdate,
+        ...(name !== undefined ? { name: name.trim() } : {}),
+        ...(description !== undefined ? { description: description?.trim() || null } : {}),
+        ...(visibility !== undefined ? { visibility: visibility as Prisma.InputJsonValue } : {}),
+      },
+    });
+
+    const sources = await loadAggregatedSourcesDto(prisma, boardId);
+    res.json({ ...updated, columns: [], taskFields: [], taskTypes: [], sources });
+  } catch (error) {
+    console.error('Update aggregated board error:', error);
+    res.status(500).json({ error: 'Ошибка обновления сводной доски' });
   }
 });
 
@@ -295,6 +507,10 @@ router.put('/:id', requireStaffUser, async (req: AuthRequest, res) => {
       const existing = await tx.board.findUnique({ where: { id: boardId } });
       if (!existing) {
         throw new Error('BOARD_NOT_FOUND');
+      }
+
+      if (isAggregatedBoard(existing)) {
+        throw new Error('AGGREGATED_USE_DEDICATED_ENDPOINT');
       }
 
       let codeUpdate: { code: string } | Record<string, never> = {};
@@ -462,6 +678,9 @@ router.put('/:id', requireStaffUser, async (req: AuthRequest, res) => {
     if (msg === 'BOARD_CODE_TAKEN') {
       return res.status(400).json({ error: 'Код доски уже занят' });
     }
+    if (msg === 'AGGREGATED_USE_DEDICATED_ENDPOINT') {
+      return res.status(400).json({ error: 'Сводную доску редактируйте через отдельный режим' });
+    }
     console.error('Update board error:', error);
     res.status(500).json({ error: 'Ошибка обновления доски' });
   }
@@ -517,9 +736,20 @@ router.post('/:boardId/columns/:columnId/move-tasks', requireStaffUser, async (r
       }
     }
 
-    const result = await prisma.task.updateMany({
-      where: { boardId, columnId },
-      data: { columnId: toColumnId },
+    const result = await prisma.$transaction(async (tx) => {
+      const tasksOrdered = await tx.task.findMany({
+        where: { boardId, columnId },
+        orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
+        select: { id: true },
+      });
+      let nextPos = await tx.task.count({ where: { columnId: toColumnId } });
+      for (const row of tasksOrdered) {
+        await tx.task.update({
+          where: { id: row.id },
+          data: { columnId: toColumnId, position: nextPos++ },
+        });
+      }
+      return { count: tasksOrdered.length };
     });
 
     if (tasksInColumn.length > 0) {
@@ -570,6 +800,88 @@ router.post('/:boardId/types/:typeId/move-tasks', requireStaffUser, async (req: 
     res.status(500).json({ error: 'Ошибка переноса задач' });
   }
 });
+
+router.post(
+  '/:boardId/transfer-tasks',
+  requireStaffUser,
+  authorize('admin', 'manager'),
+  async (req: AuthRequest, res) => {
+    try {
+      const sourceBoard = await resolveBoardRef(prisma, req.params.boardId);
+      if (!sourceBoard) {
+        return res.status(404).json({ error: 'Исходная доска не найдена' });
+      }
+
+      const {
+        targetBoardId,
+        targetColumnId,
+        taskIds,
+        typeMapping,
+        defaultTargetTypeId,
+        force,
+      } = req.body as {
+        targetBoardId?: string;
+        targetColumnId?: string;
+        taskIds?: string[];
+        typeMapping?: Record<string, string>;
+        defaultTargetTypeId?: string;
+        force?: boolean;
+      };
+
+      if (!targetBoardId) {
+        return res.status(400).json({ error: 'targetBoardId обязателен' });
+      }
+      if (!Array.isArray(taskIds) || taskIds.length === 0) {
+        return res.status(400).json({ error: 'taskIds обязателен (непустой массив)' });
+      }
+
+      const targetBoard = await resolveBoardRef(prisma, targetBoardId);
+      if (!targetBoard) {
+        return res.status(404).json({ error: 'Целевая доска не найдена' });
+      }
+
+      const [sourceAccess, targetAccess] = await Promise.all([
+        assertWorkspaceMember(prisma, sourceBoard.workspaceId, req.userId!, req.userRole),
+        assertWorkspaceMember(prisma, targetBoard.workspaceId, req.userId!, req.userRole),
+      ]);
+      if (!sourceAccess || !targetAccess) {
+        return res.status(403).json({ error: 'Нет доступа к одному из пространств' });
+      }
+
+      const result = await transferTasks(prisma, {
+        sourceBoardId: sourceBoard.id,
+        targetBoardId: targetBoard.id,
+        targetColumnId,
+        taskIds,
+        typeMapping,
+        defaultTargetTypeId,
+        force: Boolean(force),
+        actorUserId: req.userId!,
+      });
+
+      res.json(result);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'SAME_BOARD') {
+        return res.status(400).json({ error: 'Нельзя перенести задачи на ту же доску' });
+      }
+      if (msg === 'SOURCE_BOARD_NOT_FOUND') {
+        return res.status(404).json({ error: 'Исходная доска не найдена' });
+      }
+      if (msg === 'TARGET_BOARD_NOT_FOUND') {
+        return res.status(404).json({ error: 'Целевая доска не найдена' });
+      }
+      if (msg === 'TARGET_COLUMN_NOT_FOUND') {
+        return res.status(400).json({ error: 'Целевая колонка не найдена' });
+      }
+      if (msg === 'TARGET_TYPES_EMPTY') {
+        return res.status(400).json({ error: 'На целевой доске нет типов задач' });
+      }
+      console.error('Transfer tasks error:', error);
+      res.status(500).json({ error: 'Ошибка переноса задач' });
+    }
+  },
+);
 
 router.delete('/:id', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
   try {

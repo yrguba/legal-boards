@@ -16,6 +16,7 @@ import {
   MoreHorizontal,
   GripVertical,
   Trash2,
+  ArrowRightLeft,
 } from 'lucide-react';
 import {
   DndContext,
@@ -32,6 +33,8 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CreateTaskModal } from '../components/CreateTaskModal';
+import { AggregatedBoardView } from '../components/AggregatedBoardView';
+import { TransferTaskModal } from '../components/TransferTaskModal';
 import { ColumnActionTransitionModal } from '../components/ColumnActionTransitionModal';
 import { BoardSettingsModal } from '../features/board-settings/BoardSettingsModal';
 import {
@@ -42,6 +45,8 @@ import {
   type TaskColumnActionCompletionRow,
 } from '../utils/boardColumnActions';
 import { TaskElapsedTimeDisplay } from '../components/TaskElapsedTimeDisplay';
+import { TaskPriorityBadge } from '../components/TaskPriorityBadge';
+import { TASK_PRIORITY_KEYS, normalizeTaskPriority } from '../utils/taskPriority';
 import { boardTimeTrackingIsConfigured } from '../utils/boardTimeTracking';
 import { useApp } from '../store/AppContext';
 import {
@@ -56,6 +61,12 @@ import {
 import { buttonVariants } from '../components/ui/button';
 import { cn } from '../components/ui/utils';
 import { taskPath } from '../utils/taskUrls';
+import {
+  applyDragReorder,
+  columnIdsEqual,
+  getColumnTaskIds,
+  sortTasksByPosition,
+} from '../utils/kanbanTaskOrder';
 
 /** После сохранения колонки API возвращает обновлённые поля учёта времени — подмешиваем в карточку без перезагрузки */
 function mergeTaskFromUpdateResponse(prev: TaskType, api: Record<string, unknown>): TaskType {
@@ -75,6 +86,7 @@ function mergeTaskFromUpdateResponse(prev: TaskType, api: Record<string, unknown
   }
   if (api.assignee !== undefined) merged.assignee = api.assignee as TaskType['assignee'];
   if (typeof api.updatedAt === 'string') merged.updatedAt = api.updatedAt;
+  if (typeof api.position === 'number') merged.position = api.position;
   if (Array.isArray(api.columnApprovals)) {
     (merged as TaskType & { columnApprovals?: unknown[] }).columnApprovals = api.columnApprovals;
   }
@@ -115,8 +127,10 @@ function DroppableColumn({
     >
       <div
         ref={setNodeRef}
-        className={`flex-shrink-0 w-80 rounded-lg p-4 flex flex-col transition-colors ${
-          isOver ? 'bg-brand-light ring-2 ring-brand' : 'bg-slate-50'
+        className={`flex-shrink-0 w-80 rounded-lg p-4 flex flex-col transition-colors border-2 ${
+          isOver
+            ? 'bg-brand-light border-dashed border-brand'
+            : 'bg-slate-50 border-transparent'
         }`}
       >
         <div className="flex items-center justify-between mb-4">
@@ -193,42 +207,45 @@ function TaskCard({
     <div
       ref={setNodeRef}
       style={style}
-      className="bg-white rounded-lg p-4 border border-slate-200 hover:border-brand hover:shadow-md transition-all group"
+      {...attributes}
+      {...listeners}
+      className="bg-white rounded-lg p-4 border border-slate-200 hover:border-brand hover:shadow-md transition-all group cursor-grab active:cursor-grabbing touch-none"
     >
       <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2 flex-1">
-          <button
-            {...attributes}
-            {...listeners}
-            className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600"
-          >
-            <GripVertical className="w-4 h-4" />
-          </button>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           <Link
             to={taskPath(task)}
             className="text-sm font-medium text-slate-900 group-hover:text-brand transition-colors flex-1"
+            onClick={(e) => e.stopPropagation()}
           >
             {task.title}
           </Link>
         </div>
-        <button className="text-slate-400 hover:text-slate-600 ml-2">
+        <button
+          type="button"
+          className="text-slate-400 hover:text-slate-600 ml-2 shrink-0"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <MoreHorizontal className="w-4 h-4" />
         </button>
       </div>
 
       {task.description && (
-        <p className="text-xs text-slate-600 mb-3 line-clamp-2 ml-6">
+        <p className="text-xs text-slate-600 mb-3 line-clamp-2">
           {task.description}
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 ml-6">
-        <span
-          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
-          style={{ backgroundColor: getTaskTypeColor(task.typeId) }}
-        >
-          {getTaskTypeName(task.typeId)}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
+            style={{ backgroundColor: getTaskTypeColor(task.typeId) }}
+          >
+            {getTaskTypeName(task.typeId)}
+          </span>
+          <TaskPriorityBadge priority={normalizeTaskPriority(task.priority)} compact />
+        </div>
 
         <div className="flex items-center gap-2">
           {boardTracksTime &&
@@ -252,11 +269,6 @@ function TaskCard({
         </div>
       </div>
 
-      {task.customFields?.priority && (
-        <div className="mt-2 text-xs text-slate-600 ml-6">
-          Приоритет: {task.customFields.priority}
-        </div>
-      )}
     </div>
   );
 }
@@ -275,9 +287,14 @@ export function Board() {
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [createTaskColumnId, setCreateTaskColumnId] = useState<string>('');
   const [assigneeFilterIds, setAssigneeFilterIds] = useState<string[]>([]);
+  const [typeFilterIds, setTypeFilterIds] = useState<string[]>([]);
+  const [priorityFilterKeys, setPriorityFilterKeys] = useState<string[]>([]);
+  const [columnFilterIds, setColumnFilterIds] = useState<string[]>([]);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const filterPanelRef = useRef<HTMLDivElement>(null);
   const dragOriginColumnRef = useRef<string | null>(null);
+  const dragOriginOrderRef = useRef<string[] | null>(null);
+  const dragSnapshotRef = useRef<TaskType[] | null>(null);
   const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
   const [deleteBoardDialogOpen, setDeleteBoardDialogOpen] = useState(false);
   const [isDeletingBoard, setIsDeletingBoard] = useState(false);
@@ -291,6 +308,9 @@ export function Board() {
   } | null>(null);
   const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
   const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferNotice, setTransferNotice] = useState<string | null>(null);
 
   const canManageBoardSettings =
     currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -348,17 +368,48 @@ export function Board() {
 
   const boardTasks = tasks;
 
+  const activeFilterCount =
+    assigneeFilterIds.length +
+    typeFilterIds.length +
+    priorityFilterKeys.length +
+    columnFilterIds.length;
+
   const filteredTasks = useMemo(() => {
-    if (assigneeFilterIds.length === 0) return boardTasks;
-    return boardTasks.filter((t) => {
-      if (assigneeFilterIds.includes(UNASSIGNED_FILTER) && !t.assigneeId) return true;
-      if (t.assigneeId && assigneeFilterIds.includes(t.assigneeId)) return true;
-      return false;
+    return boardTasks
+      .filter((t) => {
+        if (columnFilterIds.length > 0 && !columnFilterIds.includes(t.columnId)) return false;
+        if (typeFilterIds.length > 0 && !typeFilterIds.includes(t.typeId)) return false;
+
+        if (priorityFilterKeys.length > 0) {
+          const key = normalizeTaskPriority(t.priority);
+          if (!priorityFilterKeys.includes(key)) return false;
+        }
+
+        if (assigneeFilterIds.length > 0) {
+          if (assigneeFilterIds.includes(UNASSIGNED_FILTER) && !t.assigneeId) return true;
+          if (t.assigneeId && assigneeFilterIds.includes(t.assigneeId)) return true;
+          return false;
+        }
+
+        return true;
+      })
+      .sort(sortTasksByPosition);
+  }, [boardTasks, assigneeFilterIds, typeFilterIds, priorityFilterKeys, columnFilterIds]);
+
+  const filtersHideAllTasks =
+    activeFilterCount > 0 && boardTasks.length > 0 && filteredTasks.length === 0;
+
+  useEffect(() => {
+    const visible = new Set(filteredTasks.map((t) => t.id));
+    setSelectedTaskIds((prev) => {
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
     });
-  }, [boardTasks, assigneeFilterIds]);
+  }, [filteredTasks]);
 
   const taskTypes = useMemo(() => board?.taskTypes || [], [board?.taskTypes]);
   const columns = useMemo(() => board?.columns || [], [board?.columns]);
+  const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
   const boardTracksTime = useMemo(() => boardTimeTrackingIsConfigured(board), [board]);
   const approvalRules = useMemo(() => getBoardApprovalRules(board), [board]);
 
@@ -386,11 +437,17 @@ export function Board() {
     );
   };
 
-  const finishColumnMove = async (taskId: string, targetColumnId: string, originColumnId: string) => {
+  const finishColumnMove = async (
+    taskId: string,
+    targetColumnId: string,
+    originColumnId: string,
+    position?: number,
+    revertSnapshot?: TaskType[] | null,
+  ) => {
     try {
-      const updated = (await tasksApi.update(taskId, {
-        columnId: targetColumnId,
-      })) as Record<string, unknown>;
+      const payload: { columnId: string; position?: number } = { columnId: targetColumnId };
+      if (typeof position === 'number') payload.position = position;
+      const updated = (await tasksApi.update(taskId, payload)) as Record<string, unknown>;
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
           task.id === taskId ? mergeTaskFromUpdateResponse(task, updated) : task,
@@ -401,7 +458,11 @@ export function Board() {
       const message =
         error instanceof ApiError ? error.message : 'Не удалось изменить статус задачи';
       setDragMoveError(message);
-      revertTaskColumn(taskId, originColumnId);
+      if (revertSnapshot) {
+        setTasks(revertSnapshot);
+      } else {
+        revertTaskColumn(taskId, originColumnId);
+      }
       throw error;
     }
   };
@@ -439,8 +500,23 @@ export function Board() {
     );
   }
 
+  if (board.kind === 'aggregated') {
+    return (
+      <AggregatedBoardView
+        board={board}
+        tasks={tasks}
+        users={users}
+        onTasksChange={setTasks}
+        onBoardChange={setBoard}
+        isLoading={false}
+      />
+    );
+  }
+
   const getTasksByColumn = (columnId: string) => {
-    return filteredTasks.filter((t) => t.columnId === columnId);
+    return filteredTasks
+      .filter((t) => t.columnId === columnId)
+      .sort(sortTasksByPosition);
   };
 
   const getCreatorName = (task: TaskType) => {
@@ -448,10 +524,18 @@ export function Board() {
     return users.find((u) => u.id === task.createdBy)?.name ?? '—';
   };
 
-  const toggleAssigneeFilter = (id: string) => {
-    setAssigneeFilterIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+  const toggleFilterValue = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    id: string,
+  ) => {
+    setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const clearAllFilters = () => {
+    setAssigneeFilterIds([]);
+    setTypeFilterIds([]);
+    setPriorityFilterKeys([]);
+    setColumnFilterIds([]);
   };
 
   const getTaskTypeName = (typeId: string) => {
@@ -477,6 +561,7 @@ export function Board() {
     description?: string;
     typeId: string;
     assigneeId?: string;
+    priority: string;
     customFields: Record<string, any>;
   }) => {
     if (!board) throw new Error('Доска не загружена');
@@ -489,17 +574,29 @@ export function Board() {
       title: data.title,
       description: data.description,
       assigneeId: data.assigneeId,
+      priority: data.priority,
       customFields: data.customFields,
     });
 
-    setTasks((prev) => [created, ...prev]);
+    setTasks((prev) => {
+      const next = prev.map((t) =>
+        t.columnId === createTaskColumnId
+          ? { ...t, position: (typeof t.position === 'number' ? t.position : 0) + 1 }
+          : t,
+      );
+      return [{ ...created, position: created.position ?? 0 }, ...next];
+    });
   };
 
   const handleDragStart = (event: DragStartEvent) => {
     setDragMoveError(null);
     const { active } = event;
     const task = tasks.find((t) => t.id === active.id);
+    dragSnapshotRef.current = tasks;
     dragOriginColumnRef.current = task?.columnId ?? null;
+    dragOriginOrderRef.current = task?.columnId
+      ? getColumnTaskIds(tasks, task.columnId)
+      : null;
     setActiveTask(task);
   };
 
@@ -509,25 +606,15 @@ export function Board() {
 
     const activeTaskId = active.id as string;
     const overId = over.id as string;
-
     const activeTask = tasks.find((t) => t.id === activeTaskId);
-    const overTask = tasks.find((t) => t.id === overId);
-
     if (!activeTask) return;
 
-    const activeColumn = activeTask.columnId;
-    const overColumn = overTask ? overTask.columnId : overId;
+    const overTask = tasks.find((t) => t.id === overId);
+    if (activeFilterCount > 0 && overTask && activeTask.columnId === overTask.columnId) {
+      return;
+    }
 
-    if (activeColumn === overColumn) return;
-
-    setTasks((prevTasks) => {
-      return prevTasks.map((task) => {
-        if (task.id === activeTaskId) {
-          return { ...task, columnId: overColumn };
-        }
-        return task;
-      });
-    });
+    setTasks((prevTasks) => applyDragReorder(prevTasks, activeTaskId, overId, columnIds));
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -536,27 +623,44 @@ export function Board() {
 
     const activeTaskId = active.id as string;
     const originColumnId = dragOriginColumnRef.current;
+    const originOrder = dragOriginOrderRef.current;
+    const snapshot = dragSnapshotRef.current;
     dragOriginColumnRef.current = null;
+    dragOriginOrderRef.current = null;
+    dragSnapshotRef.current = null;
 
     if (!over) {
-      if (originColumnId) {
-        setTasks((prevTasks) =>
-          prevTasks.map((task) =>
-            task.id === activeTaskId ? { ...task, columnId: originColumnId } : task,
-          ),
-        );
-      }
+      if (snapshot) setTasks(snapshot);
       return;
     }
 
     const targetColumnId = resolveDropColumnId(over.id as string);
-    if (!originColumnId || !targetColumnId || originColumnId === targetColumnId) {
-      if (originColumnId) {
-        setTasks((prevTasks) =>
-          prevTasks.map((task) =>
-            task.id === activeTaskId ? { ...task, columnId: originColumnId } : task,
-          ),
-        );
+    if (!originColumnId || !targetColumnId) {
+      if (snapshot) setTasks(snapshot);
+      return;
+    }
+
+    if (originColumnId === targetColumnId) {
+      if (activeFilterCount > 0) {
+        if (snapshot) setTasks(snapshot);
+        return;
+      }
+      const newOrder = getColumnTaskIds(tasks, originColumnId);
+      if (!originOrder || columnIdsEqual(originOrder, newOrder)) {
+        return;
+      }
+      if (!board) {
+        if (snapshot) setTasks(snapshot);
+        return;
+      }
+      try {
+        await tasksApi.reorderInColumn(board.id, originColumnId, newOrder);
+      } catch (error) {
+        console.error('Error reordering tasks:', error);
+        const message =
+          error instanceof ApiError ? error.message : 'Не удалось изменить порядок задач';
+        setDragMoveError(message);
+        if (snapshot) setTasks(snapshot);
       }
       return;
     }
@@ -598,11 +702,61 @@ export function Board() {
       return;
     }
 
+    const targetPosition = getColumnTaskIds(tasks, targetColumnId).indexOf(activeTaskId);
+
     try {
-      await finishColumnMove(activeTaskId, targetColumnId, originColumnId);
+      await finishColumnMove(
+        activeTaskId,
+        targetColumnId,
+        originColumnId,
+        targetPosition >= 0 ? targetPosition : undefined,
+        snapshot,
+      );
     } catch {
       /* ошибка уже показана */
     }
+  };
+
+  const toggleTaskSelection = (taskId: string) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
+  const toggleAllFilteredTasks = () => {
+    const ids = filteredTasks.map((t) => t.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selectedTaskIds.has(id));
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of ids) next.delete(id);
+      } else {
+        for (const id of ids) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleTransferSuccess = (result: {
+    moved: { taskId: string }[];
+    skipped: { taskId: string; reason: string }[];
+    warnings: { message: string }[];
+  }) => {
+    const movedIds = new Set(result.moved.map((m) => m.taskId));
+    setTasks((prev) => prev.filter((t) => !movedIds.has(t.id)));
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      for (const id of movedIds) next.delete(id);
+      return next;
+    });
+    const parts: string[] = [];
+    if (result.moved.length) parts.push(`Перенесено: ${result.moved.length}`);
+    if (result.skipped.length) parts.push(`Пропущено: ${result.skipped.length}`);
+    if (result.warnings.length) parts.push(`Предупреждений: ${result.warnings.length}`);
+    setTransferNotice(parts.join(' · ') || 'Готово');
   };
 
   const confirmDeleteBoard = async () => {
@@ -659,19 +813,92 @@ export function Board() {
                 type="button"
                 onClick={() => setFilterPanelOpen((o) => !o)}
                 className={`flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors ${
-                  assigneeFilterIds.length > 0
+                  activeFilterCount > 0
                     ? 'bg-brand-light text-brand font-medium'
                     : 'text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <Filter className="w-4 h-4" />
                 Фильтр
-                {assigneeFilterIds.length > 0 ? (
-                  <span className="text-xs opacity-80">({assigneeFilterIds.length})</span>
+                {activeFilterCount > 0 ? (
+                  <span className="text-xs opacity-80">({activeFilterCount})</span>
                 ) : null}
               </button>
               {filterPanelOpen && (
-                <div className="absolute right-0 mt-2 w-72 rounded-lg border border-slate-200 bg-white shadow-lg z-50 p-3 max-h-80 overflow-y-auto">
+                <div className="absolute right-0 mt-2 w-80 rounded-lg border border-slate-200 bg-white shadow-lg z-50 p-3 max-h-[min(28rem,calc(100dvh-8rem))] overflow-y-auto">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                    Тип задачи
+                  </div>
+                  {taskTypes.length === 0 ? (
+                    <p className="text-sm text-slate-400 px-1">Нет типов</p>
+                  ) : (
+                    taskTypes.map((ty) => (
+                      <label
+                        key={ty.id}
+                        className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={typeFilterIds.includes(ty.id)}
+                          onChange={() => toggleFilterValue(setTypeFilterIds, ty.id)}
+                          className="rounded border-slate-300"
+                        />
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white shrink-0"
+                          style={{ backgroundColor: ty.color }}
+                        >
+                          {ty.name}
+                        </span>
+                      </label>
+                    ))
+                  )}
+
+                  <div className="border-t border-slate-100 my-3" />
+
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                    Приоритет
+                  </div>
+                  {TASK_PRIORITY_KEYS.map((key) => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={priorityFilterKeys.includes(key)}
+                        onChange={() => toggleFilterValue(setPriorityFilterKeys, key)}
+                        className="rounded border-slate-300"
+                      />
+                      <TaskPriorityBadge priority={key} compact />
+                    </label>
+                  ))}
+
+                  <div className="border-t border-slate-100 my-3" />
+
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                    Статус
+                  </div>
+                  {columns.length === 0 ? (
+                    <p className="text-sm text-slate-400 px-1">Нет колонок</p>
+                  ) : (
+                    columns.map((col) => (
+                      <label
+                        key={col.id}
+                        className="flex items-center gap-2 py-1.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={columnFilterIds.includes(col.id)}
+                          onChange={() => toggleFilterValue(setColumnFilterIds, col.id)}
+                          className="rounded border-slate-300"
+                        />
+                        {col.name}
+                      </label>
+                    ))
+                  )}
+
+                  <div className="border-t border-slate-100 my-3" />
+
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
                     Исполнитель
                   </div>
@@ -679,7 +906,7 @@ export function Board() {
                     <input
                       type="checkbox"
                       checked={assigneeFilterIds.includes(UNASSIGNED_FILTER)}
-                      onChange={() => toggleAssigneeFilter(UNASSIGNED_FILTER)}
+                      onChange={() => toggleFilterValue(setAssigneeFilterIds, UNASSIGNED_FILTER)}
                       className="rounded border-slate-300"
                     />
                     Без исполнителя
@@ -693,19 +920,19 @@ export function Board() {
                       <input
                         type="checkbox"
                         checked={assigneeFilterIds.includes(u.id)}
-                        onChange={() => toggleAssigneeFilter(u.id)}
+                        onChange={() => toggleFilterValue(setAssigneeFilterIds, u.id)}
                         className="rounded border-slate-300"
                       />
                       {u.name}
                     </label>
                   ))}
-                  {assigneeFilterIds.length > 0 && (
+                  {activeFilterCount > 0 && (
                     <button
                       type="button"
                       className="mt-3 w-full text-xs text-slate-600 hover:text-slate-900 py-1.5 border border-slate-200 rounded"
-                      onClick={() => setAssigneeFilterIds([])}
+                      onClick={clearAllFilters}
                     >
-                      Сбросить фильтр
+                      Сбросить все фильтры
                     </button>
                   )}
                 </div>
@@ -744,8 +971,32 @@ export function Board() {
           {dragMoveError}
         </div>
       ) : null}
+      {transferNotice ? (
+        <div className="mx-6 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 flex justify-between gap-2">
+          <span>{transferNotice}</span>
+          <button
+            type="button"
+            className="text-emerald-700 hover:text-emerald-900 shrink-0"
+            onClick={() => setTransferNotice(null)}
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex-1 overflow-auto p-6">
+        {filtersHideAllTasks ? (
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-2">
+            <span>Нет задач по выбранным фильтрам.</span>
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="text-brand hover:underline text-sm font-medium"
+            >
+              Сбросить фильтры
+            </button>
+          </div>
+        ) : null}
         {viewMode === 'kanban' ? (
           <DndContext
             sensors={sensors}
@@ -793,7 +1044,19 @@ export function Board() {
           </DndContext>
         ) : (
           <div className="bg-white rounded-lg border border-slate-200">
-            <div className="flex items-center justify-end gap-2 px-4 py-3 border-b border-slate-200">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200">
+              {canManageBoardSettings && selectedTaskIds.size > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setTransferOpen(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 text-slate-800 rounded hover:bg-slate-50 transition-colors"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  Перенести ({selectedTaskIds.size})
+                </button>
+              ) : (
+                <span />
+              )}
               <button
                 type="button"
                 disabled={!columns[0]}
@@ -807,6 +1070,20 @@ export function Board() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200">
+                  {canManageBoardSettings ? (
+                    <th className="w-10 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredTasks.length > 0 &&
+                          filteredTasks.every((t) => selectedTaskIds.has(t.id))
+                        }
+                        onChange={toggleAllFilteredTasks}
+                        className="rounded border-slate-300"
+                        aria-label="Выбрать все"
+                      />
+                    </th>
+                  ) : null}
                   <th className="text-left px-4 py-3 text-sm font-medium text-slate-700">
                     Задача
                   </th>
@@ -831,6 +1108,18 @@ export function Board() {
                 </tr>
               </thead>
               <tbody>
+                {filteredTasks.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={canManageBoardSettings ? 8 : 7}
+                      className="px-4 py-10 text-center text-sm text-slate-500"
+                    >
+                      {activeFilterCount > 0
+                        ? 'Нет задач по выбранным фильтрам'
+                        : 'На доске пока нет задач'}
+                    </td>
+                  </tr>
+                ) : null}
                 {filteredTasks.map((task) => {
                   const column = columns.find((c) => c.id === task.columnId);
                   return (
@@ -838,6 +1127,17 @@ export function Board() {
                       key={task.id}
                       className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
                     >
+                      {canManageBoardSettings ? (
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedTaskIds.has(task.id)}
+                            onChange={() => toggleTaskSelection(task.id)}
+                            className="rounded border-slate-300"
+                            aria-label={`Выбрать ${task.title}`}
+                          />
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3">
                         <Link
                           to={taskPath(task)}
@@ -878,9 +1178,7 @@ export function Board() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-sm text-slate-600">
-                          {task.customFields?.priority || '—'}
-                        </span>
+                        <TaskPriorityBadge priority={normalizeTaskPriority(task.priority)} />
                       </td>
                     </tr>
                   );
@@ -911,6 +1209,16 @@ export function Board() {
           onSubmit={handleCreateTask}
         />
       )}
+
+      {board && canManageBoardSettings ? (
+        <TransferTaskModal
+          open={transferOpen}
+          sourceBoard={board}
+          taskIds={[...selectedTaskIds]}
+          onClose={() => setTransferOpen(false)}
+          onSuccess={handleTransferSuccess}
+        />
+      ) : null}
 
       <ColumnActionTransitionModal
         open={!!columnTransition}

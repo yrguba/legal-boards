@@ -106,6 +106,39 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   });
 }
 
+export function buildPasswordInviteEmailHtml(opts: {
+  name: string;
+  inviteUrl: string;
+  workspaceName?: string;
+  kind: 'welcome' | 'reset';
+}): string {
+  const isReset = opts.kind === 'reset';
+  const title = isReset ? 'Сброс пароля' : 'Приглашение в Legal Boards';
+  const intro = isReset
+    ? 'Администратор сбросил ваш пароль. Чтобы задать новый пароль и войти в систему, перейдите по ссылке:'
+    : opts.workspaceName
+      ? `Вас пригласили в рабочее пространство «${opts.workspaceName}» в Legal Boards. Чтобы активировать аккаунт и задать пароль, перейдите по ссылке:`
+      : 'Вас пригласили в Legal Boards. Чтобы активировать аккаунт и задать пароль, перейдите по ссылке:';
+
+  return `
+    <div style="font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+      <h2 style="color: #0f172a; margin: 0 0 16px;">${title}</h2>
+      <p style="color: #334155; line-height: 1.5;">Здравствуйте, ${opts.name}!</p>
+      <p style="color: #334155; line-height: 1.5;">${intro}</p>
+      <p style="margin: 24px 0;">
+        <a href="${opts.inviteUrl}" style="display: inline-block; background: #2563eb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">
+          ${isReset ? 'Задать новый пароль' : 'Активировать аккаунт'}
+        </a>
+      </p>
+      <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+        Ссылка действительна 7 дней. После активации аккаунта она перестанет работать.
+        Если вы уже вошли в систему, ссылка также будет недействительна.
+      </p>
+      <p style="color: #94a3b8; font-size: 12px; word-break: break-all;">${opts.inviteUrl}</p>
+    </div>
+  `;
+}
+
 export function buildVerificationEmailHtml(name: string, verifyUrl: string): string {
   return `
     <div style="font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">

@@ -18,6 +18,7 @@ export type TaskRecord = Record<string, any> & {
   columnId: string;
   typeId: string;
   conclusionText?: string | null;
+  priority?: string;
   customFields?: Record<string, unknown>;
   taskAttachments?: unknown[];
   comments?: unknown[];
@@ -60,13 +61,10 @@ export type TaskMainColumnProps = {
   assignee: User | null | undefined;
   creator: User | null | undefined;
   column: { name?: string } | undefined;
-  isEditing: boolean;
-  editDescription: string;
-  editColumnId: string;
-  editTypeId: string;
-  editAssigneeId: string;
-  editCustomFields: Record<string, unknown>;
-  saveError: string | null;
+  savingField: import('./utils/validateField').InlineFieldKey | null;
+  fieldErrors: Partial<Record<import('./utils/validateField').InlineFieldKey, string>>;
+  isFieldLocked: (key: import('./utils/validateField').InlineFieldKey) => boolean;
+  onSaveField: (key: import('./utils/validateField').InlineFieldKey, value: unknown) => Promise<void>;
   taskAttachments: Record<string, unknown>[];
   apiBaseUrl: string;
   uploadingFile: boolean;
@@ -82,11 +80,6 @@ export type TaskMainColumnProps = {
   approvalError: string | null;
   onApproveRule: (ruleId: string) => void;
   onRejectRule: (ruleId: string, reason: string) => void;
-  onEditDescription: (v: string) => void;
-  onEditColumnId: (v: string) => void;
-  onEditTypeId: (v: string) => void;
-  onEditAssigneeId: (v: string) => void;
-  onEditCustomField: (fieldId: string, value: unknown) => void;
   onDropFiles: (files: FileList | File[]) => Promise<void>;
   onUploadInputChange: (files: FileList | null) => Promise<void>;
   onDragState: (dragging: boolean) => void;

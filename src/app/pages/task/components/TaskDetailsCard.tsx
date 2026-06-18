@@ -1,9 +1,139 @@
-import { Calendar, Clock, Paperclip, Tag, User } from 'lucide-react';
+import { Calendar, Clock, Flag, Paperclip, Tag, User } from 'lucide-react';
 import { t } from '../taskPage.classes';
 import type { TaskMainColumnProps } from '../types';
+import type { TaskField } from '../../../types';
 import { filePublicUrl } from '../utils/documentPaths';
 import { TaskElapsedTimeDisplay } from '../../../components/TaskElapsedTimeDisplay';
 import { TaskApprovalsSection } from './TaskApprovalsSection';
+import { InlineEditField } from '../../../components/inline-edit/InlineEditField';
+import type { InlineFieldKey } from '../utils/validateField';
+import { TaskPriorityBadge } from '../../../components/TaskPriorityBadge';
+import {
+  TASK_PRIORITY_KEYS,
+  TASK_PRIORITY_LABELS,
+  normalizeTaskPriority,
+} from '../../../utils/taskPriority';
+import { isLegacyPriorityTaskField } from '../../../utils/taskFieldFilters';
+
+function fieldError(
+  errors: TaskMainColumnProps['fieldErrors'],
+  key: InlineFieldKey,
+): string | null {
+  return errors[key] ?? null;
+}
+
+function CustomFieldInline({
+  field,
+  task,
+  savingField,
+  fieldErrors,
+  isFieldLocked,
+  onSaveField,
+  renderFieldValue,
+  formatDate,
+}: {
+  field: TaskField;
+  task: TaskMainColumnProps['task'];
+  savingField: TaskMainColumnProps['savingField'];
+  fieldErrors: TaskMainColumnProps['fieldErrors'];
+  isFieldLocked: TaskMainColumnProps['isFieldLocked'];
+  onSaveField: TaskMainColumnProps['onSaveField'];
+  renderFieldValue: TaskMainColumnProps['renderFieldValue'];
+  formatDate: TaskMainColumnProps['formatDate'];
+}) {
+  const key = `custom:${field.id}` as InlineFieldKey;
+  const rawValue = task.customFields?.[field.id];
+
+  const label = (
+    <div className="flex items-center gap-2 text-sm text-slate-600">
+      {field.type === 'date' ? <Calendar className="w-4 h-4" /> : null}
+      {field.name}
+      {field.required ? <span className="text-red-500">*</span> : null}
+    </div>
+  );
+
+  return (
+    <InlineEditField
+      fieldKey={key}
+      label={label}
+      layout="full"
+      saving={savingField === key}
+      locked={isFieldLocked(key)}
+      error={fieldError(fieldErrors, key)}
+      placeholder="Не заполнено"
+      getValue={() => rawValue ?? ''}
+      isEmpty={(v) => renderFieldValue(v) === '—'}
+      onSave={(v) => onSaveField(key, v)}
+      renderView={(v) => (
+        <span className="text-sm text-slate-900">
+          {field.type === 'date' ? formatDate(v) : renderFieldValue(v)}
+        </span>
+      )}
+      renderEditor={({ value, onChange, onCommit, saving, inputRef }) => {
+        if (field.type === 'textarea') {
+          return (
+            <textarea
+              ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+              rows={3}
+              value={String(value ?? '')}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.metaKey) void onCommit();
+              }}
+              className={t.textarea}
+            />
+          );
+        }
+        if (field.type === 'select') {
+          return (
+            <select
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={String(value ?? '')}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
+              className={t.input}
+            >
+              <option value="">—</option>
+              {(field.options || []).map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          );
+        }
+        if (field.type === 'date') {
+          return (
+            <input
+              ref={inputRef as React.RefObject<HTMLInputElement>}
+              type="date"
+              value={String(value ?? '')}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
+              className={t.input}
+            />
+          );
+        }
+        return (
+          <input
+            ref={inputRef as React.RefObject<HTMLInputElement>}
+            value={String(value ?? '')}
+            disabled={saving}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void onCommit();
+              }
+            }}
+            className={t.input}
+          />
+        );
+      }}
+    />
+  );
+}
 
 export function TaskDetailsCard(p: TaskMainColumnProps) {
   const {
@@ -15,26 +145,16 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
     descriptionFieldId,
     taskType,
     assignee,
-    isEditing,
-    editTitle,
-    editDescription,
-    editColumnId,
-    editTypeId,
-    editAssigneeId,
-    editCustomFields,
-    saveError,
+    savingField,
+    fieldErrors,
+    isFieldLocked,
+    onSaveField,
     taskAttachments,
     apiBaseUrl,
     uploadingFile,
     uploadError,
     isDraggingFile,
     attachmentsEnabled,
-    onEditTitle,
-    onEditDescription,
-    onEditColumnId,
-    onEditTypeId,
-    onEditAssigneeId,
-    onEditCustomField,
     onDropFiles,
     onUploadInputChange,
     onDragState,
@@ -54,30 +174,23 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
 
   return (
     <div className={`${t.card} p-6 mb-6`}>
-      {saveError ? <div className={`mb-4 ${t.errBanner}`}>{saveError}</div> : null}
-
       <div className="grid grid-cols-2 gap-4 mb-6">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">
-            <Tag className="w-4 h-4" />
-            Тип задачи
-          </div>
-          {isEditing ? (
-            <select
-              value={editTypeId}
-              onChange={(e) => onEditTypeId(e.target.value)}
-              className={t.input}
-            >
-              <option value="" disabled>
-                Выберите тип
-              </option>
-              {board.taskTypes.map((ty) => (
-                <option key={ty.id} value={ty.id}>
-                  {ty.name}
-                </option>
-              ))}
-            </select>
-          ) : (
+        <InlineEditField
+          fieldKey="typeId"
+          label={
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <Tag className="w-4 h-4" />
+              Тип задачи
+            </div>
+          }
+          layout="full"
+          saving={savingField === 'typeId'}
+          locked={isFieldLocked('typeId')}
+          error={fieldError(fieldErrors, 'typeId')}
+          getValue={() => task.typeId}
+          onSave={(v) => onSaveField('typeId', v)}
+          commitOnChange
+          renderView={() => (
             <span
               className="inline-flex items-center px-2.5 py-1 rounded text-sm font-medium text-white"
               style={{ backgroundColor: taskType?.color }}
@@ -85,17 +198,58 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
               {taskType?.name || '—'}
             </span>
           )}
-        </div>
-
-        <div>
-          <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">
-            <User className="w-4 h-4" />
-            Исполнитель
-          </div>
-          {isEditing ? (
+          renderEditor={({ value, onChange, saving, inputRef }) => (
             <select
-              value={editAssigneeId}
-              onChange={(e) => onEditAssigneeId(e.target.value)}
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={String(value)}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
+              className={t.input}
+            >
+              {board.taskTypes.map((ty) => (
+                <option key={ty.id} value={ty.id}>
+                  {ty.name}
+                </option>
+              ))}
+            </select>
+          )}
+        />
+
+        <InlineEditField
+          fieldKey="assigneeId"
+          label={
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <User className="w-4 h-4" />
+              Исполнитель
+            </div>
+          }
+          layout="full"
+          saving={savingField === 'assigneeId'}
+          locked={isFieldLocked('assigneeId')}
+          error={fieldError(fieldErrors, 'assigneeId')}
+          placeholder="Не назначено"
+          getValue={() => task.assigneeId || ''}
+          isEmpty={(v) => !v}
+          onSave={(v) => onSaveField('assigneeId', v)}
+          commitOnChange
+          renderView={() =>
+            assignee ? (
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-brand-light flex items-center justify-center">
+                  <span className="text-xs font-medium text-brand">{assignee.name.charAt(0)}</span>
+                </div>
+                <span className="text-sm text-slate-900">{assignee.name}</span>
+              </div>
+            ) : (
+              <span className="text-sm text-slate-500">Не назначено</span>
+            )
+          }
+          renderEditor={({ value, onChange, saving, inputRef }) => (
+            <select
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={String(value)}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
               className={t.input}
             >
               <option value="">Не назначено</option>
@@ -105,35 +259,72 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
                 </option>
               ))}
             </select>
-          ) : assignee ? (
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-brand-light flex items-center justify-center">
-                <span className="text-xs font-medium text-brand">{assignee.name.charAt(0)}</span>
-              </div>
-              <span className="text-sm text-slate-900">{assignee.name}</span>
-            </div>
-          ) : (
-            <span className="text-sm text-slate-500">Не назначено</span>
           )}
-        </div>
+        />
 
-        <div>
-          <div className="text-sm text-slate-600 mb-1">Статус</div>
-          {isEditing ? (
-            <select value={editColumnId} onChange={(e) => onEditColumnId(e.target.value)} className={t.input}>
-              <option value="" disabled>
-                Выберите статус
-              </option>
-              {board.columns.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+        <InlineEditField
+          fieldKey="priority"
+          label={
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <Flag className="w-4 h-4" />
+              Приоритет
+            </div>
+          }
+          layout="full"
+          saving={savingField === 'priority'}
+          locked={isFieldLocked('priority')}
+          error={fieldError(fieldErrors, 'priority')}
+          getValue={() => normalizeTaskPriority(task.priority)}
+          onSave={(v) => onSaveField('priority', v)}
+          commitOnChange
+          renderView={(v) => <TaskPriorityBadge priority={v} />}
+          renderEditor={({ value, onChange, saving, inputRef }) => (
+            <select
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={String(value)}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
+              className={t.input}
+            >
+              {TASK_PRIORITY_KEYS.map((p) => (
+                <option key={p} value={p}>
+                  {TASK_PRIORITY_LABELS[p]}
                 </option>
               ))}
             </select>
-          ) : (
+          )}
+        />
+
+        <InlineEditField
+          fieldKey="columnId"
+          label={<div className="text-sm text-slate-600">Статус</div>}
+          layout="full"
+          saving={savingField === 'columnId'}
+          locked={isFieldLocked('columnId')}
+          error={fieldError(fieldErrors, 'columnId')}
+          getValue={() => task.columnId}
+          onSave={(v) => onSaveField('columnId', v)}
+          commitOnChange
+          renderView={() => (
             <span className="text-sm text-slate-900">{p.column?.name || '—'}</span>
           )}
-        </div>
+          renderEditor={({ value, onChange, saving, inputRef }) => (
+            <select
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={String(value)}
+              disabled={saving}
+              onChange={(e) => onChange(e.target.value)}
+              className={t.input}
+            >
+              {board.columns.map((c) => (
+                <option key={c.id} value={c.id} disabled={c.id === task.columnId}>
+                  {c.name}
+                  {c.id === task.columnId ? ' (текущий)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        />
 
         <TaskApprovalsSection
           columnId={task.columnId}
@@ -161,94 +352,57 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
         ) : null}
 
         {taskFields
-          .filter((f) => f.id !== titleFieldId && f.id !== descriptionFieldId)
-          .map((f) => {
-            const rawValue = task.customFields?.[f.id];
-            const displayValue = f.type === 'date' ? formatDate(rawValue) : renderFieldValue(rawValue);
-
-            if (!isEditing) {
-              if (displayValue === '—') return null;
-              return (
-                <div key={f.id}>
-                  <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">
-                    {f.type === 'date' ? <Calendar className="w-4 h-4" /> : null}
-                    {f.name}
-                  </div>
-                  <span className="text-sm text-slate-900">{displayValue}</span>
-                </div>
-              );
-            }
-
-            const val = editCustomFields[f.id];
-            return (
-              <div key={f.id}>
-                <div className="flex items-center gap-2 text-sm text-slate-600 mb-1">
-                  {f.type === 'date' ? <Calendar className="w-4 h-4" /> : null}
-                  {f.name}
-                  {f.required ? <span className="text-red-500">*</span> : null}
-                </div>
-
-                {f.type === 'text' && (
-                  <input
-                    value={(val as string) ?? ''}
-                    onChange={(e) => onEditCustomField(f.id, e.target.value)}
-                    className={t.input}
-                  />
-                )}
-
-                {f.type === 'textarea' && (
-                  <textarea
-                    rows={3}
-                    value={(val as string) ?? ''}
-                    onChange={(e) => onEditCustomField(f.id, e.target.value)}
-                    className={t.textarea}
-                  />
-                )}
-
-                {f.type === 'select' && (
-                  <select
-                    value={(val as string) ?? ''}
-                    onChange={(e) => onEditCustomField(f.id, e.target.value)}
-                    className={t.input}
-                  >
-                    {(f.options || []).map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {f.type === 'date' && (
-                  <input
-                    type="date"
-                    value={(val as string) ?? ''}
-                    onChange={(e) => onEditCustomField(f.id, e.target.value)}
-                    className={t.input}
-                  />
-                )}
-              </div>
-            );
-          })}
+          .filter(
+            (f) =>
+              f.id !== titleFieldId &&
+              f.id !== descriptionFieldId &&
+              !isLegacyPriorityTaskField(f),
+          )
+          .map((f) => (
+            <CustomFieldInline
+              key={f.id}
+              field={f}
+              task={task}
+              savingField={savingField}
+              fieldErrors={fieldErrors}
+              isFieldLocked={isFieldLocked}
+              onSaveField={onSaveField}
+              renderFieldValue={renderFieldValue}
+              formatDate={formatDate}
+            />
+          ))}
       </div>
 
-      {isEditing ? (
-        <div className="border-t border-slate-200 pt-4">
-          <h3 className="text-sm font-medium text-slate-900 mb-2">Описание</h3>
+      <InlineEditField
+        fieldKey="description"
+        label={<h3 className="text-sm font-medium text-slate-900">Описание</h3>}
+        layout="full"
+        className="border-t border-slate-200 pt-4"
+        saving={savingField === 'description'}
+        locked={isFieldLocked('description')}
+        error={fieldError(fieldErrors, 'description')}
+        placeholder="Добавить описание…"
+        getValue={() => task.description || ''}
+        isEmpty={(v) => !String(v).trim()}
+        onSave={(v) => onSaveField('description', v)}
+        renderView={(v) => (
+          <p className="text-sm text-slate-700 whitespace-pre-wrap">{String(v)}</p>
+        )}
+        renderEditor={({ value, onChange, onCommit, saving, inputRef }) => (
           <textarea
+            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
             rows={5}
-            value={editDescription}
-            onChange={(e) => onEditDescription(e.target.value)}
+            value={String(value)}
+            disabled={saving}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.metaKey) void onCommit();
+            }}
             placeholder="Описание задачи"
             className={t.textarea}
           />
-        </div>
-      ) : task.description ? (
-        <div className="border-t border-slate-200 pt-4">
-          <h3 className="text-sm font-medium text-slate-900 mb-2">Описание</h3>
-          <p className="text-sm text-slate-700 whitespace-pre-wrap">{task.description}</p>
-        </div>
-      ) : null}
+        )}
+      />
 
       {attachmentsEnabled && (
         <div className="border-t border-slate-200 pt-4 mt-4">
@@ -311,7 +465,9 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
                 <Paperclip className="w-4 h-4 text-slate-600" />
               </div>
               <div className="min-w-0">
-                <div className="text-sm text-slate-900">Перетащите файл сюда или нажмите, чтобы выбрать</div>
+                <div className="text-sm text-slate-900">
+                  Перетащите файл сюда или нажмите, чтобы выбрать
+                </div>
                 <div className="text-xs text-slate-500">Максимум 10MB</div>
               </div>
             </div>

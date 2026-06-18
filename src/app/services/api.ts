@@ -44,6 +44,17 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   return response.json();
 }
 
+export const configApi = {
+  async getFeatureTabs() {
+    return fetchApi<{
+      documents: boolean;
+      knowledge: boolean;
+      chat: boolean;
+      calendar: boolean;
+    }>('/config/tabs');
+  },
+};
+
 // Auth API
 export const authApi = {
   async getRegistrationConfig() {
@@ -75,6 +86,18 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ email }),
     });
+  },
+
+  async acceptInvite(token: string) {
+    const data = await fetchApi<{
+      message: string;
+      token?: string;
+      user?: any;
+    }>(`/auth/invite?token=${encodeURIComponent(token)}`);
+    if (data.token) {
+      localStorage.setItem('auth_token', data.token);
+    }
+    return data;
   },
 
   async verifyEmail(token: string) {
@@ -192,7 +215,7 @@ export const usersApi = {
   },
 
   async resetPassword(id: string) {
-    return fetchApi<{ message: string; initialPassword: string }>(`/users/${id}/reset-password`, {
+    return fetchApi<{ message: string; inviteSent: boolean }>(`/users/${id}/reset-password`, {
       method: 'POST',
     });
   },
@@ -214,11 +237,23 @@ export const usersApi = {
     );
   },
 
-  async updateProfile(userId: string, profileFields: Record<string, unknown>) {
+  async updateProfile(userId: string, workspaceId: string, profileFields: Record<string, unknown>) {
     return fetchApi<any>(`/users/${userId}/profile`, {
       method: 'PUT',
-      body: JSON.stringify({ profileFields }),
+      body: JSON.stringify({ workspaceId, profileFields }),
     });
+  },
+
+  async lookupInWorkspace(workspaceId: string, email: string) {
+    const q = new URLSearchParams({ email });
+    return fetchApi<{
+      exists: boolean;
+      userId?: string;
+      name?: string;
+      email?: string;
+      alreadyMember?: boolean;
+      pendingInviteId?: string | null;
+    }>(`/workspaces/${workspaceId}/users/lookup?${q}`);
   },
 };
 
@@ -250,10 +285,43 @@ export const workspacesApi = {
     return fetchApi<void>(`/workspaces/${id}`, { method: 'DELETE' });
   },
 
-  async addUser(workspaceId: string, userEmail: string) {
-    return fetchApi<any>(`/workspaces/${workspaceId}/users`, {
+  async lookupUser(workspaceId: string, email: string) {
+    return usersApi.lookupInWorkspace(workspaceId, email);
+  },
+
+  async listInvites(workspaceId: string, status = 'pending') {
+    const q = new URLSearchParams({ status });
+    return fetchApi<any[]>(`/workspaces/${workspaceId}/invites?${q}`);
+  },
+
+  async createInvite(
+    workspaceId: string,
+    data: { email: string; role?: string; departmentId?: string; groupIds?: string[] },
+  ) {
+    return fetchApi<{ id: string; status: string; emailSent: boolean; user?: { name: string; email: string } }>(
+      `/workspaces/${workspaceId}/invites`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  },
+
+  async cancelInvite(workspaceId: string, inviteId: string) {
+    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/invites/${inviteId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async removeMember(workspaceId: string, userId: string) {
+    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async leave(workspaceId: string) {
+    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/leave`, {
       method: 'POST',
-      body: JSON.stringify({ userEmail }),
     });
   },
 
@@ -361,6 +429,36 @@ export const boardsApi = {
     });
   },
 
+  async createAggregated(data: {
+    name: string;
+    code: string;
+    description?: string;
+    workspaceId: string;
+    visibility?: Record<string, unknown>;
+    sourceBoardIds: string[];
+  }) {
+    return fetchApi<any>('/boards/aggregated', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateAggregated(
+    id: string,
+    data: {
+      name?: string;
+      code?: string;
+      description?: string;
+      visibility?: Record<string, unknown>;
+      sourceBoardIds?: string[];
+    },
+  ) {
+    return fetchApi<any>(`/boards/${id}/aggregated`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
   async update(id: string, data: any) {
     return fetchApi<any>(`/boards/${id}`, {
       method: 'PUT',
@@ -392,6 +490,27 @@ export const boardsApi = {
       body: JSON.stringify({ toTypeId }),
     });
   },
+
+  async transferTasks(
+    sourceBoardId: string,
+    data: {
+      targetBoardId: string;
+      targetColumnId?: string;
+      taskIds: string[];
+      typeMapping?: Record<string, string>;
+      defaultTargetTypeId?: string;
+      force?: boolean;
+    },
+  ) {
+    return fetchApi<{
+      moved: { taskId: string; oldKey: string; newKey: string; assigneeCleared?: boolean }[];
+      skipped: { taskId: string; reason: string; code?: string }[];
+      warnings: { taskId: string; code: string; message: string }[];
+    }>(`/boards/${sourceBoardId}/transfer-tasks`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 };
 
 // Tasks API
@@ -415,6 +534,13 @@ export const tasksApi = {
     return fetchApi<any>(`/tasks/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  },
+
+  async reorderInColumn(boardId: string, columnId: string, taskIds: string[]) {
+    return fetchApi<{ ok: boolean }>('/tasks/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ boardId, columnId, taskIds }),
     });
   },
 
@@ -667,6 +793,33 @@ export const conferencesApi = {
     return fetchApi<any>(`/conferences/${id}/end`, { method: 'POST' });
   },
 
+  async update(
+    id: string,
+    data: {
+      title?: string;
+      description?: string | null;
+      startAt?: string;
+      endAt?: string;
+      attendeeIds?: string[];
+    },
+  ) {
+    return fetchApi<any>(`/conferences/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async cancel(id: string) {
+    return fetchApi<{ message: string; notifyStats?: { notifications: number; emails: number } }>(
+      `/conferences/${id}/cancel`,
+      { method: 'POST' },
+    );
+  },
+
+  async delete(id: string) {
+    return fetchApi<{ message: string }>(`/conferences/${id}`, { method: 'DELETE' });
+  },
+
   async shareToChat(id: string) {
     return fetchApi<{ message: string; channelsCount: number }>(`/conferences/${id}/share-chat`, {
       method: 'POST',
@@ -778,6 +931,48 @@ export const knowledgeApi = {
 };
 
 // Notifications API
+export const invitesApi = {
+  async getMine(status = 'pending') {
+    const q = new URLSearchParams({ status });
+    return fetchApi<
+      Array<{
+        id: string;
+        workspaceId: string;
+        role: string;
+        departmentId?: string | null;
+        groupIds: string[];
+        status: string;
+        expiresAt: string;
+        workspace?: { id: string; name: string };
+        invitedBy?: { id: string; name: string; email: string };
+      }>
+    >(`/invites/mine?${q}`);
+  },
+
+  async getByToken(token: string) {
+    const q = new URLSearchParams({ token });
+    return fetchApi<{
+      id: string;
+      workspaceId: string;
+      role: string;
+      status: string;
+      workspace?: { id: string; name: string };
+      invitedBy?: { id: string; name: string; email: string };
+    }>(`/invites/by-token?${q}`);
+  },
+
+  async accept(id: string) {
+    return fetchApi<{ workspaceId: string; workspaceName: string; alreadyMember?: boolean }>(
+      `/invites/${id}/accept`,
+      { method: 'POST' },
+    );
+  },
+
+  async decline(id: string) {
+    return fetchApi<{ message: string }>(`/invites/${id}/decline`, { method: 'POST' });
+  },
+};
+
 export const notificationsApi = {
   async getAll() {
     return fetchApi<any[]>('/notifications');

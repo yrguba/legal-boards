@@ -113,12 +113,22 @@ export interface TaskType {
   icon?: string;
 }
 
+export interface AggregatedBoardSource {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  position: number;
+  columns: { id: string; name: string; position: number }[];
+}
+
 export interface Board {
   id: string;
   code: string;
   name: string;
   description?: string;
   workspaceId: string;
+  kind?: 'standard' | 'aggregated';
   attachmentsEnabled?: boolean;
   visibility: {
     departmentIds?: string[];
@@ -129,6 +139,9 @@ export interface Board {
   taskTypes: TaskType[];
   viewMode: 'kanban' | 'list';
   advancedSettings?: BoardAdvancedSettings;
+  /** Только для kind=aggregated */
+  sources?: AggregatedBoardSource[];
+  _count?: { tasks?: number; aggregatedSources?: number };
 }
 
 export interface TaskAttachment {
@@ -151,10 +164,13 @@ export interface Task {
   boardCode?: string;
   boardId: string;
   columnId: string;
+  /** Порядок внутри колонки (0 — сверху) */
+  position?: number;
   title: string;
   description?: string;
   typeId: string;
   assigneeId?: string;
+  priority?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -167,6 +183,13 @@ export interface Task {
   assignee?: { id: string; name: string; email?: string; avatar?: string | null };
   /** Вложения только этой задачи (не глобальные Document) */
   taskAttachments?: TaskAttachment[];
+  /** Поля сводной доски */
+  sourceBoardId?: string;
+  sourceBoardCode?: string;
+  sourceBoardName?: string;
+  sourceColumnId?: string;
+  sourceColumnName?: string;
+  type?: TaskType;
 }
 
 export interface Comment {
@@ -214,6 +237,9 @@ export interface Conference {
   allowGuests: boolean;
   joinUrl: string;
   jitsiDomain: string;
+  description?: string | null;
+  attendeeIds?: string[];
+  attendeeCount?: number;
   createdBy?: { id: string; name: string; email?: string; avatar?: string | null };
   canJoin?: boolean;
 }
@@ -234,7 +260,13 @@ export interface Notification {
     | 'document'
     | 'mention'
     | 'user_added'
-    | 'conference_invite';
+    | 'workspace_invite'
+    | 'workspace_invite_accepted'
+    | 'workspace_invite_declined'
+    | 'workspace_member_removed'
+    | 'conference_invite'
+    | 'conference_updated'
+    | 'conference_cancelled';
   title: string;
   message: string;
   userId: string;
