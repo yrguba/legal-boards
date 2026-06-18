@@ -11,6 +11,13 @@ import {
   sendPasswordInviteEmail,
 } from '../utils/passwordInvite';
 import {
+  assertCanManageWorkspace,
+  getWorkspaceGroupIdsForUser,
+  getWorkspaceMemberProfile,
+  normalizeEmail,
+  resolveWorkspaceRole,
+} from '../utils/workspaceRole';
+import {
   assertUserGroupsMatchDepartment,
   canManageEmployeeProfile,
   ensureEmployeeProfileSchema,
@@ -22,6 +29,7 @@ import {
   validateProfileFields,
   type CatalogFilters,
 } from '../utils/employeeProfile';
+import { handleWorkspaceMemberLookup } from '../utils/workspaceInviteAdmin';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -40,14 +48,60 @@ async function workspaceAccess(req: AuthRequest, workspaceId: string) {
   });
   if (!workspace) return null;
   if (!req.userId) return null;
-  const isMember = await prisma.workspaceUser.findUnique({
-    where: { workspaceId_userId: { workspaceId, userId: req.userId } },
-  });
-  if (!isMember && workspace.ownerId !== req.userId) return null;
+  const viewerRole = await resolveWorkspaceRole(prisma, req.userId, workspaceId);
+  if (!viewerRole) return null;
   return {
     workspace,
-    canManageProfile: canManageEmployeeProfile(req.userRole, workspace.ownerId === req.userId),
+    viewerRole,
+    canManageProfile: canManageEmployeeProfile(viewerRole, workspace.ownerId === req.userId),
   };
+}
+
+async function shapeWorkspaceUserRow(
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    avatar: string | null;
+    createdAt?: Date;
+  },
+  workspaceId: string,
+  ownerId: string,
+  viewerId: string,
+  viewerRole: string,
+  ledGroupIds: Set<string>,
+  confidentialKeys: Set<string>,
+) {
+  const profile = await getWorkspaceMemberProfile(prisma, user.id, workspaceId, ownerId);
+  if (!profile) return null;
+  const groupIds = await getWorkspaceGroupIdsForUser(prisma, user.id, workspaceId);
+  const perm = computeProfilePerm({
+    viewerId,
+    viewerRole,
+    ownerId,
+    targetId: user.id,
+    targetGroupIds: groupIds,
+    ledGroupIds,
+  });
+  return shapeUserRow(
+    {
+      ...user,
+      role: profile.role,
+      departmentId: profile.departmentId,
+      profileFields: profile.profileFields,
+    },
+    groupIds,
+    perm,
+    confidentialKeys,
+  );
+}
+
+async function getWorkspaceGroupIdSet(workspaceId: string): Promise<Set<string>> {
+  const groups = await prisma.group.findMany({
+    where: { workspaceId },
+    select: { id: true },
+  });
+  return new Set(groups.map((g) => g.id));
 }
 
 /** Направления, в которых текущий пользователь назначен руководителем. */
@@ -406,6 +460,15 @@ router.get('/workspace/:workspaceId/lex-directory', async (req: AuthRequest, res
   }
 });
 
+router.get('/workspace/:workspaceId/member-lookup', async (req: AuthRequest, res) => {
+  try {
+    await handleWorkspaceMemberLookup(req, res, prisma, req.params.workspaceId);
+  } catch (error) {
+    console.error('Member lookup error:', error);
+    res.status(500).json({ error: 'Ошибка поиска пользователя' });
+  }
+});
+
 router.get('/workspace/:workspaceId/catalog', async (req: AuthRequest, res) => {
   try {
     const workspaceId = req.params.workspaceId;
@@ -434,51 +497,40 @@ router.get('/workspace/:workspaceId/catalog', async (req: AuthRequest, res) => {
         id: true,
         email: true,
         name: true,
-        role: true,
         avatar: true,
-        departmentId: true,
-        profileFields: true,
         createdAt: true,
       },
     });
 
-    const groupLinks = await prisma.userGroup.findMany({
-      where: { userId: { in: userIds } },
-      select: { userId: true, groupId: true },
-    });
-    const groupsByUser = new Map<string, string[]>();
-    for (const l of groupLinks) {
-      const list = groupsByUser.get(l.userId) ?? [];
-      list.push(l.groupId);
-      groupsByUser.set(l.userId, list);
-    }
-
-    const rows = users
-      .map((u) => {
-        const groupIds = groupsByUser.get(u.id) ?? [];
-        const perm = computeProfilePerm({
-          viewerId: req.userId!,
-          viewerRole: req.userRole,
-          ownerId: workspace.ownerId,
-          targetId: u.id,
-          targetGroupIds: groupIds,
-          ledGroupIds,
-        });
-        return shapeUserRow(u, groupIds, perm, confidentialKeys);
-      })
-      .filter((u) =>
-        matchesCatalogFilters(
-          {
-            name: u.name,
-            email: u.email,
-            role: u.role,
-            departmentId: u.departmentId,
-            groupIds: u.groupIds,
-            profileFields: profileFieldsToObject(u.profileFields),
-          },
-          filters,
+    const shaped = (
+      await Promise.all(
+        users.map((u) =>
+          shapeWorkspaceUserRow(
+            u,
+            workspaceId,
+            workspace.ownerId,
+            req.userId!,
+            access.viewerRole,
+            ledGroupIds,
+            confidentialKeys,
+          ),
         ),
-      );
+      )
+    ).filter((row): row is NonNullable<typeof row> => row !== null);
+
+    const rows = shaped.filter((u) =>
+      matchesCatalogFilters(
+        {
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          departmentId: u.departmentId,
+          groupIds: u.groupIds,
+          profileFields: profileFieldsToObject(u.profileFields),
+        },
+        filters,
+      ),
+    );
 
     res.json(rows);
   } catch (error) {
@@ -512,32 +564,26 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
         id: true,
         email: true,
         name: true,
-        role: true,
         avatar: true,
-        departmentId: true,
-        profileFields: true,
         createdAt: true,
       },
     });
 
-    const usersWithGroups = await Promise.all(
-      users.map(async (user) => {
-        const groups = await prisma.userGroup.findMany({
-          where: { userId: user.id },
-          select: { groupId: true },
-        });
-        const groupIds = groups.map((g) => g.groupId);
-        const perm = computeProfilePerm({
-          viewerId: req.userId!,
-          viewerRole: req.userRole,
-          ownerId: access.workspace.ownerId,
-          targetId: user.id,
-          targetGroupIds: groupIds,
-          ledGroupIds,
-        });
-        return shapeUserRow(user, groupIds, perm, confidentialKeys);
-      }),
-    );
+    const usersWithGroups = (
+      await Promise.all(
+        users.map((user) =>
+          shapeWorkspaceUserRow(
+            user,
+            workspaceId,
+            access.workspace.ownerId,
+            req.userId!,
+            access.viewerRole,
+            ledGroupIds,
+            confidentialKeys,
+          ),
+        ),
+      )
+    ).filter((row): row is NonNullable<typeof row> => row !== null);
 
     res.json(usersWithGroups);
   } catch (error) {
@@ -546,28 +592,31 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.post('/', async (req: AuthRequest, res) => {
   try {
-    const { email, name, role = 'member', workspaceId, departmentId, groupIds, password } = req.body;
+    const { email: rawEmail, name, role = 'member', workspaceId, departmentId, groupIds, password } = req.body;
 
-    if (!email || !name || !workspaceId) {
+    if (!rawEmail || !name || !workspaceId) {
       return res.status(400).json({ error: 'email, name и workspaceId обязательны' });
     }
+    const email = normalizeEmail(String(rawEmail));
 
-    // Ensure caller is owner or member (admin/manager already checked) of workspace
+    const manage = await assertCanManageWorkspace(prisma, req.userId!, workspaceId);
+    if (!manage.ok) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (existingUser) {
+      return res.status(409).json({
+        error: 'Пользователь уже зарегистрирован. Отправьте приглашение в пространство.',
+        code: 'USER_EXISTS',
+      });
+    }
+
     const workspace = await prisma.workspace.findUnique({
       where: { id: workspaceId },
       select: { ownerId: true },
     });
     if (!workspace) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
-
-    const isMember = await prisma.workspaceUser.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId: req.userId! } },
-      select: { id: true },
-    });
-    if (!isMember && workspace.ownerId !== req.userId) {
-      return res.status(403).json({ error: 'Недостаточно прав' });
-    }
 
     const adminProvidedPassword =
       typeof password === 'string' && password.trim().length > 0;
@@ -613,6 +662,9 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
         data: {
           workspaceId,
           userId: user.id,
+          role,
+          departmentId: departmentId || null,
+          profileFields: { fullName: name } as Prisma.InputJsonValue,
         },
       });
 
@@ -801,10 +853,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
         id: true,
         email: true,
         name: true,
-        role: true,
         avatar: true,
-        departmentId: true,
-        profileFields: true,
         createdAt: true,
       },
     });
@@ -813,47 +862,50 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    const membership = await prisma.workspaceUser.findFirst({
-      where: { userId: user.id },
-      select: { workspaceId: true },
-    });
+    const workspaceIdFromQuery =
+      typeof req.query.workspaceId === 'string' ? req.query.workspaceId : undefined;
+    const membership = workspaceIdFromQuery
+      ? await prisma.workspaceUser.findUnique({
+          where: { workspaceId_userId: { workspaceId: workspaceIdFromQuery, userId: user.id } },
+          select: { workspaceId: true },
+        })
+      : await prisma.workspaceUser.findFirst({
+          where: { userId: user.id },
+          select: { workspaceId: true },
+        });
     const owned = await prisma.workspace.findFirst({
       where: { ownerId: user.id },
       select: { id: true, ownerId: true },
     });
-    const workspaceId = membership?.workspaceId ?? owned?.id;
+    const workspaceId = workspaceIdFromQuery ?? membership?.workspaceId ?? owned?.id;
 
-    const groups = await prisma.userGroup.findMany({
-      where: { userId: user.id },
-      include: { group: { select: { id: true, name: true, departmentId: true } } },
-    });
-    const groupIds = groups.map((g) => g.groupId);
-
-    let perm: ProfilePerm = {
-      canSeeAny: false,
-      canSeeConfidential: false,
-      canEditAny: false,
-      canEditConfidential: false,
-    };
-    let confidentialKeys = DEFAULT_CONFIDENTIAL_KEYS;
-    if (workspaceId && req.userId) {
-      const access = await workspaceAccess(req, workspaceId);
-      if (access) {
-        const ledGroupIds = await viewerLedGroupIds(req.userId, workspaceId);
-        confidentialKeys = await confidentialKeysForWorkspace(workspaceId);
-        perm = computeProfilePerm({
-          viewerId: req.userId,
-          viewerRole: req.userRole,
-          ownerId: access.workspace.ownerId,
-          targetId: user.id,
-          targetGroupIds: groupIds,
-          ledGroupIds,
-        });
-      }
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId не определён' });
     }
 
+    const access = req.userId ? await workspaceAccess(req, workspaceId) : null;
+    if (!access) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    const confidentialKeys = await confidentialKeysForWorkspace(workspaceId);
+    const ledGroupIds = await viewerLedGroupIds(req.userId!, workspaceId);
+    const shaped = await shapeWorkspaceUserRow(
+      user,
+      workspaceId,
+      access.workspace.ownerId,
+      req.userId!,
+      access.viewerRole,
+      ledGroupIds,
+      confidentialKeys,
+    );
+    if (!shaped) return res.status(404).json({ error: 'Сотрудник не найден в пространстве' });
+
+    const groups = await prisma.userGroup.findMany({
+      where: { userId: user.id, group: { workspaceId } },
+      include: { group: { select: { id: true, name: true, departmentId: true } } },
+    });
+
     res.json({
-      ...shapeUserRow(user, groupIds, perm, confidentialKeys),
+      ...shaped,
       groups: groups.map((g) => g.group),
     });
   } catch (error) {
@@ -865,31 +917,33 @@ router.get('/:id', async (req: AuthRequest, res) => {
 router.put('/:id/profile', async (req: AuthRequest, res) => {
   try {
     const userId = req.params.id;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId обязателен' });
 
     const target = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, profileFields: true },
+      select: { id: true, name: true, email: true, avatar: true, createdAt: true },
     });
     if (!target) return res.status(404).json({ error: 'Сотрудник не найден' });
 
-    const membership = await prisma.workspaceUser.findFirst({
-      where: { userId },
-      select: { workspaceId: true },
+    const access = await workspaceAccess(req, workspaceId);
+    if (!access) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    const membership = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+      select: { profileFields: true },
     });
-    if (!membership) {
+    const isOwner = access.workspace.ownerId === userId;
+    if (!membership && !isOwner) {
       return res.status(400).json({ error: 'Сотрудник не привязан к пространству' });
     }
 
-    const access = await workspaceAccess(req, membership.workspaceId);
-    if (!access) return res.status(403).json({ error: 'Недостаточно прав' });
-
-    const groupLinks = await prisma.userGroup.findMany({ where: { userId }, select: { groupId: true } });
-    const groupIds = groupLinks.map((g) => g.groupId);
-    const ledGroupIds = await viewerLedGroupIds(req.userId, membership.workspaceId);
+    const groupIds = await getWorkspaceGroupIdsForUser(prisma, userId, workspaceId);
+    const ledGroupIds = await viewerLedGroupIds(req.userId, workspaceId);
     const perm = computeProfilePerm({
       viewerId: req.userId,
-      viewerRole: req.userRole,
+      viewerRole: access.viewerRole,
       ownerId: access.workspace.ownerId,
       targetId: userId,
       targetGroupIds: groupIds,
@@ -899,12 +953,11 @@ router.put('/:id/profile', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Недостаточно прав для редактирования профиля' });
     }
 
-    const schema = await ensureEmployeeProfileSchema(prisma, membership.workspaceId);
+    const schema = await ensureEmployeeProfileSchema(prisma, workspaceId);
     const confidentialKeys = new Set([...DEFAULT_CONFIDENTIAL_KEYS, ...getConfidentialKeys(schema)]);
-    const existing = profileFieldsToObject(target.profileFields);
+    const existing = profileFieldsToObject(membership?.profileFields ?? {});
     const incoming = profileFieldsToObject(req.body?.profileFields ?? req.body);
 
-    // Пустые значения из формы не перезаписывают уже сохранённые поля.
     const permittedIncoming: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(incoming)) {
       if (confidentialKeys.has(k) && !perm.canEditConfidential) continue;
@@ -920,75 +973,120 @@ router.put('/:id/profile', async (req: AuthRequest, res) => {
     const validated = validateProfileFields(schema, merged);
     if (!validated.ok) return res.status(400).json({ error: validated.error });
 
-    const updated = await prisma.user.update({
-      where: { id: userId },
-      data: { profileFields: validated.sanitized as Prisma.InputJsonValue },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        avatar: true,
-        departmentId: true,
-        profileFields: true,
-      },
-    });
+    if (membership) {
+      await prisma.workspaceUser.update({
+        where: { workspaceId_userId: { workspaceId, userId } },
+        data: { profileFields: validated.sanitized as Prisma.InputJsonValue },
+      });
+    } else if (isOwner) {
+      await prisma.workspaceUser.create({
+        data: {
+          workspaceId,
+          userId,
+          role: 'admin',
+          profileFields: validated.sanitized as Prisma.InputJsonValue,
+        },
+      });
+    }
 
-    res.json(shapeUserRow(updated, groupIds, perm, confidentialKeys));
+    const shaped = await shapeWorkspaceUserRow(
+      target,
+      workspaceId,
+      access.workspace.ownerId,
+      req.userId,
+      access.viewerRole,
+      ledGroupIds,
+      confidentialKeys,
+    );
+    res.json(shaped);
   } catch (error) {
     console.error('Update user profile error:', error);
     res.status(500).json({ error: 'Ошибка сохранения профиля' });
   }
 });
 
-router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.put('/:id', async (req: AuthRequest, res) => {
   try {
-    const { name, role, departmentId, groupIds } = req.body;
+    const { name, role, departmentId, groupIds, workspaceId } = req.body;
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId обязателен' });
+
+    const manage = await assertCanManageWorkspace(prisma, req.userId!, workspaceId);
+    if (!manage.ok) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    const access = await workspaceAccess(req, workspaceId);
+    if (!access) return res.status(403).json({ error: 'Недостаточно прав' });
 
     const nextDept = departmentId === undefined ? undefined : departmentId || null;
     const gids: string[] | undefined = groupIds !== undefined ? groupIds : undefined;
+    const wsGroupIds = await getWorkspaceGroupIdSet(workspaceId);
 
     if (gids !== undefined) {
-      const current = await prisma.user.findUnique({
-        where: { id: req.params.id },
+      const membership = await prisma.workspaceUser.findUnique({
+        where: { workspaceId_userId: { workspaceId, userId: req.params.id } },
         select: { departmentId: true },
       });
-      const deptForGroups = nextDept !== undefined ? nextDept : current?.departmentId;
+      const profile = await getWorkspaceMemberProfile(
+        prisma,
+        req.params.id,
+        workspaceId,
+        access.workspace.ownerId,
+      );
+      const deptForGroups = nextDept !== undefined ? nextDept : profile?.departmentId ?? membership?.departmentId;
       const groupGate = await assertUserGroupsMatchDepartment(
         prisma,
         req.params.id,
         deptForGroups,
-        gids,
+        gids.filter((id: string) => wsGroupIds.has(id)),
       );
       if (!groupGate.ok) return res.status(400).json({ error: groupGate.error });
     }
 
-    const user = await prisma.user.update({
-      where: { id: req.params.id },
-      data: {
-        ...(name !== undefined ? { name } : {}),
-        ...(role !== undefined ? { role } : {}),
-        ...(departmentId !== undefined ? { departmentId: departmentId || null } : {}),
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        avatar: true,
-        departmentId: true,
-        profileFields: true,
-      },
+    if (name !== undefined) {
+      await prisma.user.update({
+        where: { id: req.params.id },
+        data: { name },
+      });
+    }
+
+    const isOwner = access.workspace.ownerId === req.params.id;
+    const membershipExists = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.params.id } },
+      select: { id: true },
     });
+
+    if (role !== undefined || departmentId !== undefined) {
+      if (membershipExists) {
+        await prisma.workspaceUser.update({
+          where: { workspaceId_userId: { workspaceId, userId: req.params.id } },
+          data: {
+            ...(role !== undefined ? { role } : {}),
+            ...(departmentId !== undefined ? { departmentId: departmentId || null } : {}),
+          },
+        });
+      } else if (isOwner && role !== undefined) {
+        await prisma.workspaceUser.create({
+          data: {
+            workspaceId,
+            userId: req.params.id,
+            role: role || 'admin',
+            departmentId: departmentId || null,
+          },
+        });
+      }
+    }
 
     if (groupIds !== undefined) {
       await prisma.userGroup.deleteMany({
-        where: { userId: req.params.id },
+        where: {
+          userId: req.params.id,
+          groupId: { in: [...wsGroupIds] },
+        },
       });
 
-      if (groupIds.length > 0) {
+      const validGroupIds = gids!.filter((id: string) => wsGroupIds.has(id));
+      if (validGroupIds.length > 0) {
         await prisma.userGroup.createMany({
-          data: groupIds.map((groupId: string) => ({
+          data: validGroupIds.map((groupId: string) => ({
             userId: req.params.id,
             groupId,
           })),
@@ -999,44 +1097,31 @@ router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) 
         where: {
           userId: req.params.id,
           group: nextDept
-            ? { departmentId: { not: nextDept } }
-            : {},
+            ? { workspaceId, departmentId: { not: nextDept } }
+            : { workspaceId },
         },
       });
     }
 
-    const groups = await prisma.userGroup.findMany({
-      where: { userId: user.id },
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, email: true, name: true, avatar: true, createdAt: true },
     });
-    const userGroupIds = groups.map((g) => g.groupId);
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
-    const membership = await prisma.workspaceUser.findFirst({
-      where: { userId: user.id },
-      select: { workspaceId: true },
-    });
-    const access = membership ? await workspaceAccess(req, membership.workspaceId) : null;
+    const ledGroupIds = await viewerLedGroupIds(req.userId!, workspaceId);
+    const confidentialKeys = await confidentialKeysForWorkspace(workspaceId);
+    const shaped = await shapeWorkspaceUserRow(
+      user,
+      workspaceId,
+      access.workspace.ownerId,
+      req.userId!,
+      access.viewerRole,
+      ledGroupIds,
+      confidentialKeys,
+    );
 
-    let perm: ProfilePerm = {
-      canSeeAny: true,
-      canSeeConfidential: true,
-      canEditAny: true,
-      canEditConfidential: true,
-    };
-    let confidentialKeys = DEFAULT_CONFIDENTIAL_KEYS;
-    if (access && req.userId) {
-      const ledGroupIds = await viewerLedGroupIds(req.userId, membership!.workspaceId);
-      confidentialKeys = await confidentialKeysForWorkspace(membership!.workspaceId);
-      perm = computeProfilePerm({
-        viewerId: req.userId,
-        viewerRole: req.userRole,
-        ownerId: access.workspace.ownerId,
-        targetId: user.id,
-        targetGroupIds: userGroupIds,
-        ledGroupIds,
-      });
-    }
-
-    res.json(shapeUserRow(user, userGroupIds, perm, confidentialKeys));
+    res.json(shaped);
   } catch (error) {
     console.error('Update user error:', error);
     res.status(500).json({ error: 'Ошибка обновления пользователя' });

@@ -20,6 +20,7 @@ import { ConferenceRoom } from './pages/ConferenceRoom';
 import { ConferenceJoin } from './pages/ConferenceJoin';
 import { ChangePassword } from './pages/ChangePassword';
 import { Invite } from './pages/Invite';
+import { WorkspaceInvite } from './pages/WorkspaceInvite';
 import { useApp } from './store/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -56,6 +57,10 @@ export const router = createBrowserRouter([
   {
     path: '/invite',
     element: <Invite />,
+  },
+  {
+    path: '/workspace-invite',
+    element: <WorkspaceInvite />,
   },
   {
     path: '/conferences/join/:shareToken',

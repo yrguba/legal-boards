@@ -124,7 +124,7 @@ export function EmployeeProfileModal({
       const payload = Object.fromEntries(
         Object.entries(values).filter(([, v]) => v.trim() !== ''),
       );
-      await usersApi.updateProfile(employee.id, payload);
+      await usersApi.updateProfile(employee.id, workspaceId, payload);
       onSaved();
       onClose();
     } catch (err: unknown) {

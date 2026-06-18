@@ -20,6 +20,7 @@ import calendarEventRoutes from './routes/calendarEvents';
 import knowledgeArticleRoutes from './routes/knowledgeArticles';
 import reportRoutes from './routes/reports';
 import conferenceRoutes from './routes/conferences';
+import inviteRoutes from './routes/invites';
 import { initRealtime } from './realtime';
 import { setupSwagger } from './swagger/setup';
 
@@ -56,6 +57,7 @@ app.use('/api/calendar-events', calendarEventRoutes);
 app.use('/api/knowledge', knowledgeArticleRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/conferences', conferenceRoutes);
+app.use('/api/invites', inviteRoutes);
 
 setupSwagger(app);
 

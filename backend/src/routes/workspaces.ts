@@ -1,10 +1,21 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
-import { broadcast } from '../realtime';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
 import { ensureChannelForNewWorkspace } from '../utils/workspaceChatChannels';
 import { getLexIntakeWorkspaceIds, workspaceAllowsLexIntake } from '../utils/lexIntakeWorkspaces';
-import { ensureEmployeeProfileSchema } from '../utils/employeeProfile';
+import { ensureEmployeeProfileSchema, canManageEmployeeProfile } from '../utils/employeeProfile';
+import {
+  assertCanManageWorkspace,
+  isAlreadyWorkspaceMember,
+  resolveWorkspaceRole,
+} from '../utils/workspaceRole';
+import { removeUserFromWorkspace } from '../utils/removeWorkspaceMember';
+import {
+  handleCancelWorkspaceInvite,
+  handleCreateWorkspaceInvite,
+  handleListWorkspaceInvites,
+  handleWorkspaceMemberLookup,
+} from '../utils/workspaceInviteAdmin';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -106,6 +117,185 @@ router.post('/', requireStaffUser, async (req: AuthRequest, res) => {
   }
 });
 
+router.get('/:workspaceId/users/lookup', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    await handleWorkspaceMemberLookup(req, res, prisma, req.params.workspaceId);
+  } catch (error) {
+    console.error('User lookup error:', error);
+    res.status(500).json({ error: 'Ошибка поиска пользователя' });
+  }
+});
+
+router.get('/:workspaceId/invites', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    await handleListWorkspaceInvites(req, res, prisma, req.params.workspaceId);
+  } catch (error) {
+    console.error('List workspace invites error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки приглашений' });
+  }
+});
+
+router.post('/:workspaceId/invites', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    await handleCreateWorkspaceInvite(req, res, prisma, req.params.workspaceId);
+  } catch (error) {
+    console.error('Create workspace invite error:', error);
+    res.status(500).json({ error: 'Ошибка отправки приглашения' });
+  }
+});
+
+router.delete('/:workspaceId/invites/:inviteId', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    await handleCancelWorkspaceInvite(req, res, prisma, req.params.workspaceId, req.params.inviteId);
+  } catch (error) {
+    console.error('Cancel workspace invite error:', error);
+    res.status(500).json({ error: 'Ошибка отмены приглашения' });
+  }
+});
+
+router.delete('/:workspaceId/members/:userId', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const { workspaceId, userId: targetUserId } = req.params;
+    const manage = await assertCanManageWorkspace(prisma, req.userId!, workspaceId);
+    if (!manage.ok) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    if (targetUserId === req.userId) {
+      return res.status(400).json({
+        error: 'Чтобы выйти из пространства, используйте «Покинуть пространство»',
+        code: 'USE_LEAVE',
+      });
+    }
+
+    const actor = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { name: true },
+    });
+
+    const result = await removeUserFromWorkspace(prisma, workspaceId, targetUserId, {
+      actorName: actor?.name,
+    });
+    if (!result.ok) {
+      const status = result.code === 'NOT_MEMBER' ? 404 : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
+    }
+
+    res.json({ message: 'Участник исключён из пространства' });
+  } catch (error) {
+    console.error('Remove workspace member error:', error);
+    res.status(500).json({ error: 'Ошибка исключения участника' });
+  }
+});
+
+router.post('/:workspaceId/leave', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const member = await isAlreadyWorkspaceMember(prisma, req.userId!, workspaceId);
+    if (!member) {
+      return res.status(404).json({ error: 'Вы не состоите в этом пространстве', code: 'NOT_MEMBER' });
+    }
+
+    const ws = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { ownerId: true, name: true },
+    });
+    if (!ws) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+    if (ws.ownerId === req.userId) {
+      return res.status(400).json({
+        error: 'Владелец не может покинуть пространство. Удалите его или передайте владение.',
+        code: 'OWNER',
+      });
+    }
+
+    const result = await removeUserFromWorkspace(prisma, workspaceId, req.userId!, { notify: false });
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error, code: result.code });
+    }
+
+    res.json({ message: `Вы покинули «${ws.name}»` });
+  } catch (error) {
+    console.error('Leave workspace error:', error);
+    res.status(500).json({ error: 'Ошибка выхода из пространства' });
+  }
+});
+
+router.get('/:workspaceId/employee-profile-fields', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, ownerId: true },
+    });
+    if (!workspace) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const isMember = await prisma.workspaceUser.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.userId } },
+    });
+    if (!isMember && workspace.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const fields = await ensureEmployeeProfileSchema(prisma, workspaceId);
+    res.json(fields);
+  } catch (error) {
+    console.error('Get employee profile fields error:', error);
+    res.status(500).json({ error: 'Ошибка получения схемы профиля' });
+  }
+});
+
+router.put(
+  '/:workspaceId/employee-profile-fields',
+  requireStaffUser,
+  async (req: AuthRequest, res) => {
+    try {
+      const workspaceId = req.params.workspaceId;
+      const viewerRole = await resolveWorkspaceRole(prisma, req.userId!, workspaceId);
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { ownerId: true },
+      });
+      if (!workspace) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+      if (!viewerRole || !canManageEmployeeProfile(viewerRole, workspace.ownerId === req.userId)) {
+        return res.status(403).json({ error: 'Недостаточно прав' });
+      }
+
+      const incoming = req.body?.fields;
+      if (!Array.isArray(incoming)) {
+        return res.status(400).json({ error: 'fields должен быть массивом' });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.employeeProfileField.deleteMany({ where: { workspaceId } });
+        for (let idx = 0; idx < incoming.length; idx++) {
+          const f = incoming[idx] as Record<string, unknown>;
+          await tx.employeeProfileField.create({
+            data: {
+              workspaceId,
+              key: String(f.key ?? `field_${idx}`),
+              name: String(f.name ?? 'Поле'),
+              type: String(f.type ?? 'text'),
+              required: Boolean(f.required),
+              filterable: f.filterable !== false,
+              options: f.options ?? undefined,
+              section: typeof f.section === 'string' ? f.section : null,
+              position: typeof f.position === 'number' ? f.position : idx,
+            },
+          });
+        }
+      });
+
+      const fields = await prisma.employeeProfileField.findMany({
+        where: { workspaceId },
+        orderBy: { position: 'asc' },
+      });
+      res.json(fields);
+    } catch (error) {
+      console.error('Update employee profile fields error:', error);
+      res.status(500).json({ error: 'Ошибка сохранения схемы профиля' });
+    }
+  },
+);
+
 router.get('/:id', async (req: AuthRequest, res) => {
   try {
     if (req.lexClientId) {
@@ -199,128 +389,5 @@ router.delete('/:id', requireStaffUser, async (req: AuthRequest, res) => {
     res.status(500).json({ error: 'Ошибка удаления рабочего пространства' });
   }
 });
-
-router.post('/:id/users', requireStaffUser, async (req: AuthRequest, res) => {
-  try {
-    const { userEmail } = req.body;
-
-    const workspace = await prisma.workspace.findUnique({
-      where: { id: req.params.id },
-    });
-
-    if (!workspace) {
-      return res.status(404).json({ error: 'Рабочее пространство не найдено' });
-    }
-
-    if (workspace.ownerId !== req.userId) {
-      return res.status(403).json({ error: 'Недостаточно прав' });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: userEmail },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-
-    const workspaceUser = await prisma.workspaceUser.create({
-      data: {
-        workspaceId: req.params.id,
-        userId: user.id,
-      },
-    });
-
-    const notification = await prisma.notification.create({
-      data: {
-        type: 'user_added',
-        title: 'Добавление в пространство',
-        message: `Вас добавили в рабочее пространство "${workspace.name}"`,
-        userId: user.id,
-        relatedId: workspace.id,
-      },
-    });
-
-    broadcast({
-      type: 'notification',
-      userId: user.id,
-      notification,
-    });
-
-    res.json(workspaceUser);
-  } catch (error) {
-    console.error('Add user to workspace error:', error);
-    res.status(500).json({ error: 'Ошибка добавления пользователя' });
-  }
-});
-
-router.get('/:workspaceId/employee-profile-fields', requireStaffUser, async (req: AuthRequest, res) => {
-  try {
-    const workspaceId = req.params.workspaceId;
-    const workspace = await prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { id: true, ownerId: true },
-    });
-    if (!workspace) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
-
-    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
-    const isMember = await prisma.workspaceUser.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId: req.userId } },
-    });
-    if (!isMember && workspace.ownerId !== req.userId) {
-      return res.status(403).json({ error: 'Недостаточно прав' });
-    }
-
-    const fields = await ensureEmployeeProfileSchema(prisma, workspaceId);
-    res.json(fields);
-  } catch (error) {
-    console.error('Get employee profile fields error:', error);
-    res.status(500).json({ error: 'Ошибка получения схемы профиля' });
-  }
-});
-
-router.put(
-  '/:workspaceId/employee-profile-fields',
-  requireStaffUser,
-  authorize('admin', 'manager'),
-  async (req: AuthRequest, res) => {
-    try {
-      const workspaceId = req.params.workspaceId;
-      const incoming = req.body?.fields;
-      if (!Array.isArray(incoming)) {
-        return res.status(400).json({ error: 'fields должен быть массивом' });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await tx.employeeProfileField.deleteMany({ where: { workspaceId } });
-        for (let idx = 0; idx < incoming.length; idx++) {
-          const f = incoming[idx] as Record<string, unknown>;
-          await tx.employeeProfileField.create({
-            data: {
-              workspaceId,
-              key: String(f.key ?? `field_${idx}`),
-              name: String(f.name ?? 'Поле'),
-              type: String(f.type ?? 'text'),
-              required: Boolean(f.required),
-              filterable: f.filterable !== false,
-              options: f.options ?? undefined,
-              section: typeof f.section === 'string' ? f.section : null,
-              position: typeof f.position === 'number' ? f.position : idx,
-            },
-          });
-        }
-      });
-
-      const fields = await prisma.employeeProfileField.findMany({
-        where: { workspaceId },
-        orderBy: { position: 'asc' },
-      });
-      res.json(fields);
-    } catch (error) {
-      console.error('Update employee profile fields error:', error);
-      res.status(500).json({ error: 'Ошибка сохранения схемы профиля' });
-    }
-  },
-);
 
 export default router;

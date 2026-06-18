@@ -260,6 +260,10 @@ export interface Notification {
     | 'document'
     | 'mention'
     | 'user_added'
+    | 'workspace_invite'
+    | 'workspace_invite_accepted'
+    | 'workspace_invite_declined'
+    | 'workspace_member_removed'
     | 'conference_invite'
     | 'conference_updated'
     | 'conference_cancelled';
