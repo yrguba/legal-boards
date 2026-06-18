@@ -507,6 +507,7 @@ export function Board() {
         tasks={tasks}
         users={users}
         onTasksChange={setTasks}
+        onBoardChange={setBoard}
         isLoading={false}
       />
     );
