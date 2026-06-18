@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ArrowLeft, Layers } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import type { AggregatedBoardSource, Board, Task, User } from '../types';
 import { TaskPriorityBadge } from './TaskPriorityBadge';
 import { normalizeTaskPriority } from '../utils/taskPriority';
@@ -55,6 +55,10 @@ type Props = {
   onTasksChange: (updater: Task[] | ((prev: Task[]) => Task[])) => void;
   isLoading?: boolean;
 };
+
+function statusGroupKey(sourceBoardId: string, columnId: string): string {
+  return `${sourceBoardId}:${columnId}`;
+}
 
 function AggregatedTaskCard({
   task,
@@ -130,11 +134,15 @@ function StatusDropZone({
   column,
   tasks,
   getAssigneeName,
+  isCollapsed,
+  onToggleCollapse,
 }: {
   sourceBoardId: string;
   column: { id: string; name: string };
   tasks: Task[];
   getAssigneeName: (id?: string) => string;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
   const dropId = aggDropZoneId(sourceBoardId, column.id);
   const { setNodeRef, isOver } = useDroppable({ id: dropId });
@@ -148,18 +156,74 @@ function StatusDropZone({
           : 'border-transparent'
       }`}
     >
-      <div className="flex items-center gap-1.5 mb-2 sticky top-0 bg-slate-50 py-1 z-[1]">
-        <span className={`inline-block size-2 rounded-full ${statusDotClass(column.name)}`} />
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        className="flex items-center gap-1.5 mb-2 sticky top-0 bg-slate-50 py-1 z-[1] w-full text-left rounded hover:bg-slate-100/80 transition-colors"
+        aria-expanded={!isCollapsed}
+      >
+        {isCollapsed ? (
+          <ChevronRight className="size-3.5 shrink-0 text-slate-500" />
+        ) : (
+          <ChevronDown className="size-3.5 shrink-0 text-slate-500" />
+        )}
+        <span className={`inline-block size-2 rounded-full shrink-0 ${statusDotClass(column.name)}`} />
         <span className="text-xs font-medium text-slate-700">{column.name}</span>
         <span className="text-xs text-slate-400">({tasks.length})</span>
-      </div>
-      <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-        <div className="space-y-2 min-h-[2rem]">
-          {tasks.map((task) => (
-            <AggregatedTaskCard key={task.id} task={task} getAssigneeName={getAssigneeName} />
-          ))}
-        </div>
-      </SortableContext>
+      </button>
+      {isCollapsed ? (
+        <div className="min-h-[2rem]" aria-hidden />
+      ) : (
+        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+          <div className="space-y-2 min-h-[2rem]">
+            {tasks.map((task) => (
+              <AggregatedTaskCard key={task.id} task={task} getAssigneeName={getAssigneeName} />
+            ))}
+          </div>
+        </SortableContext>
+      )}
+    </div>
+  );
+}
+
+function UnknownStatusGroup({
+  tasks,
+  getAssigneeName,
+  isCollapsed,
+  onToggleCollapse,
+}: {
+  tasks: Task[];
+  getAssigneeName: (id?: string) => string;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+}) {
+  return (
+    <div className="rounded-lg p-2 border-2 border-transparent">
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        className="flex items-center gap-1.5 mb-2 w-full text-left rounded hover:bg-slate-100/80 transition-colors py-1"
+        aria-expanded={!isCollapsed}
+      >
+        {isCollapsed ? (
+          <ChevronRight className="size-3.5 shrink-0 text-slate-500" />
+        ) : (
+          <ChevronDown className="size-3.5 shrink-0 text-slate-500" />
+        )}
+        <span className="text-xs font-medium text-slate-500">Прочие</span>
+        <span className="text-xs text-slate-400">({tasks.length})</span>
+      </button>
+      {isCollapsed ? (
+        <div className="min-h-[2rem]" aria-hidden />
+      ) : (
+        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+          <div className="space-y-2">
+            {tasks.map((task) => (
+              <AggregatedTaskCard key={task.id} task={task} getAssigneeName={getAssigneeName} />
+            ))}
+          </div>
+        </SortableContext>
+      )}
     </div>
   );
 }
@@ -168,10 +232,14 @@ function SourceBoardColumn({
   source,
   tasks,
   getAssigneeName,
+  collapsedGroups,
+  onToggleStatusGroup,
 }: {
   source: AggregatedBoardSource;
   tasks: Task[];
   getAssigneeName: (id?: string) => string;
+  collapsedGroups: Set<string>;
+  onToggleStatusGroup: (key: string) => void;
 }) {
   const columnOrder = [...source.columns].sort((a, b) => a.position - b.position);
 
@@ -195,6 +263,7 @@ function SourceBoardColumn({
   }, [tasks, columnOrder]);
 
   const totalCount = tasks.length;
+  const unknownKey = statusGroupKey(source.id, '__unknown__');
 
   return (
     <div className="flex-shrink-0 w-80 rounded-lg bg-slate-50 p-4 flex flex-col max-h-[calc(100vh-12rem)]">
@@ -209,30 +278,30 @@ function SourceBoardColumn({
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-4 min-h-[200px] px-0.5">
-        {columnOrder.map((col) => (
-          <StatusDropZone
-            key={col.id}
-            sourceBoardId={source.id}
-            column={col}
-            tasks={tasksByColumn.map.get(col.id) ?? []}
-            getAssigneeName={getAssigneeName}
-          />
-        ))}
+        {columnOrder.map((col) => {
+          const colTasks = tasksByColumn.map.get(col.id) ?? [];
+          if (colTasks.length === 0) return null;
+          const groupKey = statusGroupKey(source.id, col.id);
+          return (
+            <StatusDropZone
+              key={col.id}
+              sourceBoardId={source.id}
+              column={col}
+              tasks={colTasks}
+              getAssigneeName={getAssigneeName}
+              isCollapsed={collapsedGroups.has(groupKey)}
+              onToggleCollapse={() => onToggleStatusGroup(groupKey)}
+            />
+          );
+        })}
 
         {tasksByColumn.unknown.length > 0 ? (
-          <div>
-            <div className="text-xs font-medium text-slate-500 mb-2">Прочие</div>
-            <SortableContext
-              items={tasksByColumn.unknown.map((t) => t.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="space-y-2">
-                {tasksByColumn.unknown.map((task) => (
-                  <AggregatedTaskCard key={task.id} task={task} getAssigneeName={getAssigneeName} />
-                ))}
-              </div>
-            </SortableContext>
-          </div>
+          <UnknownStatusGroup
+            tasks={tasksByColumn.unknown}
+            getAssigneeName={getAssigneeName}
+            isCollapsed={collapsedGroups.has(unknownKey)}
+            onToggleCollapse={() => onToggleStatusGroup(unknownKey)}
+          />
         ) : null}
 
         {totalCount === 0 ? (
@@ -258,6 +327,7 @@ export function AggregatedBoardView({
   );
 
   const [sourceBoards, setSourceBoards] = useState<Map<string, Board>>(new Map());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [dragMoveError, setDragMoveError] = useState<string | null>(null);
   const dragSnapshotRef = useRef<Task[] | null>(null);
@@ -319,6 +389,15 @@ export function AggregatedBoardView({
       cancelled = true;
     };
   }, [transferSourceBoardId, sourceBoards]);
+
+  const toggleStatusGroup = useCallback((key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -615,6 +694,8 @@ export function AggregatedBoardView({
                   source={source}
                   tasks={tasksBySource.get(source.id) ?? []}
                   getAssigneeName={getAssigneeName}
+                  collapsedGroups={collapsedGroups}
+                  onToggleStatusGroup={toggleStatusGroup}
                 />
               ))}
             </div>
