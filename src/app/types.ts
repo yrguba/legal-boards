@@ -113,12 +113,22 @@ export interface TaskType {
   icon?: string;
 }
 
+export interface AggregatedBoardSource {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  position: number;
+  columns: { id: string; name: string; position: number }[];
+}
+
 export interface Board {
   id: string;
   code: string;
   name: string;
   description?: string;
   workspaceId: string;
+  kind?: 'standard' | 'aggregated';
   attachmentsEnabled?: boolean;
   visibility: {
     departmentIds?: string[];
@@ -129,6 +139,9 @@ export interface Board {
   taskTypes: TaskType[];
   viewMode: 'kanban' | 'list';
   advancedSettings?: BoardAdvancedSettings;
+  /** Только для kind=aggregated */
+  sources?: AggregatedBoardSource[];
+  _count?: { tasks?: number; aggregatedSources?: number };
 }
 
 export interface TaskAttachment {
@@ -170,6 +183,13 @@ export interface Task {
   assignee?: { id: string; name: string; email?: string; avatar?: string | null };
   /** Вложения только этой задачи (не глобальные Document) */
   taskAttachments?: TaskAttachment[];
+  /** Поля сводной доски */
+  sourceBoardId?: string;
+  sourceBoardCode?: string;
+  sourceBoardName?: string;
+  sourceColumnId?: string;
+  sourceColumnName?: string;
+  type?: TaskType;
 }
 
 export interface Comment {

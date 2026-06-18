@@ -33,6 +33,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CreateTaskModal } from '../components/CreateTaskModal';
+import { AggregatedBoardView } from '../components/AggregatedBoardView';
 import { TransferTaskModal } from '../components/TransferTaskModal';
 import { ColumnActionTransitionModal } from '../components/ColumnActionTransitionModal';
 import { BoardSettingsModal } from '../features/board-settings/BoardSettingsModal';
@@ -126,8 +127,10 @@ function DroppableColumn({
     >
       <div
         ref={setNodeRef}
-        className={`flex-shrink-0 w-80 rounded-lg p-4 flex flex-col transition-colors ${
-          isOver ? 'bg-brand-light ring-2 ring-brand' : 'bg-slate-50'
+        className={`flex-shrink-0 w-80 rounded-lg p-4 flex flex-col transition-colors border-2 ${
+          isOver
+            ? 'bg-brand-light border-dashed border-brand'
+            : 'bg-slate-50 border-transparent'
         }`}
       >
         <div className="flex items-center justify-between mb-4">
@@ -204,36 +207,36 @@ function TaskCard({
     <div
       ref={setNodeRef}
       style={style}
-      className="bg-white rounded-lg p-4 border border-slate-200 hover:border-brand hover:shadow-md transition-all group"
+      {...attributes}
+      {...listeners}
+      className="bg-white rounded-lg p-4 border border-slate-200 hover:border-brand hover:shadow-md transition-all group cursor-grab active:cursor-grabbing touch-none"
     >
       <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2 flex-1">
-          <button
-            {...attributes}
-            {...listeners}
-            className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600"
-          >
-            <GripVertical className="w-4 h-4" />
-          </button>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           <Link
             to={taskPath(task)}
             className="text-sm font-medium text-slate-900 group-hover:text-brand transition-colors flex-1"
+            onClick={(e) => e.stopPropagation()}
           >
             {task.title}
           </Link>
         </div>
-        <button className="text-slate-400 hover:text-slate-600 ml-2">
+        <button
+          type="button"
+          className="text-slate-400 hover:text-slate-600 ml-2 shrink-0"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <MoreHorizontal className="w-4 h-4" />
         </button>
       </div>
 
       {task.description && (
-        <p className="text-xs text-slate-600 mb-3 line-clamp-2 ml-6">
+        <p className="text-xs text-slate-600 mb-3 line-clamp-2">
           {task.description}
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 ml-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
@@ -494,6 +497,18 @@ export function Board() {
           <h2 className="text-xl font-semibold text-slate-900">Доска не найдена</h2>
         </div>
       </div>
+    );
+  }
+
+  if (board.kind === 'aggregated') {
+    return (
+      <AggregatedBoardView
+        board={board}
+        tasks={tasks}
+        users={users}
+        onTasksChange={setTasks}
+        isLoading={false}
+      />
     );
   }
 

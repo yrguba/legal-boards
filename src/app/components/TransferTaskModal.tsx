@@ -14,11 +14,25 @@ type Props = {
     skipped: { taskId: string; reason: string; code?: string }[];
     warnings: { taskId: string; code: string; message: string }[];
   }) => void;
+  /** Предзаполнение цели (например, drop на колонку сводной доски) */
+  presetTargetBoardId?: string;
+  presetTargetColumnId?: string;
+  /** Ограничить список целевых досок (id) */
+  restrictTargetBoardIds?: string[];
 };
 
 type BoardOption = Board & { workspaceName: string };
 
-export function TransferTaskModal({ open, sourceBoard, taskIds, onClose, onSuccess }: Props) {
+export function TransferTaskModal({
+  open,
+  sourceBoard,
+  taskIds,
+  onClose,
+  onSuccess,
+  presetTargetBoardId,
+  presetTargetColumnId,
+  restrictTargetBoardIds,
+}: Props) {
   const { workspaces } = useApp();
   const [boards, setBoards] = useState<BoardOption[]>([]);
   const [loadingBoards, setLoadingBoards] = useState(false);
@@ -32,8 +46,8 @@ export function TransferTaskModal({ open, sourceBoard, taskIds, onClose, onSucce
 
   useEffect(() => {
     if (!open) return;
-    setTargetBoardId('');
-    setTargetColumnId('');
+    setTargetBoardId(presetTargetBoardId ?? '');
+    setTargetColumnId(presetTargetColumnId ?? '');
     setDefaultTargetTypeId('');
     setTypeMapping({});
     setForce(false);
@@ -43,11 +57,14 @@ export function TransferTaskModal({ open, sourceBoard, taskIds, onClose, onSucce
     const load = async () => {
       setLoadingBoards(true);
       try {
+        const restrict = restrictTargetBoardIds ? new Set(restrictTargetBoardIds) : null;
         const lists = await Promise.all(
           workspaces.map(async (ws) => {
             const items = (await boardsApi.getByWorkspace(ws.id)) as Board[];
             return items
               .filter((b) => b.id !== sourceBoard.id)
+              .filter((b) => b.kind !== 'aggregated')
+              .filter((b) => !restrict || restrict.has(b.id))
               .map((b) => ({ ...b, workspaceName: ws.name }));
           }),
         );
@@ -62,7 +79,7 @@ export function TransferTaskModal({ open, sourceBoard, taskIds, onClose, onSucce
     return () => {
       cancelled = true;
     };
-  }, [open, sourceBoard.id, workspaces]);
+  }, [open, sourceBoard.id, workspaces, presetTargetBoardId, presetTargetColumnId, restrictTargetBoardIds]);
 
   const targetBoard = useMemo(
     () => boards.find((b) => b.id === targetBoardId) ?? null,
@@ -77,8 +94,11 @@ export function TransferTaskModal({ open, sourceBoard, taskIds, onClose, onSucce
       return;
     }
     const sortedColumns = [...targetBoard.columns].sort((a, b) => a.position - b.position);
-    const firstColumn = sortedColumns[0];
-    setTargetColumnId(firstColumn?.id ?? '');
+    const presetCol =
+      presetTargetColumnId && sortedColumns.some((c) => c.id === presetTargetColumnId)
+        ? presetTargetColumnId
+        : sortedColumns[0]?.id ?? '';
+    setTargetColumnId(presetCol);
     const firstType = targetBoard.taskTypes[0];
     setDefaultTargetTypeId(firstType?.id ?? '');
 
@@ -90,7 +110,7 @@ export function TransferTaskModal({ open, sourceBoard, taskIds, onClose, onSucce
       mapping[srcType.id] = byName?.id ?? firstType?.id ?? '';
     }
     setTypeMapping(mapping);
-  }, [targetBoard, sourceBoard.taskTypes]);
+  }, [targetBoard, sourceBoard.taskTypes, presetTargetColumnId]);
 
   const groupedBoards = useMemo(() => {
     const map = new Map<string, BoardOption[]>();

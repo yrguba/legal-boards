@@ -43,6 +43,11 @@ import {
   writeActivityLog,
 } from '../utils/activityLog';
 import { resolveBoardRef } from '../utils/boardResolve';
+import {
+  assertAggregatedBoardView,
+  isAggregatedBoard,
+  loadAggregatedSourcesDto,
+} from '../utils/aggregatedBoard';
 import { enrichTaskWithKey, nextTaskNumber, resolveTaskRef } from '../utils/taskKeys';
 import {
   DEFAULT_TASK_PRIORITY,
@@ -278,6 +283,63 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
     const board = await resolveBoardRef(prisma, req.params.boardId);
     if (!board) {
       return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
+    const viewGate = await assertAggregatedBoardView(prisma, req, board);
+    if (!viewGate.ok) {
+      return res.status(viewGate.status).json({ error: viewGate.error });
+    }
+
+    if (isAggregatedBoard(board)) {
+      const sources = await loadAggregatedSourcesDto(prisma, board.id);
+      const sourceIds = sources.map((s) => s.id);
+      if (sourceIds.length === 0) {
+        res.json([]);
+        return;
+      }
+
+      const sourceById = new Map(sources.map((s) => [s.id, s]));
+      const columnNameById = new Map<string, string>();
+      for (const s of sources) {
+        for (const col of s.columns) {
+          columnNameById.set(col.id, col.name);
+        }
+      }
+
+      const tasks = await prisma.task.findMany({
+        where: { boardId: { in: sourceIds } },
+        include: {
+          board: { select: { id: true, code: true, name: true } },
+          type: true,
+          assignee: {
+            select: { id: true, name: true, email: true, avatar: true },
+          },
+          creator: {
+            select: { id: true, name: true, email: true },
+          },
+          lexCreator: LEX_CREATOR_FOR_TASK,
+          _count: {
+            select: { comments: true, chatMessages: true },
+          },
+        },
+        orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
+      });
+
+      const payload = tasks.map((t) => {
+        const source = sourceById.get(t.boardId);
+        const unified = unifyTaskRow(t as Record<string, unknown>);
+        return {
+          ...unified,
+          sourceBoardId: t.boardId,
+          sourceBoardCode: t.board.code,
+          sourceBoardName: source?.name ?? t.board.name,
+          sourceColumnId: t.columnId,
+          sourceColumnName: columnNameById.get(t.columnId) ?? '—',
+        };
+      });
+
+      res.json(payload);
+      return;
     }
 
     const boardWhere = req.lexClientId
@@ -760,8 +822,11 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const boardRow = await prisma.board.findUnique({
       where: { id: boardId },
-      select: { workspaceId: true, advancedSettings: true, code: true },
+      select: { workspaceId: true, advancedSettings: true, code: true, kind: true },
     });
+    if (boardRow && isAggregatedBoard(boardRow)) {
+      return res.status(400).json({ error: 'Нельзя создавать задачи на сводной доске' });
+    }
     const ttCfgCreate = parseBoardTimeTrackingCfg(boardRow?.advancedSettings ?? {});
     const ttInitCreate = applyTimeTrackingOnTaskCreate(columnId, ttCfgCreate, new Date());
 

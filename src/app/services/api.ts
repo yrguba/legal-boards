@@ -373,6 +373,36 @@ export const boardsApi = {
     });
   },
 
+  async createAggregated(data: {
+    name: string;
+    code: string;
+    description?: string;
+    workspaceId: string;
+    visibility?: Record<string, unknown>;
+    sourceBoardIds: string[];
+  }) {
+    return fetchApi<any>('/boards/aggregated', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateAggregated(
+    id: string,
+    data: {
+      name?: string;
+      code?: string;
+      description?: string;
+      visibility?: Record<string, unknown>;
+      sourceBoardIds?: string[];
+    },
+  ) {
+    return fetchApi<any>(`/boards/${id}/aggregated`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
   async update(id: string, data: any) {
     return fetchApi<any>(`/boards/${id}`, {
       method: 'PUT',

@@ -277,6 +277,8 @@ model Board {
   description String?
   workspaceId String
   viewMode    String   @default("kanban")
+  /// standard — обычная доска; aggregated — сводная над выбранными досками
+  kind        String   @default("standard")
   visibility  Json     @default("{}")
   attachmentsEnabled Boolean @default(true)
   /// Расширенные настройки доски (JSON): авто-назначение, учёт времени по статусам, iframe-сервисы
@@ -290,8 +292,26 @@ model Board {
   taskTypes  TaskType[]
   tasks      Task[]
   codeAliases BoardCodeAlias[]
+  aggregatedSources AggregatedBoardSource[] @relation("AggregatedBoard")
+  aggregatedIn      AggregatedBoardSource[] @relation("SourceBoard")
 
   @@index([workspaceId])
+  @@index([kind])
+}
+
+/// Исходные доски, входящие в сводную
+model AggregatedBoardSource {
+  id                String @id @default(cuid())
+  aggregatedBoardId String
+  sourceBoardId     String
+  position          Int
+
+  aggregatedBoard Board @relation("AggregatedBoard", fields: [aggregatedBoardId], references: [id], onDelete: Cascade)
+  sourceBoard     Board @relation("SourceBoard", fields: [sourceBoardId], references: [id], onDelete: Cascade)
+
+  @@unique([aggregatedBoardId, sourceBoardId])
+  @@index([aggregatedBoardId])
+  @@index([sourceBoardId])
 }
 
 /// Старые коды доски для redirect URL после смены code
