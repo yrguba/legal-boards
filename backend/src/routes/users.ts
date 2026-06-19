@@ -8,6 +8,7 @@ import { isEmailConfigured } from '../utils/email';
 import {
   assignPasswordInviteToken,
   buildPasswordInviteUrl,
+  isInviteEmailEnabled,
   sendPasswordInviteEmail,
 } from '../utils/passwordInvite';
 import {
@@ -636,28 +637,33 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
     });
 
     if (mustChangePassword) {
-      if (!isEmailConfigured()) {
-        await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
-        return res.status(503).json({
-          error: 'Email-сервис не настроен (RESEND_API_KEY, RESEND_FROM). Невозможно отправить приглашение.',
-        });
-      }
+      const inviteToken = await assignPasswordInviteToken(prisma, result.user.id);
+      const inviteUrl = buildPasswordInviteUrl(inviteToken);
+      const shouldSendEmail = isInviteEmailEnabled() && isEmailConfigured();
+      let inviteSent = false;
 
-      try {
-        const inviteToken = await assignPasswordInviteToken(prisma, result.user.id);
-        const inviteUrl = buildPasswordInviteUrl(inviteToken);
-        await sendPasswordInviteEmail({
-          to: result.user.email,
-          name: result.user.name,
-          workspaceName: ws?.name,
-          inviteUrl,
-          kind: 'welcome',
-        });
-      } catch (mailErr) {
-        await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
-        console.error('Create user invite email error:', mailErr);
-        const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
-        return res.status(500).json({ error: msg });
+      if (shouldSendEmail) {
+        try {
+          await sendPasswordInviteEmail({
+            to: result.user.email,
+            name: result.user.name,
+            workspaceName: ws?.name,
+            inviteUrl,
+            kind: 'welcome',
+          });
+          inviteSent = true;
+        } catch (mailErr) {
+          await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
+          console.error('Create user invite email error:', mailErr);
+          const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
+          return res.status(500).json({ error: msg });
+        }
+      } else if (isInviteEmailEnabled() && !isEmailConfigured()) {
+        console.warn(
+          `[password-invite] WORKSPACE_INVITE_EMAIL=true, но Resend не настроен — письмо не отправлено; ссылка: ${inviteUrl}`,
+        );
+      } else {
+        console.log(`[password-invite] Email отключён (WORKSPACE_INVITE_EMAIL=false); ссылка: ${inviteUrl}`);
       }
 
       const notification = await prisma.notification.create({
@@ -678,8 +684,11 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
 
       return res.json({
         ...result.user,
-        inviteSent: true,
-        message: `Приглашение отправлено на ${result.user.email}`,
+        inviteSent,
+        inviteUrl: inviteSent ? undefined : inviteUrl,
+        message: inviteSent
+          ? `Приглашение отправлено на ${result.user.email}`
+          : 'Сотрудник добавлен. Передайте ссылку для активации вручную.',
       });
     }
 
@@ -754,12 +763,6 @@ router.post('/:id/reset-password', authorize('admin'), async (req: AuthRequest, 
     const plainPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-    if (!isEmailConfigured()) {
-      return res.status(503).json({
-        error: 'Email-сервис не настроен (RESEND_API_KEY, RESEND_FROM). Невозможно отправить приглашение.',
-      });
-    }
-
     await prisma.user.update({
       where: { id: target.id },
       data: {
@@ -768,24 +771,35 @@ router.post('/:id/reset-password', authorize('admin'), async (req: AuthRequest, 
       },
     });
 
-    try {
-      const inviteToken = await assignPasswordInviteToken(prisma, target.id);
-      const inviteUrl = buildPasswordInviteUrl(inviteToken);
-      await sendPasswordInviteEmail({
-        to: target.email,
-        name: target.name,
-        inviteUrl,
-        kind: 'reset',
-      });
-    } catch (mailErr) {
-      console.error('Reset password invite email error:', mailErr);
-      const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
-      return res.status(500).json({ error: msg });
+    const inviteToken = await assignPasswordInviteToken(prisma, target.id);
+    const inviteUrl = buildPasswordInviteUrl(inviteToken);
+    const shouldSendEmail = isInviteEmailEnabled() && isEmailConfigured();
+    let inviteSent = false;
+
+    if (shouldSendEmail) {
+      try {
+        await sendPasswordInviteEmail({
+          to: target.email,
+          name: target.name,
+          inviteUrl,
+          kind: 'reset',
+        });
+        inviteSent = true;
+      } catch (mailErr) {
+        console.error('Reset password invite email error:', mailErr);
+        const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
+        return res.status(500).json({ error: msg });
+      }
+    } else {
+      console.log(`[password-invite] Email отключён или Resend не настроен; ссылка сброса: ${inviteUrl}`);
     }
 
     res.json({
-      message: `Приглашение со ссылкой для смены пароля отправлено на ${target.email}`,
-      inviteSent: true,
+      message: inviteSent
+        ? `Приглашение со ссылкой для смены пароля отправлено на ${target.email}`
+        : 'Ссылка для смены пароля сгенерирована. Передайте её пользователю вручную.',
+      inviteSent,
+      inviteUrl: inviteSent ? undefined : inviteUrl,
     });
   } catch (error) {
     console.error('Reset user password error:', error);

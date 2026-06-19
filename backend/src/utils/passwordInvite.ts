@@ -5,6 +5,12 @@ import { buildPasswordInviteEmailHtml, isConsoleEmailMode, sendEmail } from './e
 
 export const PASSWORD_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Отправка писем с invite-ссылкой (создание сотрудника, сброс пароля, приглашение в пространство). */
+export function isInviteEmailEnabled(): boolean {
+  const raw = process.env.WORKSPACE_INVITE_EMAIL?.trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
+}
+
 export function createPasswordInviteToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }

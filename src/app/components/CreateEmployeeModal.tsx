@@ -20,6 +20,8 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
     groupIds: [] as string[],
   });
   const [inviteSentTo, setInviteSentTo] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteEmailSent, setInviteEmailSent] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -28,6 +30,8 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
 
   const handleClose = () => {
     setInviteSentTo(null);
+    setInviteUrl(null);
+    setInviteEmailSent(false);
     setSubmitError(null);
     onClose();
   };
@@ -58,6 +62,8 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
       });
 
       setInviteSentTo(res?.email ?? formData.email);
+      setInviteEmailSent(!!res?.inviteSent);
+      setInviteUrl(res?.inviteUrl ?? null);
       setFormData({
         name: '',
         email: '',
@@ -96,10 +102,26 @@ export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProp
         {inviteSentTo ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-              Приглашение отправлено на <span className="font-medium">{inviteSentTo}</span>.
-              <p className="text-xs text-green-700 mt-2">
-                Сотрудник получит ссылку для активации аккаунта и создания пароля.
-              </p>
+              {inviteEmailSent ? (
+                <>
+                  Приглашение отправлено на <span className="font-medium">{inviteSentTo}</span>.
+                  <p className="text-xs text-green-700 mt-2">
+                    Сотрудник получит ссылку для активации аккаунта и создания пароля.
+                  </p>
+                </>
+              ) : (
+                <>
+                  Сотрудник <span className="font-medium">{inviteSentTo}</span> добавлен.
+                  <p className="text-xs text-green-700 mt-2">
+                    Email не отправлялся. Передайте ссылку для активации вручную:
+                  </p>
+                  {inviteUrl && (
+                    <p className="text-xs text-green-800 mt-2 break-all font-mono bg-white/60 rounded px-2 py-1">
+                      {inviteUrl}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
             <button
               type="button"
