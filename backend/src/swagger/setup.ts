@@ -1,6 +1,6 @@
 import { Express, Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
-import { openApiSpec } from './spec';
+import { buildOpenApiSpec } from './spec';
 
 function isSwaggerEnabled(): boolean {
   const raw = process.env.SWAGGER_ENABLED;
@@ -13,14 +13,16 @@ export function setupSwagger(app: Express): void {
     return;
   }
 
+  const spec = buildOpenApiSpec();
+
   app.get('/api/docs/openapi.json', (_req: Request, res: Response) => {
-    res.json(openApiSpec);
+    res.json(spec);
   });
 
   app.use(
     '/api/docs',
     swaggerUi.serve,
-    swaggerUi.setup(openApiSpec, {
+    swaggerUi.setup(spec, {
       customSiteTitle: 'Legal Boards API',
       swaggerOptions: {
         persistAuthorization: true,

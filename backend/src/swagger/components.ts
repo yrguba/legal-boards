@@ -46,6 +46,51 @@ export const schemas = {
     type: 'object',
     additionalProperties: true,
   },
+  PushTestRequest: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', example: 'Проверка push' },
+      body: { type: 'string', example: 'Legal Boards — тест доставки' },
+      route: { type: 'string', example: '/' },
+    },
+  },
+  PushSendStats: {
+    type: 'object',
+    properties: {
+      ok: { type: 'integer', example: 1 },
+      invalid: { type: 'integer', example: 0 },
+      error: { type: 'integer', example: 0 },
+      skipped: { type: 'integer', example: 0 },
+      devices: { type: 'integer', example: 1 },
+    },
+  },
+  PushTestResponse: {
+    type: 'object',
+    properties: {
+      message: { type: 'string' },
+      stats: { $ref: '#/components/schemas/PushSendStats' },
+      config: {
+        type: 'object',
+        properties: {
+          androidEnabled: { type: 'boolean' },
+          iosEnabled: { type: 'boolean' },
+          fcmConfigured: { type: 'boolean' },
+          apnsConfigured: { type: 'boolean' },
+        },
+      },
+    },
+  },
+  PushRegisterDeviceRequest: {
+    type: 'object',
+    required: ['platform', 'provider', 'token'],
+    properties: {
+      platform: { type: 'string', enum: ['android', 'ios'] },
+      provider: { type: 'string', enum: ['fcm', 'apns'] },
+      token: { type: 'string' },
+      deviceId: { type: 'string' },
+      appVersion: { type: 'string' },
+    },
+  },
 };
 
 export const parameters = {

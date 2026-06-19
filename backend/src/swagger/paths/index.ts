@@ -1,5 +1,5 @@
 import { parameters } from '../components';
-import { jsonBody, jsonBodyObject, multipartBody, op } from '../helpers';
+import { jsonBody, jsonBodyObject, jsonResponse, multipartBody, op } from '../helpers';
 
 export const authPaths = {
   '/api/auth/register': {
@@ -349,6 +349,62 @@ export const notificationPaths = {
   },
 };
 
+export const configPaths = {
+  '/api/config/tabs': {
+    get: op('Config', 'Флаги вкладок бокового меню', {
+      secured: false,
+      responses: {
+        '200': {
+          description: 'documents, knowledge, chat, calendar — true/false',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/JsonObject' } } },
+        },
+      },
+    }),
+  },
+};
+
+export const pushPaths = {
+  '/api/push/config': {
+    get: op('Push', 'Статус push-уведомлений', {
+      secured: false,
+      responses: {
+        '200': {
+          description: 'enabled, androidEnabled, iosEnabled, fcmConfigured, apnsConfigured',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/JsonObject' } } },
+        },
+      },
+    }),
+  },
+  '/api/push/devices': {
+    get: op('Push', 'Активные push-устройства текущего пользователя'),
+    post: op('Push', 'Зарегистрировать или обновить push-токен', {
+      requestBody: jsonBody('#/components/schemas/PushRegisterDeviceRequest'),
+      responses: {
+        '201': { description: 'Токен зарегистрирован' },
+        '200': { description: 'Токен обновлён' },
+      },
+    }),
+    delete: op('Push', 'Отключить push-токен (logout)', {
+      requestBody: jsonBodyObject('token'),
+      responses: { '200': { description: 'Токен деактивирован' } },
+    }),
+  },
+  '/api/push/test': {
+    post: op('Push', 'Отправить тестовый push на свои устройства', {
+      description:
+        'Отправляет видимое уведомление на все активные устройства текущего пользователя. ' +
+        'Перед вызовом зарегистрируйте token через POST /api/push/devices.',
+      requestBody: jsonBody('#/components/schemas/PushTestRequest', false),
+      responses: {
+        '200': jsonResponse('#/components/schemas/PushTestResponse', 'Push доставлен хотя бы на одно устройство'),
+        '404': jsonResponse('#/components/schemas/JsonObject', 'Нет устройств (code: NO_DEVICES)'),
+        '502': jsonResponse('#/components/schemas/PushTestResponse', 'Устройства есть, доставка не удалась'),
+        '503': jsonResponse('#/components/schemas/JsonObject', 'PUSH_ENABLED=false (code: PUSH_DISABLED)'),
+      },
+    }),
+  },
+};
+
 export const chatPaths = {
   '/api/workspace-chats/workspace/{workspaceId}/channels': {
     get: op('Workspace Chats', 'Каналы чата пространства', { parameters: [parameters.workspaceId] }),
@@ -420,6 +476,8 @@ export const allPaths = {
   ...orgPaths,
   ...documentPaths,
   ...notificationPaths,
+  ...configPaths,
+  ...pushPaths,
   ...chatPaths,
   ...calendarPaths,
   ...knowledgePaths,
