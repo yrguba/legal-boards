@@ -12,6 +12,7 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const { login, isAuthenticated } = useApp();
   const navigate = useNavigate();
@@ -27,8 +28,14 @@ export function Login() {
   useEffect(() => {
     authApi
       .getRegistrationConfig()
-      .then((cfg) => setRegistrationEnabled(cfg.enabled))
-      .catch(() => setRegistrationEnabled(false));
+      .then((cfg) => {
+        setRegistrationEnabled(cfg.enabled);
+        setPasswordRecoveryEnabled(!!cfg.enabled && !!cfg.passwordRecoveryEnabled);
+      })
+      .catch(() => {
+        setRegistrationEnabled(false);
+        setPasswordRecoveryEnabled(false);
+      });
   }, []);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -128,9 +135,16 @@ export function Login() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
-                Пароль
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                  Пароль
+                </label>
+                {passwordRecoveryEnabled ? (
+                  <Link to="/forgot-password" className="text-xs text-brand hover:underline">
+                    Забыли пароль?
+                  </Link>
+                ) : null}
+              </div>
               <input
                 id="password"
                 type="password"

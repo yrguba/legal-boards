@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import {
+  getUserNotificationSettingsResponse,
+  NotificationSettingsValidationError,
+  parseNotificationSettingsPatch,
+  updateUserNotificationSettings,
+} from '../utils/notificationSettings/preferences';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -39,17 +45,33 @@ router.get('/unread', async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/:id/read', async (req: AuthRequest, res) => {
+router.get('/settings', async (req: AuthRequest, res) => {
   try {
-    const notification = await prisma.notification.update({
-      where: { id: req.params.id },
-      data: { isRead: true },
-    });
-
-    res.json(notification);
+    const data = await getUserNotificationSettingsResponse(req.userId!);
+    res.json(data);
   } catch (error) {
-    console.error('Mark notification as read error:', error);
-    res.status(500).json({ error: 'Ошибка отметки уведомления' });
+    console.error('Get notification settings error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки настроек уведомлений' });
+  }
+});
+
+router.put('/settings', async (req: AuthRequest, res) => {
+  try {
+    const patch = parseNotificationSettingsPatch(req.body);
+    if (!patch) {
+      return res.status(400).json({
+        error: 'Ожидается { "settings": { "task_assigned": true, ... } } с boolean-значениями',
+      });
+    }
+
+    const data = await updateUserNotificationSettings(req.userId!, patch);
+    res.json(data);
+  } catch (error) {
+    if (error instanceof NotificationSettingsValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Update notification settings error:', error);
+    res.status(500).json({ error: 'Ошибка сохранения настроек уведомлений' });
   }
 });
 
@@ -67,6 +89,20 @@ router.put('/read-all', async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Mark all as read error:', error);
     res.status(500).json({ error: 'Ошибка отметки всех уведомлений' });
+  }
+});
+
+router.put('/:id/read', async (req: AuthRequest, res) => {
+  try {
+    const notification = await prisma.notification.update({
+      where: { id: req.params.id },
+      data: { isRead: true },
+    });
+
+    res.json(notification);
+  } catch (error) {
+    console.error('Mark notification as read error:', error);
+    res.status(500).json({ error: 'Ошибка отметки уведомления' });
   }
 });
 

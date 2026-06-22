@@ -22,6 +22,7 @@ import reportRoutes from './routes/reports';
 import conferenceRoutes from './routes/conferences';
 import inviteRoutes from './routes/invites';
 import configRoutes from './routes/config';
+import pushRoutes from './routes/push';
 import { initRealtime } from './realtime';
 import { setupSwagger } from './swagger/setup';
 
@@ -60,6 +61,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/conferences', conferenceRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/push', pushRoutes);
 
 setupSwagger(app);
 

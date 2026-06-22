@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["9DY9F62DG3.com.anonymous.iteru"],
+        "components": [
+          {
+            "/": "/task/*"
+          }
+        ]
+      }
+    ]
+  }
+}

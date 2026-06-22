@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import type { UserRole } from '../types';
 import { useEmployees } from '../store/EmployeesContext';
 import { useApp } from '../store/AppContext';
-import { usersApi } from '../services/api';
+import { usersApi, ApiError } from '../services/api';
 
 type LookupState =
   | { status: 'idle' }
@@ -31,6 +31,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
   });
   const [lookup, setLookup] = useState<LookupState>({ status: 'idle' });
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [initialPassword, setInitialPassword] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -47,6 +48,7 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
     });
     setLookup({ status: 'idle' });
     setSuccessMessage(null);
+    setInitialPassword(null);
     setSubmitError(null);
   };
 
@@ -55,40 +57,61 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
     onClose();
   };
 
-  const checkEmail = useCallback(
-    async (email: string) => {
+  const resolveLookup = useCallback(
+    async (email: string): Promise<LookupState> => {
       if (!email.trim() || !currentWorkspace) {
-        setLookup({ status: 'idle' });
-        return;
+        return { status: 'idle' };
       }
       setLookup({ status: 'checking' });
       try {
         const result = await usersApi.lookupInWorkspace(currentWorkspace.id, email.trim());
         if (!result.exists) {
-          setLookup({ status: 'new' });
-          return;
+          return { status: 'new' };
         }
         if (result.alreadyMember) {
-          setLookup({ status: 'member', name: result.name ?? email });
-          return;
+          return { status: 'member', name: result.name ?? email };
         }
-        setLookup({
-          status: 'existing',
-          name: result.name ?? email,
-          pendingInviteId: result.pendingInviteId ?? null,
-        });
         if (result.name) {
           setFormData((prev) => ({ ...prev, name: result.name! }));
         }
+        return {
+          status: 'existing',
+          name: result.name ?? email,
+          pendingInviteId: result.pendingInviteId ?? null,
+        };
       } catch (e: unknown) {
-        setLookup({
+        return {
           status: 'error',
           message: e instanceof Error ? e.message : 'Не удалось проверить email',
-        });
+        };
       }
     },
     [currentWorkspace],
   );
+
+  const checkEmail = useCallback(
+    async (email: string) => {
+      const next = await resolveLookup(email);
+      setLookup(next);
+    },
+    [resolveLookup],
+  );
+
+  const submitInvite = async () => {
+    if (!currentWorkspace) return;
+    const res = await inviteExistingUser({
+      email: formData.email.trim(),
+      role: formData.role,
+      workspaceId: currentWorkspace.id,
+      departmentId: formData.departmentId || undefined,
+      groupIds: formData.groupIds,
+    });
+    const emailPart = res.emailSent ? ' Письмо также отправлено на почту.' : '';
+    setSuccessMessage(
+      `Приглашение создано.${emailPart} Пользователь увидит его в уведомлениях приложения.`,
+    );
+    onSuccess?.();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,48 +126,69 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
       return;
     }
 
-    if (lookup.status === 'member') {
-      setSubmitError('Пользователь уже состоит в этом пространстве');
-      return;
-    }
-
-    const isInvite = lookup.status === 'existing';
-    if (!isInvite && !formData.name.trim()) {
-      alert('Заполните обязательные поля');
-      return;
-    }
-
     setSubmitError(null);
     setSubmitting(true);
     try {
+      let effectiveLookup = lookup;
+      if (
+        lookup.status === 'idle' ||
+        lookup.status === 'checking' ||
+        lookup.status === 'error'
+      ) {
+        effectiveLookup = await resolveLookup(formData.email);
+        setLookup(effectiveLookup);
+      }
+
+      if (effectiveLookup.status === 'member') {
+        setSubmitError('Пользователь уже состоит в этом пространстве');
+        return;
+      }
+      if (effectiveLookup.status === 'error') {
+        setSubmitError(effectiveLookup.message);
+        return;
+      }
+
+      const isInvite = effectiveLookup.status === 'existing';
+      if (!isInvite && !formData.name.trim()) {
+        alert('Заполните обязательные поля');
+        return;
+      }
+
       if (isInvite) {
-        const res = await inviteExistingUser({
-          email: formData.email.trim(),
-          role: formData.role,
-          workspaceId: currentWorkspace.id,
-          departmentId: formData.departmentId || undefined,
-          groupIds: formData.groupIds,
-        });
-        const emailPart = res.emailSent ? ' Письмо отправлено.' : '';
-        setSuccessMessage(
-          `Приглашение отправлено на ${formData.email.trim()}.${emailPart} Пользователь должен принять его в уведомлениях.`,
-        );
-        onSuccess?.();
+        await submitInvite();
       } else {
-        const res = await createUser({
-          name: formData.name,
-          email: formData.email,
-          role: formData.role,
-          workspaceId: currentWorkspace.id,
-          departmentId: formData.departmentId || undefined,
-          groupIds: formData.groupIds,
-        });
-        setSuccessMessage(
-          res?.inviteSent
-            ? `Приглашение отправлено на ${res.email ?? formData.email}.`
-            : `Сотрудник ${formData.email} добавлен.`,
-        );
-        onSuccess?.();
+        try {
+          const res = await createUser({
+            name: formData.name,
+            email: formData.email,
+            role: formData.role,
+            workspaceId: currentWorkspace.id,
+            departmentId: formData.departmentId || undefined,
+            groupIds: formData.groupIds,
+          });
+          if (res?.initialPassword) {
+            setInitialPassword(res.initialPassword);
+            setSuccessMessage(`Сотрудник ${formData.email} добавлен.`);
+          } else if (res?.inviteSent) {
+            setInitialPassword(null);
+            setSuccessMessage(`Приглашение отправлено на ${res.email ?? formData.email}.`);
+          } else {
+            setInitialPassword(null);
+            setSuccessMessage(`Сотрудник ${formData.email} добавлен.`);
+          }
+          onSuccess?.();
+        } catch (e: unknown) {
+          if (e instanceof ApiError && e.code === 'USER_EXISTS') {
+            await submitInvite();
+            return;
+          }
+          if (e instanceof ApiError && e.code === 'ALREADY_MEMBER') {
+            setSubmitError('Пользователь уже состоит в этом пространстве');
+            setLookup({ status: 'member', name: formData.name || formData.email });
+            return;
+          }
+          throw e;
+        }
       }
     } catch (e: unknown) {
       setSubmitError(e instanceof Error ? e.message : 'Не удалось выполнить операцию');
@@ -184,6 +228,15 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
             <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
               {successMessage}
             </div>
+            {initialPassword ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-medium text-amber-900">Временный пароль (показывается один раз)</p>
+                <p className="mt-2 font-mono text-lg text-amber-950 select-all break-all">{initialPassword}</p>
+                <p className="mt-2 text-xs text-amber-800">
+                  Передайте пароль сотруднику. При первом входе потребуется смена пароля.
+                </p>
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={handleClose}

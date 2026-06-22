@@ -1,13 +1,32 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
 import { ensureChannelForNewDepartment } from '../utils/workspaceChatChannels';
+import { assertCanManageWorkspace } from '../utils/workspaceRole';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(authenticate);
 router.use(requireStaffUser);
+
+async function assertCanManageDepartment(
+  userId: string,
+  departmentId: string,
+): Promise<{ ok: true; workspaceId: string } | { ok: false; status: number; error: string }> {
+  const department = await prisma.department.findUnique({
+    where: { id: departmentId },
+    select: { workspaceId: true },
+  });
+  if (!department) {
+    return { ok: false, status: 404, error: 'Отдел не найден' };
+  }
+  const manage = await assertCanManageWorkspace(prisma, userId, department.workspaceId);
+  if (!manage.ok) {
+    return { ok: false, status: 403, error: 'Недостаточно прав' };
+  }
+  return { ok: true, workspaceId: department.workspaceId };
+}
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
@@ -55,9 +74,16 @@ router.get('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.post('/', async (req: AuthRequest, res) => {
   try {
     const { name, description, workspaceId } = req.body;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId обязателен' });
+    }
+
+    const manage = await assertCanManageWorkspace(prisma, req.userId!, workspaceId);
+    if (!manage.ok) return res.status(403).json({ error: 'Недостаточно прав' });
 
     const department = await prisma.department.create({
       data: {
@@ -76,8 +102,11 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
   }
 });
 
-router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.put('/:id', async (req: AuthRequest, res) => {
   try {
+    const gate = await assertCanManageDepartment(req.userId!, req.params.id);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
     const { name, description } = req.body;
 
     const department = await prisma.department.update({
@@ -99,8 +128,11 @@ router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) 
   }
 });
 
-router.delete('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.delete('/:id', async (req: AuthRequest, res) => {
   try {
+    const gate = await assertCanManageDepartment(req.userId!, req.params.id);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
     await prisma.user.updateMany({
       where: { departmentId: req.params.id },
       data: { departmentId: null },
@@ -117,8 +149,11 @@ router.delete('/:id', authorize('admin', 'manager'), async (req: AuthRequest, re
   }
 });
 
-router.post('/:id/members', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.post('/:id/members', async (req: AuthRequest, res) => {
   try {
+    const gate = await assertCanManageDepartment(req.userId!, req.params.id);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
     const { userIds } = req.body;
 
     await prisma.user.updateMany({

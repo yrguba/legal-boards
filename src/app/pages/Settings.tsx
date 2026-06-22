@@ -1,9 +1,135 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { Building2, Users, Shield, Bell } from 'lucide-react';
+import { ApiError, notificationsApi, type NotificationSettingItem } from '../services/api';
 
 type SettingsTab = 'workspace' | 'users' | 'permissions' | 'notifications';
+
+function NotificationSettingsPanel() {
+  const [settings, setSettings] = useState<NotificationSettingItem[]>([]);
+  const [groups, setGroups] = useState<{ id: string; label: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    notificationsApi
+      .getSettings()
+      .then((data) => {
+        if (cancelled) return;
+        setSettings(data.settings);
+        setGroups(data.groups);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof ApiError ? e.message : 'Не удалось загрузить настройки');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const grouped = useMemo(() => {
+    return groups.map((group) => ({
+      ...group,
+      items: settings.filter((s) => s.group === group.id),
+    }));
+  }, [groups, settings]);
+
+  const toggle = (key: string, enabled: boolean) => {
+    setSaved(false);
+    setSettings((prev) => prev.map((s) => (s.key === key ? { ...s, enabled } : s)));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const patch = Object.fromEntries(settings.map((s) => [s.key, s.enabled]));
+      const data = await notificationsApi.updateSettings(patch);
+      setSettings(data.settings);
+      setGroups(data.groups);
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Не удалось сохранить настройки');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <p className="text-sm text-slate-600">Загрузка настроек…</p>;
+  }
+
+  return (
+    <div>
+      <p className="text-sm text-slate-600 mb-4">
+        Настройки применяются к in-app уведомлениям и push в мобильном приложении.
+      </p>
+
+      {error ? (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+
+      {saved ? (
+        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          Настройки сохранены
+        </div>
+      ) : null}
+
+      <div className="space-y-6">
+        {grouped.map((group) =>
+          group.items.length === 0 ? null : (
+            <div key={group.id}>
+              <h3 className="text-sm font-semibold text-slate-900 mb-2">{group.label}</h3>
+              <div className="space-y-1">
+                {group.items.map((item) => (
+                  <label
+                    key={item.key}
+                    className="flex items-center justify-between py-3 border-b border-slate-200 last:border-b-0"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">{item.label}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{item.description}</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={item.enabled}
+                      onChange={(e) => toggle(item.key, e.target.checked)}
+                      className="w-4 h-4 text-brand"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ),
+        )}
+      </div>
+
+      <div className="pt-6 mt-6 border-t border-slate-200">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void handleSave()}
+          className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors disabled:opacity-50"
+        >
+          {saving ? 'Сохранение…' : 'Сохранить настройки'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function Settings() {
   const { currentWorkspace } = useApp();
@@ -218,61 +344,7 @@ export function Settings() {
           {activeTab === 'notifications' && (
             <div className="bg-white rounded-lg border border-slate-200 p-6">
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Уведомления</h2>
-              <div className="space-y-4">
-                <label className="flex items-center justify-between py-3 border-b border-slate-200">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Новые задачи
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления при назначении новой задачи
-                    </div>
-                  </div>
-                  <input type="checkbox" defaultChecked className="w-4 h-4 text-brand" />
-                </label>
-
-                <label className="flex items-center justify-between py-3 border-b border-slate-200">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Комментарии
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления о новых комментариях к задачам
-                    </div>
-                  </div>
-                  <input type="checkbox" defaultChecked className="w-4 h-4 text-brand" />
-                </label>
-
-                <label className="flex items-center justify-between py-3 border-b border-slate-200">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Изменения статуса
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления об изменении статуса задачи
-                    </div>
-                  </div>
-                  <input type="checkbox" defaultChecked className="w-4 h-4 text-brand" />
-                </label>
-
-                <label className="flex items-center justify-between py-3">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Новые документы
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления о загрузке новых документов
-                    </div>
-                  </div>
-                  <input type="checkbox" className="w-4 h-4 text-brand" />
-                </label>
-              </div>
-
-              <div className="pt-6 mt-6 border-t border-slate-200">
-                <button className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors">
-                  Сохранить настройки
-                </button>
-              </div>
+              <NotificationSettingsPanel />
             </div>
           )}
         </div>

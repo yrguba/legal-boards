@@ -146,8 +146,12 @@ export type TaskSidePanelsProps = {
   assistantMessage: string;
   isPostingComment: boolean;
   isPostingAssistant: boolean;
+  attachmentsEnabled: boolean;
+  pendingCommentFiles: File[];
   onCommentText: (v: string) => void;
   onAssistantMessage: (v: string) => void;
+  onAddCommentFiles: (files: FileList | File[]) => void;
+  onRemoveCommentFile: (index: number) => void;
   onPostComment: () => void;
   onPostAssistant: () => void;
 };

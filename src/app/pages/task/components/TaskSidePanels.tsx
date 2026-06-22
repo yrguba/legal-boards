@@ -1,6 +1,8 @@
-import { Bot, Loader2, MessageSquare, Send } from 'lucide-react';
+import { Bot, Loader2, MessageSquare, Paperclip, Send, X } from 'lucide-react';
+import { useRef } from 'react';
 import type { TaskSidePanelsProps, TaskPanelType } from '../types';
 import { formatDateTime } from '../utils/format';
+import { filePublicUrl } from '../utils/documentPaths';
 import { TaskDocumentsPanel } from './TaskDocumentsPanel';
 import { TaskActivityPanel } from './TaskActivityPanel';
 
@@ -11,11 +13,19 @@ function ChatFooter(p: {
   assistantChatError: string | null;
   isPostingComment: boolean;
   isPostingAssistant: boolean;
+  attachmentsEnabled: boolean;
+  pendingCommentFiles: File[];
   onCommentText: (v: string) => void;
   onAssistantMessage: (v: string) => void;
+  onAddCommentFiles: (files: FileList | File[]) => void;
+  onRemoveCommentFile: (index: number) => void;
   onPostComment: () => void;
   onPostAssistant: () => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const canPostComment =
+    p.commentText.trim().length > 0 || p.pendingCommentFiles.length > 0;
+
   if (p.activePanel !== 'comments' && p.activePanel !== 'assistant') return null;
   return (
     <div className="shrink-0 border-t border-slate-200 p-4">
@@ -24,19 +34,67 @@ function ChatFooter(p: {
           {p.assistantChatError}
         </div>
       ) : null}
+      {p.activePanel === 'comments' && p.pendingCommentFiles.length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {p.pendingCommentFiles.map((file, index) => (
+            <div
+              key={`${file.name}-${index}`}
+              className="flex max-w-full items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+            >
+              <Paperclip className="h-3 w-3 shrink-0 text-slate-400" />
+              <span className="truncate">{file.name}</span>
+              <button
+                type="button"
+                onClick={() => p.onRemoveCommentFile(index)}
+                className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-red-600"
+                aria-label="Удалить вложение"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="flex gap-2">
         {p.activePanel === 'comments' ? (
-          <input
-            type="text"
-            value={p.commentText}
-            onChange={(e) => p.onCommentText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return;
-              void p.onPostComment();
-            }}
-            placeholder="Написать комментарий…"
-            className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
-          />
+          <>
+            {p.attachmentsEnabled ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      p.onAddCommentFiles(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={p.isPostingComment}
+                  className="rounded border border-slate-300 px-2 py-2 text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Прикрепить файлы"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+              </>
+            ) : null}
+            <input
+              type="text"
+              value={p.commentText}
+              onChange={(e) => p.onCommentText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                void p.onPostComment();
+              }}
+              placeholder="Написать комментарий…"
+              className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          </>
         ) : (
           <textarea
             value={p.assistantMessage}
@@ -58,7 +116,7 @@ function ChatFooter(p: {
           }
           disabled={
             p.activePanel === 'comments'
-              ? !p.commentText.trim() || p.isPostingComment
+              ? !canPostComment || p.isPostingComment
               : !p.assistantMessage.trim() || p.isPostingAssistant
           }
           className="rounded bg-brand px-3 py-2 text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
@@ -113,7 +171,52 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
                       </div>
                     </div>
                   </div>
-                  <div className="text-sm text-slate-700 whitespace-pre-wrap">{c.content}</div>
+                  {c.content ? (
+                    <div className="text-sm text-slate-700 whitespace-pre-wrap">{c.content}</div>
+                  ) : null}
+                  {Array.isArray(c.attachments) && c.attachments.length > 0 ? (
+                    <div className={`space-y-1.5 ${c.content ? 'mt-2' : ''}`}>
+                      {c.attachments.map((att: any) => {
+                        const href = filePublicUrl(p.apiBaseUrl, att.path as string | undefined);
+                        const name = (att.name as string) || att.id;
+                        const canPreview =
+                          !!href &&
+                          (String(att.type || '').startsWith('image/') ||
+                            att.type === 'application/pdf');
+                        return (
+                          <div
+                            key={att.id}
+                            className="flex items-center justify-between gap-2 rounded bg-slate-50 p-2"
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <Paperclip className="h-4 w-4 shrink-0 text-slate-400" />
+                              {href ? (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="truncate text-sm text-slate-700 hover:text-brand"
+                                >
+                                  {name}
+                                </a>
+                              ) : (
+                                <span className="truncate text-sm text-slate-700">{name}</span>
+                              )}
+                            </div>
+                            {canPreview ? (
+                              <button
+                                type="button"
+                                onClick={() => p.onPreviewDoc({ ...att, href } as any)}
+                                className="shrink-0 rounded px-2 py-1 text-xs text-slate-500 transition-colors hover:bg-white hover:text-slate-900"
+                              >
+                                Просмотр
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               ))
             )}
@@ -190,8 +293,12 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
         assistantChatError={p.assistantChatError}
         isPostingComment={p.isPostingComment}
         isPostingAssistant={p.isPostingAssistant}
+        attachmentsEnabled={p.attachmentsEnabled}
+        pendingCommentFiles={p.pendingCommentFiles}
         onCommentText={p.onCommentText}
         onAssistantMessage={p.onAssistantMessage}
+        onAddCommentFiles={p.onAddCommentFiles}
+        onRemoveCommentFile={p.onRemoveCommentFile}
         onPostComment={p.onPostComment}
         onPostAssistant={p.onPostAssistant}
       />

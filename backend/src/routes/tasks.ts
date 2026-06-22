@@ -5,6 +5,7 @@ import multer from 'multer';
 import path from 'path';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { broadcast } from '../realtime';
+import { createAndBroadcastNotification } from '../utils/notifications';
 import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
 import { assertUserCanAccessTask } from '../utils/taskAccess';
@@ -218,32 +219,6 @@ function unifyActionCompletionRow(a: Record<string, unknown>) {
     ...rest,
     completer: completer ?? null,
   };
-}
-
-async function createAndBroadcastNotification(args: {
-  type: string;
-  title: string;
-  message: string;
-  userId: string;
-  relatedId?: string;
-}) {
-  const notification = await prisma.notification.create({
-    data: {
-      type: args.type,
-      title: args.title,
-      message: args.message,
-      userId: args.userId,
-      relatedId: args.relatedId,
-    },
-  });
-
-  broadcast({
-    type: 'notification',
-    userId: args.userId,
-    notification,
-  });
-
-  return notification;
 }
 
 async function mergedTaskStatusHistory(taskId: string): Promise<{ message: string; createdAt: string }[]> {
@@ -606,6 +581,9 @@ router.get('/:id', async (req: AuthRequest, res) => {
             user: {
               select: { id: true, name: true, avatar: true },
             },
+            attachments: {
+              orderBy: { createdAt: 'asc' },
+            },
           },
           orderBy: { createdAt: 'desc' },
         },
@@ -798,7 +776,7 @@ router.post('/', async (req: AuthRequest, res) => {
       });
 
       if (finalAssigneeLex) {
-        await createAndBroadcastNotification({
+        await createAndBroadcastNotification(prisma, {
           type: 'task_assigned',
           title: 'Назначена задача',
           message: `Вам назначена задача "${title}"`,
@@ -876,7 +854,7 @@ router.post('/', async (req: AuthRequest, res) => {
     });
 
     if (finalAssigneeId && finalAssigneeId !== req.userId) {
-      await createAndBroadcastNotification({
+      await createAndBroadcastNotification(prisma, {
         type: 'task_assigned',
         title: 'Назначена задача',
         message: `Вам назначена задача "${title}"`,
@@ -1153,7 +1131,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
         }
         await Promise.all(
           notifyUserIds.map((userId) =>
-            createAndBroadcastNotification({
+            createAndBroadcastNotification(prisma, {
               type: 'status_change',
               title: 'Изменение статуса',
               message: statusMessage,
@@ -1246,7 +1224,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       });
       await Promise.all(
         notifyUserIds.map((userId) =>
-          createAndBroadcastNotification({
+          createAndBroadcastNotification(prisma, {
             type: 'status_change',
             title: 'Изменение типа',
             message: typeMessage,
@@ -1273,7 +1251,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       oldTask.assigneeId !== assigneeId
     ) {
       if (assigneeId) {
-        await createAndBroadcastNotification({
+        await createAndBroadcastNotification(prisma, {
           type: 'task_assigned',
           title: 'Назначена задача',
           message: `Вам назначена задача "${task.title}"`,
@@ -1562,23 +1540,50 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/comments', async (req: AuthRequest, res) => {
+router.post('/:id/comments', taskUpload.array('files', 10), async (req: AuthRequest, res) => {
   try {
     if (req.lexClientId) {
       return res.status(403).json({ error: 'Комментарии доступны только сотрудникам Legal Boards' });
     }
 
-    const { content } = req.body;
+    const taskId = taskIdParam(req);
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+
+    if (!content && files.length === 0) {
+      return res.status(400).json({ error: 'Комментарий или вложение обязательны' });
+    }
 
     const comment = await prisma.comment.create({
       data: {
-        taskId: taskIdParam(req),
+        taskId,
         userId: req.userId!,
         content,
+        ...(files.length > 0
+          ? {
+              attachments: {
+                create: files.map((file) => ({
+                  name: decodeMultipartFilename(file.originalname),
+                  type: file.mimetype,
+                  size: file.size,
+                  path: toPublicUploadPath(file.path),
+                  uploadedBy: req.userId!,
+                })),
+              },
+            }
+          : {}),
       },
       include: {
         user: {
           select: { id: true, name: true, avatar: true },
+        },
+        attachments: {
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
@@ -1598,15 +1603,17 @@ router.post('/:id/comments', async (req: AuthRequest, res) => {
         new Set([task.assigneeId, task.createdBy].filter(Boolean) as string[])
       );
       await Promise.all(
-        notifyUserIds.map((userId) =>
-          createAndBroadcastNotification({
-            type: 'comment',
-            title: 'Новый комментарий',
-            message: `${actor?.name || 'Пользователь'} оставил(а) комментарий к задаче "${task.title}"`,
-            userId,
-            relatedId: taskIdParam(req),
-          })
-        )
+        notifyUserIds
+          .filter((userId) => userId !== req.userId)
+          .map((userId) =>
+            createAndBroadcastNotification(prisma, {
+              type: 'comment',
+              title: 'Новый комментарий',
+              message: `${actor?.name || 'Пользователь'} оставил(а) комментарий к задаче "${task.title}"`,
+              userId,
+              relatedId: taskIdParam(req),
+            }),
+          ),
       );
     }
 
@@ -1709,6 +1716,7 @@ router.post('/:id/chat/assistant', async (req: AuthRequest, res) => {
       type: 'chat_message',
       taskId,
       message: userMessage,
+      authorUserId: req.userId!,
     });
 
     const history = await prisma.chatMessage.findMany({

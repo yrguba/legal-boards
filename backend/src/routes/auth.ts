@@ -7,9 +7,16 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import {
   getFrontendUrl,
   isEmailVerificationConfigured,
+  isPasswordRecoveryEnabled,
   isRegistrationEnabled,
 } from '../utils/registration';
 import { buildVerificationEmailHtml, isConsoleEmailMode, sendEmail } from '../utils/email';
+import {
+  buildPasswordResetEmailHtml,
+  buildPasswordResetUrl,
+  createPasswordResetToken,
+  PASSWORD_RESET_TTL_MS,
+} from '../utils/passwordReset';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -46,7 +53,10 @@ function createVerificationToken() {
 }
 
 router.get('/registration-config', (_req, res) => {
-  res.json({ enabled: isRegistrationEnabled() });
+  res.json({
+    enabled: isRegistrationEnabled(),
+    passwordRecoveryEnabled: isPasswordRecoveryEnabled(),
+  });
 });
 
 router.post('/register', async (req, res) => {
@@ -274,6 +284,176 @@ router.get('/invite', async (req, res) => {
   }
 });
 
+router.post('/forgot-password', async (req, res) => {
+  const genericMessage = {
+    message: 'Если аккаунт существует, на email отправлена ссылка для сброса пароля',
+  };
+
+  try {
+    if (!isRegistrationEnabled()) {
+      return res.status(403).json({ error: 'Восстановление пароля недоступно' });
+    }
+    if (!isEmailVerificationConfigured()) {
+      return res.status(503).json({ error: 'Email-сервис не настроен' });
+    }
+
+    const email =
+      typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    if (!email) return res.status(400).json({ error: 'email обязателен' });
+
+    const [user, lexEmail] = await Promise.all([
+      prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          emailVerified: true,
+          mustChangePassword: true,
+          passwordInviteToken: true,
+        },
+      }),
+      prisma.lexClientUser.findUnique({ where: { email }, select: { id: true } }),
+    ]);
+
+    if (!user || lexEmail) {
+      return res.json(genericMessage);
+    }
+
+    if (!user.emailVerified) {
+      return res.json(genericMessage);
+    }
+
+    if (user.mustChangePassword && user.passwordInviteToken) {
+      return res.json(genericMessage);
+    }
+
+    const token = createPasswordResetToken();
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: token,
+        passwordResetExpiresAt: expiresAt,
+      },
+    });
+
+    const resetUrl = buildPasswordResetUrl(token);
+    await sendEmail({
+      to: user.email,
+      subject: 'Восстановление пароля — Legal Boards',
+      html: buildPasswordResetEmailHtml(user.name, resetUrl),
+    });
+
+    if (isConsoleEmailMode()) {
+      console.log('[password-reset] Ссылка сброса:', resetUrl);
+    }
+
+    res.json(genericMessage);
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Не удалось отправить письмо' });
+  }
+});
+
+router.get('/reset-password', async (req, res) => {
+  try {
+    if (!isRegistrationEnabled()) {
+      return res.status(403).json({ error: 'Восстановление пароля недоступно' });
+    }
+
+    const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+    if (!token) return res.status(400).json({ error: 'Токен не указан' });
+
+    const user = await prisma.user.findFirst({
+      where: { passwordResetToken: token },
+      select: {
+        id: true,
+        email: true,
+        passwordResetExpiresAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        error: 'Недействительная или устаревшая ссылка',
+        code: 'RESET_INVALID',
+      });
+    }
+
+    if (!user.passwordResetExpiresAt || user.passwordResetExpiresAt < new Date()) {
+      return res.status(400).json({
+        error: 'Срок действия ссылки истёк. Запросите восстановление пароля снова.',
+        code: 'RESET_EXPIRED',
+      });
+    }
+
+    res.json({
+      message: 'Задайте новый пароль',
+      email: user.email,
+    });
+  } catch (error) {
+    console.error('Validate reset password error:', error);
+    res.status(500).json({ error: 'Ошибка проверки ссылки' });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    if (!isRegistrationEnabled()) {
+      return res.status(403).json({ error: 'Восстановление пароля недоступно' });
+    }
+
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const newPassword = req.body?.newPassword;
+
+    if (!token) return res.status(400).json({ error: 'token обязателен' });
+    if (typeof newPassword !== 'string' || newPassword.trim().length < 6) {
+      return res.status(400).json({ error: 'Новый пароль должен быть не короче 6 символов' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { passwordResetToken: token },
+      select: {
+        id: true,
+        passwordResetExpiresAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        error: 'Недействительная или устаревшая ссылка',
+        code: 'RESET_INVALID',
+      });
+    }
+
+    if (!user.passwordResetExpiresAt || user.passwordResetExpiresAt < new Date()) {
+      return res.status(400).json({
+        error: 'Срок действия ссылки истёк. Запросите восстановление пароля снова.',
+        code: 'RESET_EXPIRED',
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: await bcrypt.hash(newPassword.trim(), 10),
+        mustChangePassword: false,
+        passwordInviteToken: null,
+        passwordInviteExpiresAt: null,
+        passwordResetToken: null,
+        passwordResetExpiresAt: null,
+      },
+    });
+
+    res.json({ message: 'Пароль успешно изменён. Теперь вы можете войти.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Ошибка смены пароля' });
+  }
+});
+
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -288,7 +468,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Неверные учетные данные' });
     }
 
-    if (user.mustChangePassword) {
+    if (user.mustChangePassword && user.passwordInviteToken) {
       return res.status(403).json({
         error: 'Активируйте аккаунт по ссылке из письма-приглашения, затем задайте свой пароль',
         code: 'PASSWORD_INVITE_REQUIRED',

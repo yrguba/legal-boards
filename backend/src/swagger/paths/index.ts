@@ -1,5 +1,5 @@
 import { parameters } from '../components';
-import { jsonBody, jsonBodyObject, multipartBody, op } from '../helpers';
+import { jsonBody, jsonBodyObject, jsonResponse, multipartBody, op } from '../helpers';
 
 export const authPaths = {
   '/api/auth/register': {
@@ -31,6 +31,59 @@ export const authPaths = {
   '/api/auth/verify': {
     post: op('Auth', 'Проверка JWT и получение профиля', {
       responses: { '200': { description: 'Текущий пользователь' } },
+    }),
+  },
+  '/api/auth/registration-config': {
+    get: op('Auth', 'Конфигурация регистрации и восстановления пароля', {
+      secured: false,
+      responses: {
+        '200': jsonResponse('#/components/schemas/RegistrationConfigResponse', 'Флаги enabled / passwordRecoveryEnabled'),
+      },
+    }),
+  },
+  '/api/auth/forgot-password': {
+    post: op('Auth', 'Запрос восстановления пароля', {
+      secured: false,
+      description:
+        'Доступно только при **REGISTRATION_ENABLED=true** и настроенном Resend. ' +
+        'Всегда возвращает нейтральное сообщение (без раскрытия наличия email). ' +
+        'Письмо отправляется только подтверждённым аккаунтам без ожидающего employee-invite.',
+      requestBody: jsonBody('#/components/schemas/ForgotPasswordRequest'),
+      responses: {
+        '200': jsonResponse('#/components/schemas/MessageResponse', 'Запрос принят'),
+        '403': { description: 'REGISTRATION_ENABLED=false', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        '503': { description: 'Email-сервис не настроен', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      },
+    }),
+  },
+  '/api/auth/reset-password': {
+    get: op('Auth', 'Проверка токена восстановления пароля', {
+      secured: false,
+      description: 'Доступно только при **REGISTRATION_ENABLED=true**.',
+      parameters: [
+        {
+          name: 'token',
+          in: 'query',
+          required: true,
+          schema: { type: 'string' },
+          description: 'Токен из ссылки в письме',
+        },
+      ],
+      responses: {
+        '200': jsonResponse('#/components/schemas/ResetPasswordValidateResponse', 'Токен действителен'),
+        '400': { description: 'Недействительный или просроченный токен', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        '403': { description: 'REGISTRATION_ENABLED=false', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      },
+    }),
+    post: op('Auth', 'Установить новый пароль по токену', {
+      secured: false,
+      description: 'Доступно только при **REGISTRATION_ENABLED=true**. Ссылка действительна 1 час.',
+      requestBody: jsonBody('#/components/schemas/ResetPasswordRequest'),
+      responses: {
+        '200': jsonResponse('#/components/schemas/MessageResponse', 'Пароль изменён'),
+        '400': { description: 'Невалидный токен или короткий пароль', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        '403': { description: 'REGISTRATION_ENABLED=false', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      },
     }),
   },
 };
@@ -338,6 +391,22 @@ export const notificationPaths = {
   '/api/notifications/unread': {
     get: op('Notifications', 'Непрочитанные уведомления'),
   },
+  '/api/notifications/settings': {
+    get: op('Notifications', 'Настройки уведомлений (in-app и push)', {
+      description:
+        'Общие категории для in-app уведомлений и push. По умолчанию все включены.',
+      responses: {
+        '200': jsonResponse('#/components/schemas/NotificationSettingsResponse', 'Текущие настройки'),
+      },
+    }),
+    put: op('Notifications', 'Сохранить настройки уведомлений', {
+      requestBody: jsonBody('#/components/schemas/NotificationSettingsUpdateRequest'),
+      responses: {
+        '200': jsonResponse('#/components/schemas/NotificationSettingsResponse', 'Обновлённые настройки'),
+        '400': jsonResponse('#/components/schemas/JsonObject', 'Неверный формат или неизвестный key'),
+      },
+    }),
+  },
   '/api/notifications/read-all': {
     put: op('Notifications', 'Отметить все прочитанными'),
   },
@@ -346,6 +415,79 @@ export const notificationPaths = {
   },
   '/api/notifications/{id}': {
     delete: op('Notifications', 'Удалить уведомление', { parameters: [parameters.entityId] }),
+  },
+};
+
+export const configPaths = {
+  '/api/config/tabs': {
+    get: op('Config', 'Флаги вкладок бокового меню', {
+      secured: false,
+      responses: {
+        '200': {
+          description: 'documents, knowledge, chat, calendar — true/false',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/JsonObject' } } },
+        },
+      },
+    }),
+  },
+};
+
+export const pushPaths = {
+  '/api/push/config': {
+    get: op('Push', 'Статус push-уведомлений', {
+      secured: false,
+      responses: {
+        '200': {
+          description: 'enabled, androidEnabled, iosEnabled, fcmConfigured, apnsConfigured',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/JsonObject' } } },
+        },
+      },
+    }),
+  },
+  '/api/push/devices': {
+    get: op('Push', 'Активные push-устройства текущего пользователя'),
+    post: op('Push', 'Зарегистрировать или обновить push-токен', {
+      requestBody: jsonBody('#/components/schemas/PushRegisterDeviceRequest'),
+      responses: {
+        '201': { description: 'Токен зарегистрирован' },
+        '200': { description: 'Токен обновлён' },
+      },
+    }),
+    delete: op('Push', 'Отключить push-токен (logout)', {
+      requestBody: jsonBodyObject('token'),
+      responses: { '200': { description: 'Токен деактивирован' } },
+    }),
+  },
+  '/api/push/test': {
+    post: op('Push', 'Отправить тестовый push на свои устройства', {
+      description:
+        'Отправляет видимое уведомление на все активные устройства текущего пользователя. ' +
+        'Перед вызовом зарегистрируйте token через POST /api/push/devices.',
+      requestBody: jsonBody('#/components/schemas/PushTestRequest', false),
+      responses: {
+        '200': jsonResponse('#/components/schemas/PushTestResponse', 'Push доставлен хотя бы на одно устройство'),
+        '404': jsonResponse('#/components/schemas/JsonObject', 'Нет устройств (code: NO_DEVICES)'),
+        '502': jsonResponse('#/components/schemas/PushTestResponse', 'Устройства есть, доставка не удалась'),
+        '503': jsonResponse('#/components/schemas/JsonObject', 'PUSH_ENABLED=false (code: PUSH_DISABLED)'),
+      },
+    }),
+  },
+  '/api/push/settings': {
+    get: op('Push', 'Настройки push (alias)', {
+      description:
+        'Алиас GET /api/notifications/settings — общая модель in-app + push.',
+      responses: {
+        '200': jsonResponse('#/components/schemas/NotificationSettingsResponse', 'Текущие настройки'),
+      },
+    }),
+    put: op('Push', 'Сохранить настройки push (alias)', {
+      description: 'Алиас PUT /api/notifications/settings',
+      requestBody: jsonBody('#/components/schemas/NotificationSettingsUpdateRequest'),
+      responses: {
+        '200': jsonResponse('#/components/schemas/NotificationSettingsResponse', 'Обновлённые настройки'),
+        '400': jsonResponse('#/components/schemas/JsonObject', 'Неверный формат или неизвестный key'),
+      },
+    }),
   },
 };
 
@@ -420,6 +562,8 @@ export const allPaths = {
   ...orgPaths,
   ...documentPaths,
   ...notificationPaths,
+  ...configPaths,
+  ...pushPaths,
   ...chatPaths,
   ...calendarPaths,
   ...knowledgePaths,
