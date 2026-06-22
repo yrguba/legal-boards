@@ -13,6 +13,7 @@ import { ResetPasswordModal } from '../components/ResetPasswordModal';
 import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMembersModal';
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
 import type { User, UserRole, Department, Group } from '../types';
+import { canManageWorkspace, isWorkspaceAdmin } from '../utils/workspacePermissions';
 
 type ViewMode = 'all' | 'catalog' | 'departments' | 'groups';
 
@@ -58,8 +59,8 @@ export function Employees() {
     updateGroupMembers,
     refreshData,
   } = useEmployees();
-  const canManageOrg = currentUser?.role === 'admin' || currentUser?.role === 'manager';
-  const isAdmin = currentUser?.role === 'admin';
+  const canManageOrg = canManageWorkspace(currentWorkspace);
+  const isAdmin = isWorkspaceAdmin(currentWorkspace);
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [profileEmployee, setProfileEmployee] = useState<User | null>(null);
   const [createGroupDeptId, setCreateGroupDeptId] = useState<string>('');

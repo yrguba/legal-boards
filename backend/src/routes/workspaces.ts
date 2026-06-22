@@ -84,11 +84,23 @@ router.get('/', async (req: AuthRequest, res) => {
       },
     });
 
+    const workspaceIds = workspaces.map((w) => w.id);
+    const memberships =
+      workspaceIds.length === 0
+        ? []
+        : await prisma.workspaceUser.findMany({
+            where: { userId: req.userId!, workspaceId: { in: workspaceIds } },
+            select: { workspaceId: true, role: true },
+          });
+    const roleByWorkspaceId = new Map(memberships.map((m) => [m.workspaceId, m.role]));
+
     res.json(
       workspaces.map((w) => ({
         ...w,
         isOwner: w.ownerId === req.userId,
-      }))
+        myRole:
+          w.ownerId === req.userId ? 'admin' : (roleByWorkspaceId.get(w.id) ?? null),
+      })),
     );
   } catch (error) {
     console.error('Get workspaces error:', error);

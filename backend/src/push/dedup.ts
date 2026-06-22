@@ -1,5 +1,6 @@
 const recentKeys = new Map<string, number>();
-const DEDUP_TTL_MS = 3000;
+/** Окно dedup: повтор той же категории + сущности одному user не уходит. */
+const DEDUP_TTL_MS = 5000;
 
 export function shouldSkipPushDedup(key: string | undefined): boolean {
   if (!key) return false;
@@ -13,21 +14,20 @@ export function shouldSkipPushDedup(key: string | undefined): boolean {
   return false;
 }
 
-export function markNotificationPushSent(userId: string, notificationId: string): void {
-  recentKeys.set(`notification:${userId}:${notificationId}`, Date.now() + DEDUP_TTL_MS);
+/** Dedup push одному user: категория настроек + id задачи/сущности. */
+export function buildUserPushDedupKey(
+  userId: string,
+  category: string,
+  entityId: string,
+): string {
+  return `user:${userId}:${category}:${entityId}`;
 }
 
-export function markTaskStatusNotification(taskId: string, userId: string): void {
-  recentKeys.set(`status_task:${taskId}:${userId}`, Date.now() + DEDUP_TTL_MS);
-}
-
-export function wasRecentTaskStatusNotification(taskId: string, userId: string): boolean {
-  const key = `status_task:${taskId}:${userId}`;
-  const expiresAt = recentKeys.get(key);
-  if (!expiresAt) return false;
-  if (expiresAt <= Date.now()) {
-    recentKeys.delete(key);
-    return false;
-  }
-  return true;
+export function shouldSkipUserPushDedup(
+  userId: string,
+  category: string,
+  entityId: string | undefined,
+): boolean {
+  if (!entityId) return false;
+  return shouldSkipPushDedup(buildUserPushDedupKey(userId, category, entityId));
 }

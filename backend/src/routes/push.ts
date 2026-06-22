@@ -7,8 +7,15 @@ import {
   isPushAndroidEnabled,
   isPushEnabled,
   isPushIosEnabled,
+  isPushMobileEnabled,
 } from '../push/config';
 import { pushLog } from '../push/logger';
+import {
+  getUserNotificationSettingsResponse,
+  NotificationSettingsValidationError,
+  parseNotificationSettingsPatch,
+  updateUserNotificationSettings,
+} from '../utils/notificationSettings/preferences';
 import { sendPushToUsers } from '../push/sender';
 
 const router = Router();
@@ -17,6 +24,7 @@ const prisma = new PrismaClient();
 router.get('/config', (_req, res) => {
   res.json({
     enabled: isPushEnabled(),
+    mobileEnabled: isPushMobileEnabled(),
     androidEnabled: isPushAndroidEnabled(),
     iosEnabled: isPushIosEnabled(),
     fcmConfigured: isFcmConfigured(),
@@ -140,6 +148,36 @@ router.get('/devices', async (req: AuthRequest, res) => {
   }
 });
 
+router.get('/settings', async (req: AuthRequest, res) => {
+  try {
+    const data = await getUserNotificationSettingsResponse(req.userId!);
+    res.json(data);
+  } catch (error) {
+    console.error('Get push settings error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки настроек уведомлений' });
+  }
+});
+
+router.put('/settings', async (req: AuthRequest, res) => {
+  try {
+    const patch = parseNotificationSettingsPatch(req.body);
+    if (!patch) {
+      return res.status(400).json({
+        error: 'Ожидается { "settings": { "task_assigned": true, ... } } с boolean-значениями',
+      });
+    }
+
+    const data = await updateUserNotificationSettings(req.userId!, patch);
+    res.json(data);
+  } catch (error) {
+    if (error instanceof NotificationSettingsValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Update push settings error:', error);
+    res.status(500).json({ error: 'Ошибка сохранения настроек уведомлений' });
+  }
+});
+
 router.post('/test', async (req: AuthRequest, res) => {
   try {
     if (!isPushEnabled()) {
@@ -147,6 +185,13 @@ router.post('/test', async (req: AuthRequest, res) => {
         error: 'Push отключён',
         code: 'PUSH_DISABLED',
         hint: 'Установите PUSH_ENABLED=true в .env',
+      });
+    }
+    if (!isPushMobileEnabled()) {
+      return res.status(503).json({
+        error: 'Push на мобильные устройства отключён',
+        code: 'PUSH_MOBILE_DISABLED',
+        hint: 'Установите PUSH_MOBILE_ENABLED=true в .env',
       });
     }
 

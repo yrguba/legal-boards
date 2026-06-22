@@ -2,6 +2,7 @@ import fs from 'fs';
 import apn from '@parse/node-apn';
 import { getApnsConfig, isApnsConfigured, isPushIosEnabled } from './config';
 import { pushLog, pushWarn } from './logger';
+import { buildApnsRawPayload, buildPushCustomData } from './payload';
 import type { PushMessagePayload } from './types';
 
 let provider: apn.Provider | null | undefined;
@@ -61,17 +62,15 @@ export async function sendApnsToToken(
   const cfg = getApnsConfig();
   const note = new apn.Notification();
   note.topic = cfg.bundleId;
-  note.alert = {
-    title: payload.title,
-    body: payload.body,
-  };
-  note.sound = 'default';
-  note.payload = {
+  note.rawPayload = buildApnsRawPayload(payload);
+
+  const custom = buildPushCustomData(payload);
+  pushLog('apns custom data', {
     eventType: payload.eventType,
-    route: payload.route,
-    relatedId: payload.relatedId,
-    taskId: payload.taskId,
-  };
+    type: custom.type,
+    relatedId: custom.relatedId,
+    taskId: custom.taskId,
+  });
 
   try {
     const result = await apnsProvider.send(note, token);

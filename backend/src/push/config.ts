@@ -11,12 +11,17 @@ export function isPushEnabled(): boolean {
   return parseEnvFlag('PUSH_ENABLED', false);
 }
 
+/** Отправка push на мобильные устройства (iOS/Android). Требует PUSH_ENABLED=true. */
+export function isPushMobileEnabled(): boolean {
+  return isPushEnabled() && parseEnvFlag('PUSH_MOBILE_ENABLED', true);
+}
+
 export function isPushAndroidEnabled(): boolean {
-  return isPushEnabled() && parseEnvFlag('PUSH_ANDROID_ENABLED', true);
+  return isPushMobileEnabled() && parseEnvFlag('PUSH_ANDROID_ENABLED', true);
 }
 
 export function isPushIosEnabled(): boolean {
-  return isPushEnabled() && parseEnvFlag('PUSH_IOS_ENABLED', true);
+  return isPushMobileEnabled() && parseEnvFlag('PUSH_IOS_ENABLED', true);
 }
 
 export function getApnsConfig() {

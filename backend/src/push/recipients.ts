@@ -8,7 +8,6 @@ import {
   parseBoardApprovalRules,
 } from '../utils/boardApprovals';
 import type { PushDispatchJob, PushMessagePayload } from './types';
-import { markNotificationPushSent, markTaskStatusNotification, wasRecentTaskStatusNotification } from './dedup';
 
 const prisma = new PrismaClient();
 
@@ -71,9 +70,20 @@ export async function resolvePushJobs(event: Record<string, unknown>): Promise<P
 
     const title = typeof notification.title === 'string' ? notification.title : 'Уведомление';
     const body = typeof notification.message === 'string' ? notification.message : '';
-    const relatedId = typeof notification.relatedId === 'string' ? notification.relatedId : undefined;
+    const eventTaskId = typeof event.taskId === 'string' ? event.taskId : undefined;
+    const relatedId =
+      (typeof notification.relatedId === 'string' ? notification.relatedId : undefined) ??
+      eventTaskId;
     const notificationId = typeof notification.id === 'string' ? notification.id : '';
     const notificationType = typeof notification.type === 'string' ? notification.type : 'notification';
+
+    const isTaskNotification =
+      notificationType === 'task_assigned' ||
+      notificationType === 'comment' ||
+      notificationType === 'mention' ||
+      notificationType === 'status_change' ||
+      notificationType.includes('task');
+    const taskUuid = isTaskNotification ? relatedId : undefined;
 
     let route: string | undefined;
     if (relatedId && (notificationType.includes('task') || notificationType === 'status_change' || notificationType === 'comment' || notificationType === 'mention')) {
@@ -86,26 +96,13 @@ export async function resolvePushJobs(event: Record<string, unknown>): Promise<P
       route = `/conferences/${relatedId}`;
     }
 
-    if (notificationId) {
-      markNotificationPushSent(userId, notificationId);
-    }
-    if (relatedId && notificationType === 'status_change') {
-      markTaskStatusNotification(relatedId, userId);
-    }
-
     const payload: PushMessagePayload = {
       title,
       body,
       eventType: notificationType,
       route,
-      relatedId,
-      taskId:
-        notificationType === 'status_change' ||
-        notificationType === 'task_assigned' ||
-        notificationType === 'comment' ||
-        notificationType === 'mention'
-          ? relatedId
-          : undefined,
+      relatedId: taskUuid ?? relatedId,
+      taskId: taskUuid ?? eventTaskId,
     };
 
     return [{
@@ -120,6 +117,9 @@ export async function resolvePushJobs(event: Record<string, unknown>): Promise<P
     if (!taskId) return [];
 
     const message = asRecord(event.message);
+    if (message?.type === 'assistant') {
+      return [];
+    }
     const content = typeof message?.content === 'string' ? message.content : 'Новое сообщение';
     const authorUserId = typeof event.authorUserId === 'string' ? event.authorUserId : null;
 
@@ -144,28 +144,8 @@ export async function resolvePushJobs(event: Record<string, unknown>): Promise<P
   }
 
   if (type === 'task_status_history') {
-    const taskId = typeof event.taskId === 'string' ? event.taskId : '';
-    const entry = asRecord(event.entry);
-    const message = typeof entry?.message === 'string' ? entry.message : 'Статус задачи обновлён';
-    if (!taskId) return [];
-
-    const watchers = await taskStaffWatchers(taskId);
-    const filtered = watchers.filter((uid) => !wasRecentTaskStatusNotification(taskId, uid));
-    if (filtered.length === 0) return [];
-
-    const route = await buildTaskRoute(taskId);
-    return [{
-      userIds: filtered,
-      payload: {
-        title: 'Изменение статуса',
-        body: truncate(message),
-        eventType: 'task_status_history',
-        route,
-        taskId,
-        relatedId: taskId,
-      },
-      dedupKey: `task_status_history:${taskId}:${entry?.createdAt ?? ''}`,
-    }];
+    // Push не нужен: staff уже получает status_change; WS-событие — для LEXPRO.
+    return [];
   }
 
   if (type === 'task_conclusion_updated') {

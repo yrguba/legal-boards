@@ -29,7 +29,7 @@ interface EmployeesContextType {
     data: { name?: string; description?: string; leaderId?: string | null },
   ) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
-  createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ email?: string; inviteSent?: boolean } | void>;
+  createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ email?: string; inviteSent?: boolean; initialPassword?: string } | void>;
   inviteExistingUser: (data: { email: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[] }) => Promise<{ emailSent: boolean }>;
   removeMemberFromWorkspace: (userId: string) => Promise<void>;
   updateUser: (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[]; workspaceId?: string }) => Promise<void>;
@@ -120,7 +120,11 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
   const createUser = async (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => {
     const created = await usersApi.create(data);
     await refreshData();
-    return { email: created?.email as string | undefined, inviteSent: !!created?.inviteSent };
+    return {
+      email: created?.email as string | undefined,
+      inviteSent: !!created?.inviteSent,
+      initialPassword: created?.initialPassword as string | undefined,
+    };
   };
 
   const inviteExistingUser = async (data: { email: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[] }) => {

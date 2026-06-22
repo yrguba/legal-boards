@@ -18,3 +18,7 @@ export function getResendConfig(): { apiKey: string; from: string } | null {
 export function isEmailVerificationConfigured(): boolean {
   return isRegistrationEnabled() && getResendConfig() !== null;
 }
+
+export function isPasswordRecoveryEnabled(): boolean {
+  return isEmailVerificationConfigured();
+}

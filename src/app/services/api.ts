@@ -58,7 +58,9 @@ export const configApi = {
 // Auth API
 export const authApi = {
   async getRegistrationConfig() {
-    return fetchApi<{ enabled: boolean }>('/auth/registration-config');
+    return fetchApi<{ enabled: boolean; passwordRecoveryEnabled?: boolean }>(
+      '/auth/registration-config',
+    );
   },
 
   async login(email: string, password: string) {
@@ -121,6 +123,26 @@ export const authApi = {
     return fetchApi<{ user: any; message: string }>('/auth/change-password', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  },
+
+  async forgotPassword(email: string) {
+    return fetchApi<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async validateResetPassword(token: string) {
+    return fetchApi<{ message: string; email: string }>(
+      `/auth/reset-password?token=${encodeURIComponent(token)}`,
+    );
+  },
+
+  async resetPassword(token: string, newPassword: string) {
+    return fetchApi<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, newPassword }),
     });
   },
 
@@ -548,7 +570,25 @@ export const tasksApi = {
     return fetchApi<void>(`/tasks/${id}`, { method: 'DELETE' });
   },
 
-  async addComment(taskId: string, content: string) {
+  async addComment(taskId: string, content: string, files?: File[]) {
+    if (files?.length) {
+      const formData = new FormData();
+      formData.append('content', content);
+      for (const file of files) {
+        formData.append('files', file);
+      }
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API_URL}/tasks/${taskId}/comments`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Ошибка создания комментария' }));
+        throw new ApiError(response.status, error.error || 'Ошибка создания комментария');
+      }
+      return response.json();
+    }
     return fetchApi<any>(`/tasks/${taskId}/comments`, {
       method: 'POST',
       body: JSON.stringify({ content }),
@@ -973,6 +1013,20 @@ export const invitesApi = {
   },
 };
 
+export type NotificationSettingItem = {
+  key: string;
+  label: string;
+  description: string;
+  group: string;
+  defaultEnabled: boolean;
+  enabled: boolean;
+};
+
+export type NotificationSettingsResponse = {
+  groups: { id: string; label: string }[];
+  settings: NotificationSettingItem[];
+};
+
 export const notificationsApi = {
   async getAll() {
     return fetchApi<any[]>('/notifications');
@@ -980,6 +1034,17 @@ export const notificationsApi = {
 
   async getUnreadCount() {
     return fetchApi<{ count: number }>('/notifications/unread');
+  },
+
+  async getSettings() {
+    return fetchApi<NotificationSettingsResponse>('/notifications/settings');
+  },
+
+  async updateSettings(settings: Record<string, boolean>) {
+    return fetchApi<NotificationSettingsResponse>('/notifications/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ settings }),
+    });
   },
 
   async markAsRead(id: string) {

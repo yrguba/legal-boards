@@ -42,6 +42,50 @@ export const schemas = {
       user: { type: 'object', additionalProperties: true },
     },
   },
+  RegistrationConfigResponse: {
+    type: 'object',
+    properties: {
+      enabled: {
+        type: 'boolean',
+        description: 'REGISTRATION_ENABLED — самостоятельная регистрация',
+      },
+      passwordRecoveryEnabled: {
+        type: 'boolean',
+        description: 'Восстановление пароля (REGISTRATION_ENABLED + Resend)',
+      },
+    },
+    required: ['enabled'],
+  },
+  ForgotPasswordRequest: {
+    type: 'object',
+    properties: {
+      email: { type: 'string', format: 'email' },
+    },
+    required: ['email'],
+  },
+  ResetPasswordRequest: {
+    type: 'object',
+    properties: {
+      token: { type: 'string', description: 'Токен из ссылки /reset-password?token=…' },
+      newPassword: { type: 'string', format: 'password', minLength: 6 },
+    },
+    required: ['token', 'newPassword'],
+  },
+  ResetPasswordValidateResponse: {
+    type: 'object',
+    properties: {
+      message: { type: 'string' },
+      email: { type: 'string', format: 'email' },
+    },
+    required: ['message', 'email'],
+  },
+  MessageResponse: {
+    type: 'object',
+    properties: {
+      message: { type: 'string' },
+    },
+    required: ['message'],
+  },
   JsonObject: {
     type: 'object',
     additionalProperties: true,
@@ -91,6 +135,57 @@ export const schemas = {
       appVersion: { type: 'string' },
     },
   },
+  NotificationSettingGroup: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', example: 'tasks' },
+      label: { type: 'string', example: 'Задачи' },
+    },
+  },
+  NotificationSettingItem: {
+    type: 'object',
+    properties: {
+      key: { type: 'string', example: 'task_assigned' },
+      label: { type: 'string', example: 'Новые задачи' },
+      description: { type: 'string' },
+      group: { type: 'string', example: 'tasks' },
+      defaultEnabled: { type: 'boolean' },
+      enabled: { type: 'boolean' },
+    },
+  },
+  NotificationSettingsResponse: {
+    type: 'object',
+    properties: {
+      groups: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/NotificationSettingGroup' },
+      },
+      settings: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/NotificationSettingItem' },
+      },
+    },
+  },
+  NotificationSettingsUpdateRequest: {
+    type: 'object',
+    required: ['settings'],
+    properties: {
+      settings: {
+        type: 'object',
+        additionalProperties: { type: 'boolean' },
+        example: {
+          task_assigned: true,
+          task_comments: false,
+          task_status: true,
+          document_uploaded: true,
+        },
+      },
+    },
+  },
+  PushSettingGroup: { $ref: '#/components/schemas/NotificationSettingGroup' },
+  PushSettingItem: { $ref: '#/components/schemas/NotificationSettingItem' },
+  PushSettingsResponse: { $ref: '#/components/schemas/NotificationSettingsResponse' },
+  PushSettingsUpdateRequest: { $ref: '#/components/schemas/NotificationSettingsUpdateRequest' },
 };
 
 export const parameters = {

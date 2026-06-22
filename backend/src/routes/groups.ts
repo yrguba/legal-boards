@@ -1,13 +1,32 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
+import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
 import { ensureChannelForNewGroup } from '../utils/workspaceChatChannels';
+import { assertCanManageWorkspace } from '../utils/workspaceRole';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(authenticate);
 router.use(requireStaffUser);
+
+async function assertCanManageGroup(
+  userId: string,
+  groupId: string,
+): Promise<{ ok: true; workspaceId: string } | { ok: false; status: number; error: string }> {
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: { workspaceId: true },
+  });
+  if (!group) {
+    return { ok: false, status: 404, error: 'Группа не найдена' };
+  }
+  const manage = await assertCanManageWorkspace(prisma, userId, group.workspaceId);
+  if (!manage.ok) {
+    return { ok: false, status: 403, error: 'Недостаточно прав' };
+  }
+  return { ok: true, workspaceId: group.workspaceId };
+}
 
 async function assertGroupDepartment(
   workspaceId: string,
@@ -100,9 +119,16 @@ router.get('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.post('/', async (req: AuthRequest, res) => {
   try {
     const { name, description, workspaceId, departmentId, memberIds, leaderId } = req.body;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId обязателен' });
+    }
+
+    const manage = await assertCanManageWorkspace(prisma, req.userId!, workspaceId);
+    if (!manage.ok) return res.status(403).json({ error: 'Недостаточно прав' });
 
     if (!departmentId) {
       return res.status(400).json({ error: 'departmentId обязателен (группа внутри отдела)' });
@@ -153,8 +179,11 @@ router.post('/', authorize('admin', 'manager'), async (req: AuthRequest, res) =>
   }
 });
 
-router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.put('/:id', async (req: AuthRequest, res) => {
   try {
+    const gate = await assertCanManageGroup(req.userId!, req.params.id);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
     const { name, description, departmentId, leaderId } = req.body;
     const existing = await prisma.group.findUnique({
       where: { id: req.params.id },
@@ -196,8 +225,11 @@ router.put('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) 
   }
 });
 
-router.delete('/:id', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.delete('/:id', async (req: AuthRequest, res) => {
   try {
+    const gate = await assertCanManageGroup(req.userId!, req.params.id);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
     await prisma.group.delete({
       where: { id: req.params.id },
     });
@@ -209,8 +241,11 @@ router.delete('/:id', authorize('admin', 'manager'), async (req: AuthRequest, re
   }
 });
 
-router.post('/:id/members', authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+router.post('/:id/members', async (req: AuthRequest, res) => {
   try {
+    const gate = await assertCanManageGroup(req.userId!, req.params.id);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
     const { userIds } = req.body;
     const group = await prisma.group.findUnique({
       where: { id: req.params.id },

@@ -1,11 +1,25 @@
 import { PrismaClient } from '@prisma/client';
 import { sendApnsToToken } from './apns';
 import { sendFcmToToken } from './fcm';
-import { isPushEnabled } from './config';
+import { isPushMobileEnabled } from './config';
 import { maskToken, pushLog, pushWarn } from './logger';
+import { filterUsersByNotificationPreferences } from '../utils/notificationSettings/preferences';
+import { shouldSkipUserPushDedup } from './dedup';
+import { resolvePushTaskId } from './payload';
 import type { PushMessagePayload } from './types';
+import { eventTypeToNotificationSettingKey } from '../utils/notificationSettings/catalog';
 
 const prisma = new PrismaClient();
+
+function filterUsersByPushDedup(userIds: string[], payload: PushMessagePayload): string[] {
+  if (payload.eventType === 'test') return userIds;
+
+  const entityId = resolvePushTaskId(payload) ?? payload.relatedId;
+  if (!entityId) return userIds;
+
+  const category = eventTypeToNotificationSettingKey(payload.eventType) ?? payload.eventType;
+  return userIds.filter((userId) => !shouldSkipUserPushDedup(userId, category, entityId));
+}
 
 export type PushSendStats = {
   ok: number;
@@ -20,12 +34,30 @@ export async function sendPushToUsers(
   payload: PushMessagePayload,
 ): Promise<PushSendStats> {
   const empty: PushSendStats = { ok: 0, invalid: 0, error: 0, skipped: 0, devices: 0 };
-  if (!isPushEnabled() || userIds.length === 0) return empty;
+  if (!isPushMobileEnabled() || userIds.length === 0) return empty;
 
   const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  const eligibleUserIds = await filterUsersByNotificationPreferences(uniqueUserIds, payload.eventType);
+  if (eligibleUserIds.length === 0) {
+    pushLog('all recipients filtered by preferences', {
+      eventType: payload.eventType,
+      userIds: uniqueUserIds.length,
+    });
+    return empty;
+  }
+
+  const dedupedUserIds = filterUsersByPushDedup(eligibleUserIds, payload);
+  if (dedupedUserIds.length === 0) {
+    pushLog('all recipients filtered by dedup', {
+      eventType: payload.eventType,
+      userIds: eligibleUserIds.length,
+    });
+    return empty;
+  }
+
   const devices = await prisma.pushDevice.findMany({
     where: {
-      userId: { in: uniqueUserIds },
+      userId: { in: dedupedUserIds },
       isActive: true,
     },
   });
@@ -41,7 +73,7 @@ export async function sendPushToUsers(
   pushLog('send batch', {
     eventType: payload.eventType,
     title: payload.title,
-    userIds: uniqueUserIds.length,
+    userIds: dedupedUserIds.length,
     devices: devices.length,
     route: payload.route,
   });

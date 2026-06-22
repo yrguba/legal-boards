@@ -20,6 +20,8 @@ import { ConferenceRoom } from './pages/ConferenceRoom';
 import { ConferenceJoin } from './pages/ConferenceJoin';
 import { ChangePassword } from './pages/ChangePassword';
 import { Invite } from './pages/Invite';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { ResetPassword } from './pages/ResetPassword';
 import { WorkspaceInvite } from './pages/WorkspaceInvite';
 import { useApp } from './store/AppContext';
 import { FeatureTabGuard } from './components/FeatureTabGuard';
@@ -58,6 +60,14 @@ export const router = createBrowserRouter([
   {
     path: '/invite',
     element: <Invite />,
+  },
+  {
+    path: '/forgot-password',
+    element: <ForgotPassword />,
+  },
+  {
+    path: '/reset-password',
+    element: <ResetPassword />,
   },
   {
     path: '/workspace-invite',

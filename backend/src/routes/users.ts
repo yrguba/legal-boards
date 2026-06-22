@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
-import { broadcast } from '../realtime';
+import { createAndBroadcastNotification } from '../utils/notifications';
 import { isLexClientsTabEnabled } from '../utils/lexClients';
 import { isEmailConfigured } from '../utils/email';
 import {
@@ -10,10 +10,12 @@ import {
   buildPasswordInviteUrl,
   sendPasswordInviteEmail,
 } from '../utils/passwordInvite';
+import { isWorkspaceInviteEmailEnabled } from '../utils/workspaceInviteEmail';
 import {
   assertCanManageWorkspace,
   getWorkspaceGroupIdsForUser,
   getWorkspaceMemberProfile,
+  isAlreadyWorkspaceMember,
   normalizeEmail,
   resolveWorkspaceRole,
 } from '../utils/workspaceRole';
@@ -606,6 +608,13 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (existingUser) {
+      const alreadyMember = await isAlreadyWorkspaceMember(prisma, existingUser.id, workspaceId);
+      if (alreadyMember) {
+        return res.status(409).json({
+          error: 'Пользователь уже состоит в этом пространстве',
+          code: 'ALREADY_MEMBER',
+        });
+      }
       return res.status(409).json({
         error: 'Пользователь уже зарегистрирован. Отправьте приглашение в пространство.',
         code: 'USER_EXISTS',
@@ -688,67 +697,60 @@ router.post('/', async (req: AuthRequest, res) => {
     });
 
     if (mustChangePassword) {
-      if (!isEmailConfigured()) {
-        await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
-        return res.status(503).json({
-          error: 'Email-сервис не настроен (RESEND_API_KEY, RESEND_FROM). Невозможно отправить приглашение.',
-        });
-      }
-
-      try {
-        const inviteToken = await assignPasswordInviteToken(prisma, result.user.id);
-        const inviteUrl = buildPasswordInviteUrl(inviteToken);
-        await sendPasswordInviteEmail({
-          to: result.user.email,
-          name: result.user.name,
-          workspaceName: ws?.name,
-          inviteUrl,
-          kind: 'welcome',
-        });
-      } catch (mailErr) {
-        await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
-        console.error('Create user invite email error:', mailErr);
-        const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
-        return res.status(500).json({ error: msg });
-      }
-
-      const notification = await prisma.notification.create({
-        data: {
-          type: 'user_added',
-          title: 'Добро пожаловать',
-          message: `Вас добавили в рабочее пространство "${ws?.name || 'пространство'}"`,
-          userId: result.user.id,
-          relatedId: workspaceId,
-        },
-      });
-
-      broadcast({
-        type: 'notification',
-        userId: result.user.id,
-        notification,
-      });
-
-      return res.json({
-        ...result.user,
-        inviteSent: true,
-        message: `Приглашение отправлено на ${result.user.email}`,
-      });
-    }
-
-    const notification = await prisma.notification.create({
-      data: {
+      await createAndBroadcastNotification(prisma, {
         type: 'user_added',
         title: 'Добро пожаловать',
         message: `Вас добавили в рабочее пространство "${ws?.name || 'пространство'}"`,
         userId: result.user.id,
         relatedId: workspaceId,
-      },
-    });
+      });
 
-    broadcast({
-      type: 'notification',
+      if (isWorkspaceInviteEmailEnabled()) {
+        if (!isEmailConfigured()) {
+          await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
+          return res.status(503).json({
+            error: 'Email-сервис не настроен (RESEND_API_KEY, RESEND_FROM). Невозможно отправить приглашение.',
+          });
+        }
+
+        try {
+          const inviteToken = await assignPasswordInviteToken(prisma, result.user.id);
+          const inviteUrl = buildPasswordInviteUrl(inviteToken);
+          await sendPasswordInviteEmail({
+            to: result.user.email,
+            name: result.user.name,
+            workspaceName: ws?.name,
+            inviteUrl,
+            kind: 'welcome',
+          });
+        } catch (mailErr) {
+          await prisma.user.delete({ where: { id: result.user.id } }).catch(() => undefined);
+          console.error('Create user invite email error:', mailErr);
+          const msg = mailErr instanceof Error ? mailErr.message : 'Не удалось отправить приглашение';
+          return res.status(500).json({ error: msg });
+        }
+
+        return res.json({
+          ...result.user,
+          inviteSent: true,
+          message: `Приглашение отправлено на ${result.user.email}`,
+        });
+      }
+
+      return res.json({
+        ...result.user,
+        inviteSent: false,
+        initialPassword: plainPassword,
+        message: 'Сотрудник добавлен. Передайте временный пароль сотруднику.',
+      });
+    }
+
+    await createAndBroadcastNotification(prisma, {
+      type: 'user_added',
+      title: 'Добро пожаловать',
+      message: `Вас добавили в рабочее пространство "${ws?.name || 'пространство'}"`,
       userId: result.user.id,
-      notification,
+      relatedId: workspaceId,
     });
 
     res.json({ ...result.user, inviteSent: false });

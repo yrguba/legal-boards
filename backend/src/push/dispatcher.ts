@@ -1,11 +1,11 @@
-import { isPushEnabled } from './config';
+import { isPushMobileEnabled } from './config';
 import { shouldSkipPushDedup } from './dedup';
 import { pushLog } from './logger';
 import { resolvePushJobs } from './recipients';
 import { sendPushToUsers } from './sender';
 
 export function dispatchPushFromRealtimeEvent(data: unknown): void {
-  if (!isPushEnabled()) return;
+  if (!isPushMobileEnabled()) return;
   if (!data || typeof data !== 'object') return;
 
   const eventType =

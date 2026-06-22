@@ -4,6 +4,7 @@ import { getMessaging } from 'firebase-admin/messaging';
 import type { ServiceAccount } from 'firebase-admin/app';
 import { isFcmConfigured, isPushAndroidEnabled } from './config';
 import { pushWarn } from './logger';
+import { buildPushCustomData } from './payload';
 import type { PushMessagePayload } from './types';
 
 function initFirebase(): App | null {
@@ -33,13 +34,10 @@ function initFirebase(): App | null {
 }
 
 function dataPayload(payload: PushMessagePayload): Record<string, string> {
-  const data: Record<string, string> = {
+  return {
+    ...buildPushCustomData(payload),
     eventType: payload.eventType,
   };
-  if (payload.route) data.route = payload.route;
-  if (payload.relatedId) data.relatedId = payload.relatedId;
-  if (payload.taskId) data.taskId = payload.taskId;
-  return data;
 }
 
 export async function sendFcmToToken(
