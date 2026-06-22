@@ -61,7 +61,6 @@ export function TaskPage() {
   const [isPostingInteraction, setIsPostingInteraction] = useState(false);
   const [interactionError, setInteractionError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
-  const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -469,34 +468,19 @@ export function TaskPage() {
   const postComment = async () => {
     if (!activeTaskId) return;
     const content = commentText.trim();
-    if (!content && pendingCommentFiles.length === 0) return;
+    if (!content) return;
     setIsPostingComment(true);
     try {
-      const created = await tasksApi.addComment(
-        activeTaskId,
-        content,
-        pendingCommentFiles.length > 0 ? pendingCommentFiles : undefined,
-      );
+      const created = await tasksApi.addComment(activeTaskId, content);
       setTask((prev: any) => ({
         ...prev,
         comments: [created, ...(prev?.comments || [])],
       }));
       setCommentText('');
-      setPendingCommentFiles([]);
       setActivePanel('comments');
     } finally {
       setIsPostingComment(false);
     }
-  };
-
-  const addCommentFiles = (files: FileList | File[]) => {
-    const next = Array.from(files);
-    if (next.length === 0) return;
-    setPendingCommentFiles((prev) => [...prev, ...next]);
-  };
-
-  const removeCommentFile = (index: number) => {
-    setPendingCommentFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const removeTaskAttachment = async (attachmentId: string) => {
@@ -814,12 +798,8 @@ export function TaskPage() {
                   assistantMessage={assistantMessage}
                   isPostingComment={isPostingComment}
                   isPostingAssistant={isPostingAssistant}
-                  attachmentsEnabled={board.attachmentsEnabled !== false}
-                  pendingCommentFiles={pendingCommentFiles}
                   onCommentText={setCommentText}
                   onAssistantMessage={setAssistantMessage}
-                  onAddCommentFiles={addCommentFiles}
-                  onRemoveCommentFile={removeCommentFile}
                   onPostComment={postComment}
                   onPostAssistant={postAssistantMessage}
                 />

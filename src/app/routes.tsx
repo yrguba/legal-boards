@@ -20,11 +20,7 @@ import { ConferenceRoom } from './pages/ConferenceRoom';
 import { ConferenceJoin } from './pages/ConferenceJoin';
 import { ChangePassword } from './pages/ChangePassword';
 import { Invite } from './pages/Invite';
-import { ForgotPassword } from './pages/ForgotPassword';
-import { ResetPassword } from './pages/ResetPassword';
-import { WorkspaceInvite } from './pages/WorkspaceInvite';
 import { useApp } from './store/AppContext';
-import { FeatureTabGuard } from './components/FeatureTabGuard';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useApp();
@@ -60,18 +56,6 @@ export const router = createBrowserRouter([
   {
     path: '/invite',
     element: <Invite />,
-  },
-  {
-    path: '/forgot-password',
-    element: <ForgotPassword />,
-  },
-  {
-    path: '/reset-password',
-    element: <ResetPassword />,
-  },
-  {
-    path: '/workspace-invite',
-    element: <WorkspaceInvite />,
   },
   {
     path: '/conferences/join/:shareToken',
@@ -111,27 +95,15 @@ export const router = createBrowserRouter([
       },
       {
         path: 'documents',
-        element: (
-          <FeatureTabGuard tab="documents">
-            <Documents />
-          </FeatureTabGuard>
-        ),
+        element: <Documents />,
       },
       {
         path: 'chat',
-        element: (
-          <FeatureTabGuard tab="chat">
-            <Chat />
-          </FeatureTabGuard>
-        ),
+        element: <Chat />,
       },
       {
         path: 'calendar',
-        element: (
-          <FeatureTabGuard tab="calendar">
-            <Calendar />
-          </FeatureTabGuard>
-        ),
+        element: <Calendar />,
       },
       {
         path: 'conferences',
@@ -143,19 +115,11 @@ export const router = createBrowserRouter([
       },
       {
         path: 'knowledge/:articleId',
-        element: (
-          <FeatureTabGuard tab="knowledge">
-            <Knowledge />
-          </FeatureTabGuard>
-        ),
+        element: <Knowledge />,
       },
       {
         path: 'knowledge',
-        element: (
-          <FeatureTabGuard tab="knowledge">
-            <Knowledge />
-          </FeatureTabGuard>
-        ),
+        element: <Knowledge />,
       },
       {
         path: 'workspaces',

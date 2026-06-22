@@ -3,13 +3,13 @@ import { X, Bell, CheckCheck, FileText, MessageSquare, ArrowRightLeft, AtSign, U
 import type { Notification } from '../types';
 import { useNavigate } from 'react-router';
 import { useNotifications } from '../store/NotificationsContext';
+
 interface NotificationsPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  onOpenInvite: (inviteId: string) => void;
 }
 
-export function NotificationsPanel({ isOpen, onClose, onOpenInvite }: NotificationsPanelProps) {
+export function NotificationsPanel({ isOpen, onClose }: NotificationsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { items, isLoading, refresh, markAsRead, markAllAsRead } = useNotifications();
@@ -50,7 +50,6 @@ export function NotificationsPanel({ isOpen, onClose, onOpenInvite }: Notificati
       case 'mention':
         return <AtSign className="w-5 h-5 text-pink-600" />;
       case 'user_added':
-      case 'workspace_invite':
         return <UserPlus className="w-5 h-5 text-emerald-600" />;
       case 'conference_invite':
       case 'conference_updated':
@@ -153,19 +152,8 @@ export function NotificationsPanel({ isOpen, onClose, onOpenInvite }: Notificati
                       }
 
                       if (notification.type === 'user_added') {
-                        navigate('/workspaces');
+                        navigate('/');
                         onClose();
-                        return;
-                      }
-
-                      if (notification.type === 'workspace_member_removed') {
-                        navigate('/workspaces');
-                        onClose();
-                        return;
-                      }
-
-                      if (notification.type === 'workspace_invite' && notification.relatedId) {
-                        onOpenInvite(notification.relatedId);
                         return;
                       }
 

@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { formatTaskKey } from '../utils/taskKeys';
 import { canSeeDocument, getUserDocumentAccess } from '../utils/documentAccess';
 import { getWorkspaceMemberIds } from '../utils/workspaceMembers';
+import { CHAT_SCOPE, parseDirectUserIds, userCanSeeChannel } from '../utils/workspaceChatChannels';
 import {
   getApprovalRulesForColumn,
   getApprovedRuleIdsForTask,
@@ -131,6 +132,7 @@ export async function resolvePushJobs(event: Record<string, unknown>): Promise<P
 
     return [{
       userIds,
+      excludeUserIds: authorUserId ? [authorUserId] : undefined,
       payload: {
         title: task?.title ? `Сообщение: ${task.title}` : 'Новое сообщение',
         body: truncate(content),
@@ -140,6 +142,93 @@ export async function resolvePushJobs(event: Record<string, unknown>): Promise<P
         relatedId: taskId,
       },
       dedupKey: typeof message?.id === 'string' ? `chat:${message.id}` : undefined,
+    }];
+  }
+
+  if (type === 'workspace_chat_message') {
+    const channelId = typeof event.channelId === 'string' ? event.channelId : '';
+    const workspaceId = typeof event.workspaceId === 'string' ? event.workspaceId : '';
+    const authorUserId = typeof event.authorUserId === 'string' ? event.authorUserId : '';
+    const scope = typeof event.scope === 'string' ? event.scope : '';
+    const message = asRecord(event.message);
+    if (!channelId || !workspaceId || !message) return [];
+
+    const attachments = message.attachments;
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+    const content =
+      typeof message.content === 'string' && message.content.trim()
+        ? message.content.trim()
+        : hasAttachments
+          ? 'Вложение'
+          : 'Новое сообщение';
+
+    const author = asRecord(message.user);
+    const authorName = typeof author?.name === 'string' ? author.name : undefined;
+
+    let recipientIds: string[] = [];
+
+    if (scope === CHAT_SCOPE.direct) {
+      const directUserIds = Array.isArray(event.directUserIds)
+        ? parseDirectUserIds(event.directUserIds)
+        : [];
+      recipientIds = directUserIds.filter((id) => id !== authorUserId);
+    } else {
+      const channel = await prisma.workspaceChatChannel.findUnique({
+        where: { id: channelId },
+      });
+      if (!channel) return [];
+
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { ownerId: true },
+      });
+
+      const memberIds = await getWorkspaceMemberIds(prisma, workspaceId);
+      memberIds.delete(authorUserId);
+
+      for (const userId of memberIds) {
+        if (workspace?.ownerId === userId) {
+          recipientIds.push(userId);
+          continue;
+        }
+        const access = await getUserDocumentAccess(prisma, userId, workspaceId);
+        if (userCanSeeChannel(access, channel, userId)) {
+          recipientIds.push(userId);
+        }
+      }
+    }
+
+    recipientIds = exclude(recipientIds, authorUserId ? [authorUserId] : undefined);
+    if (recipientIds.length === 0) return [];
+
+    const channelTitle =
+      scope === CHAT_SCOPE.direct
+        ? undefined
+        : (
+            await prisma.workspaceChatChannel.findUnique({
+              where: { id: channelId },
+              select: { title: true },
+            })
+          )?.title;
+
+    const title =
+      scope === CHAT_SCOPE.direct
+        ? authorName
+          ? `Сообщение от ${authorName}`
+          : 'Личное сообщение'
+        : channelTitle || 'Новое сообщение в чате';
+
+    return [{
+      userIds: recipientIds,
+      excludeUserIds: authorUserId ? [authorUserId] : undefined,
+      payload: {
+        title,
+        body: truncate(content),
+        eventType: 'workspace_chat_message',
+        route: '/chat',
+        relatedId: channelId,
+      },
+      dedupKey: typeof message.id === 'string' ? `workspace_chat:${message.id}` : undefined,
     }];
   }
 

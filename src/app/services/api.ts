@@ -44,23 +44,10 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   return response.json();
 }
 
-export const configApi = {
-  async getFeatureTabs() {
-    return fetchApi<{
-      documents: boolean;
-      knowledge: boolean;
-      chat: boolean;
-      calendar: boolean;
-    }>('/config/tabs');
-  },
-};
-
 // Auth API
 export const authApi = {
   async getRegistrationConfig() {
-    return fetchApi<{ enabled: boolean; passwordRecoveryEnabled?: boolean }>(
-      '/auth/registration-config',
-    );
+    return fetchApi<{ enabled: boolean }>('/auth/registration-config');
   },
 
   async login(email: string, password: string) {
@@ -123,26 +110,6 @@ export const authApi = {
     return fetchApi<{ user: any; message: string }>('/auth/change-password', {
       method: 'POST',
       body: JSON.stringify(data),
-    });
-  },
-
-  async forgotPassword(email: string) {
-    return fetchApi<{ message: string }>('/auth/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-  },
-
-  async validateResetPassword(token: string) {
-    return fetchApi<{ message: string; email: string }>(
-      `/auth/reset-password?token=${encodeURIComponent(token)}`,
-    );
-  },
-
-  async resetPassword(token: string, newPassword: string) {
-    return fetchApi<{ message: string }>('/auth/reset-password', {
-      method: 'POST',
-      body: JSON.stringify({ token, newPassword }),
     });
   },
 
@@ -259,23 +226,11 @@ export const usersApi = {
     );
   },
 
-  async updateProfile(userId: string, workspaceId: string, profileFields: Record<string, unknown>) {
+  async updateProfile(userId: string, profileFields: Record<string, unknown>) {
     return fetchApi<any>(`/users/${userId}/profile`, {
       method: 'PUT',
-      body: JSON.stringify({ workspaceId, profileFields }),
+      body: JSON.stringify({ profileFields }),
     });
-  },
-
-  async lookupInWorkspace(workspaceId: string, email: string) {
-    const q = new URLSearchParams({ email });
-    return fetchApi<{
-      exists: boolean;
-      userId?: string;
-      name?: string;
-      email?: string;
-      alreadyMember?: boolean;
-      pendingInviteId?: string | null;
-    }>(`/workspaces/${workspaceId}/users/lookup?${q}`);
   },
 };
 
@@ -307,43 +262,10 @@ export const workspacesApi = {
     return fetchApi<void>(`/workspaces/${id}`, { method: 'DELETE' });
   },
 
-  async lookupUser(workspaceId: string, email: string) {
-    return usersApi.lookupInWorkspace(workspaceId, email);
-  },
-
-  async listInvites(workspaceId: string, status = 'pending') {
-    const q = new URLSearchParams({ status });
-    return fetchApi<any[]>(`/workspaces/${workspaceId}/invites?${q}`);
-  },
-
-  async createInvite(
-    workspaceId: string,
-    data: { email: string; role?: string; departmentId?: string; groupIds?: string[] },
-  ) {
-    return fetchApi<{ id: string; status: string; emailSent: boolean; user?: { name: string; email: string } }>(
-      `/workspaces/${workspaceId}/invites`,
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      },
-    );
-  },
-
-  async cancelInvite(workspaceId: string, inviteId: string) {
-    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/invites/${inviteId}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async removeMember(workspaceId: string, userId: string) {
-    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/members/${userId}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async leave(workspaceId: string) {
-    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/leave`, {
+  async addUser(workspaceId: string, userEmail: string) {
+    return fetchApi<any>(`/workspaces/${workspaceId}/users`, {
       method: 'POST',
+      body: JSON.stringify({ userEmail }),
     });
   },
 
@@ -570,25 +492,7 @@ export const tasksApi = {
     return fetchApi<void>(`/tasks/${id}`, { method: 'DELETE' });
   },
 
-  async addComment(taskId: string, content: string, files?: File[]) {
-    if (files?.length) {
-      const formData = new FormData();
-      formData.append('content', content);
-      for (const file of files) {
-        formData.append('files', file);
-      }
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${API_URL}/tasks/${taskId}/comments`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: formData,
-      });
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Ошибка создания комментария' }));
-        throw new ApiError(response.status, error.error || 'Ошибка создания комментария');
-      }
-      return response.json();
-    }
+  async addComment(taskId: string, content: string) {
     return fetchApi<any>(`/tasks/${taskId}/comments`, {
       method: 'POST',
       body: JSON.stringify({ content }),
@@ -695,9 +599,28 @@ export const workspaceChatsApi = {
         title: string;
         departmentId: string | null;
         groupId: string | null;
+        directUserIds?: string[];
+        peerUser?: { id: string; name: string; avatar: string | null; email: string } | null;
         createdAt: string;
       }[]
     >(`/workspace-chats/workspace/${workspaceId}/channels`);
+  },
+
+  async openDirectChat(workspaceId: string, participantUserId: string) {
+    return fetchApi<{
+      id: string;
+      channelKey: string;
+      scope: string;
+      title: string;
+      departmentId: string | null;
+      groupId: string | null;
+      directUserIds: string[];
+      peerUser: { id: string; name: string; avatar: string | null; email: string } | null;
+      createdAt: string;
+    }>(`/workspace-chats/workspace/${workspaceId}/direct`, {
+      method: 'POST',
+      body: JSON.stringify({ participantUserId }),
+    });
   },
 
   async getMessages(channelId: string, before?: string) {
@@ -708,21 +631,53 @@ export const workspaceChatsApi = {
         content: string;
         createdAt: string;
         user: { id: string; name: string; avatar: string | null; email: string };
+        attachments?: {
+          id: string;
+          name: string;
+          type: string;
+          size: number;
+          path: string;
+          createdAt: string;
+        }[];
       }[];
       hasMore: boolean;
     }>(`/workspace-chats/channels/${channelId}/messages${q}`);
   },
 
-  async postMessage(channelId: string, content: string) {
-    return fetchApi<{
+  async postMessage(channelId: string, content: string, files?: File[]) {
+    const formData = new FormData();
+    formData.append('content', content);
+    for (const file of files ?? []) {
+      formData.append('files', file);
+    }
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/workspace-chats/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Ошибка отправки сообщения' }));
+      throw new ApiError(response.status, error.error || 'Ошибка отправки сообщения');
+    }
+    const data = await response.json();
+    return {
+      ...data,
+      attachments: Array.isArray(data.attachments) ? data.attachments : [],
+    } as {
       id: string;
       content: string;
       createdAt: string;
       user: { id: string; name: string; avatar: string | null; email: string };
-    }>(`/workspace-chats/channels/${channelId}/messages`, {
-      method: 'POST',
-      body: JSON.stringify({ content }),
-    });
+      attachments: {
+        id: string;
+        name: string;
+        type: string;
+        size: number;
+        path: string;
+        createdAt: string;
+      }[];
+    };
   },
 };
 
@@ -971,62 +926,6 @@ export const knowledgeApi = {
 };
 
 // Notifications API
-export const invitesApi = {
-  async getMine(status = 'pending') {
-    const q = new URLSearchParams({ status });
-    return fetchApi<
-      Array<{
-        id: string;
-        workspaceId: string;
-        role: string;
-        departmentId?: string | null;
-        groupIds: string[];
-        status: string;
-        expiresAt: string;
-        workspace?: { id: string; name: string };
-        invitedBy?: { id: string; name: string; email: string };
-      }>
-    >(`/invites/mine?${q}`);
-  },
-
-  async getByToken(token: string) {
-    const q = new URLSearchParams({ token });
-    return fetchApi<{
-      id: string;
-      workspaceId: string;
-      role: string;
-      status: string;
-      workspace?: { id: string; name: string };
-      invitedBy?: { id: string; name: string; email: string };
-    }>(`/invites/by-token?${q}`);
-  },
-
-  async accept(id: string) {
-    return fetchApi<{ workspaceId: string; workspaceName: string; alreadyMember?: boolean }>(
-      `/invites/${id}/accept`,
-      { method: 'POST' },
-    );
-  },
-
-  async decline(id: string) {
-    return fetchApi<{ message: string }>(`/invites/${id}/decline`, { method: 'POST' });
-  },
-};
-
-export type NotificationSettingItem = {
-  key: string;
-  label: string;
-  description: string;
-  group: string;
-  defaultEnabled: boolean;
-  enabled: boolean;
-};
-
-export type NotificationSettingsResponse = {
-  groups: { id: string; label: string }[];
-  settings: NotificationSettingItem[];
-};
-
 export const notificationsApi = {
   async getAll() {
     return fetchApi<any[]>('/notifications');
@@ -1034,17 +933,6 @@ export const notificationsApi = {
 
   async getUnreadCount() {
     return fetchApi<{ count: number }>('/notifications/unread');
-  },
-
-  async getSettings() {
-    return fetchApi<NotificationSettingsResponse>('/notifications/settings');
-  },
-
-  async updateSettings(settings: Record<string, boolean>) {
-    return fetchApi<NotificationSettingsResponse>('/notifications/settings', {
-      method: 'PUT',
-      body: JSON.stringify({ settings }),
-    });
   },
 
   async markAsRead(id: string) {

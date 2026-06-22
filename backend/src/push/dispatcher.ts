@@ -15,7 +15,13 @@ export function dispatchPushFromRealtimeEvent(data: unknown): void {
 
   void (async () => {
     try {
-      const jobs = await resolvePushJobs(data as Record<string, unknown>);
+      const event = data as Record<string, unknown>;
+      const authorUserId =
+        typeof event.authorUserId === 'string' && event.authorUserId.trim()
+          ? event.authorUserId.trim()
+          : undefined;
+
+      const jobs = await resolvePushJobs(event);
       if (jobs.length === 0) {
         pushLog('no recipients', { eventType });
         return;
@@ -24,9 +30,12 @@ export function dispatchPushFromRealtimeEvent(data: unknown): void {
       pushLog('dispatch', { eventType, jobs: jobs.length });
 
       for (const job of jobs) {
-        const userIds = job.excludeUserIds?.length
+        let userIds = job.excludeUserIds?.length
           ? job.userIds.filter((id) => !job.excludeUserIds!.includes(id))
-          : job.userIds;
+          : [...job.userIds];
+        if (authorUserId) {
+          userIds = userIds.filter((id) => id !== authorUserId);
+        }
         if (userIds.length === 0) {
           pushLog('skip empty recipients', {
             eventType: job.payload.eventType,

@@ -21,20 +21,17 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
-import { WorkspaceInviteModal } from './WorkspaceInviteModal';
 import { useNotifications } from '../store/NotificationsContext';
 import { useConferencesConfig } from '../features/conferences/useConferencesConfig';
 import { useLexClientsConfig } from '../features/lexClients/useLexClientsConfig';
-import { useFeatureTabsConfig } from '../features/featureTabs/useFeatureTabsConfig';
 
 export function Layout() {
   const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace } = useApp();
   const navigate = useNavigate();
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [inviteModalId, setInviteModalId] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const { unreadCount, toast, refresh: refreshNotifications } = useNotifications();
+  const { unreadCount, toast } = useNotifications();
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_collapsed');
@@ -70,40 +67,33 @@ export function Layout() {
   const canViewAnalytics = canManageLexClients;
   const { enabled: conferencesEnabled } = useConferencesConfig();
   const { enabled: lexClientsEnabled } = useLexClientsConfig();
-  const {
-    documents: documentsEnabled,
-    knowledge: knowledgeEnabled,
-    chat: chatEnabled,
-    calendar: calendarEnabled,
-  } = useFeatureTabsConfig();
 
   const navItems = useMemo(() => {
     const items: { to: string; end?: boolean; label: string; icon: typeof LayoutDashboard }[] = [
       { to: '/', end: true, label: 'Доски', icon: LayoutDashboard },
-      ...(canViewAnalytics ? [{ to: '/analytics', label: 'Аналитика', icon: BarChart3 }] : []),
       { to: '/employees', label: 'Сотрудники', icon: Users },
-      ...(documentsEnabled ? [{ to: '/documents', label: 'Документы', icon: FileText }] : []),
-      ...(knowledgeEnabled ? [{ to: '/knowledge', label: 'База знаний', icon: BookOpen }] : []),
-      ...(chatEnabled ? [{ to: '/chat', label: 'Чат', icon: MessageCircle }] : []),
-      ...(calendarEnabled ? [{ to: '/calendar', label: 'Календарь', icon: Calendar }] : []),
-      ...(conferencesEnabled ? [{ to: '/conferences', label: 'Конференции', icon: Video }] : []),
-      ...(canManageLexClients && lexClientsEnabled
-        ? [{ to: '/lex-clients', label: 'Клиенты LEXPRO', icon: Handshake }]
+      { to: '/documents', label: 'Документы', icon: FileText },
+      { to: '/knowledge', label: 'База знаний', icon: BookOpen },
+      { to: '/chat', label: 'Чат', icon: MessageCircle },
+      { to: '/calendar', label: 'Календарь', icon: Calendar },
+      ...(conferencesEnabled
+        ? [{ to: '/conferences', label: 'Конференции', icon: Video }]
         : []),
       { to: '/workspaces', label: 'Пространства', icon: Layers },
       { to: '/settings', label: 'Настройки', icon: Settings },
     ];
+    if (canViewAnalytics) {
+      items.splice(1, 0, { to: '/analytics', label: 'Аналитика', icon: BarChart3 });
+    }
+    if (canManageLexClients && lexClientsEnabled) {
+      items.splice(canViewAnalytics ? 7 : 6, 0, {
+        to: '/lex-clients',
+        label: 'Клиенты LEXPRO',
+        icon: Handshake,
+      });
+    }
     return items;
-  }, [
-    canManageLexClients,
-    canViewAnalytics,
-    conferencesEnabled,
-    lexClientsEnabled,
-    documentsEnabled,
-    knowledgeEnabled,
-    chatEnabled,
-    calendarEnabled,
-  ]);
+  }, [canManageLexClients, canViewAnalytics, conferencesEnabled, lexClientsEnabled]);
 
   return (
     <div className="flex h-screen bg-slate-50">
@@ -241,20 +231,10 @@ export function Layout() {
 
       <NotificationsPanel
         isOpen={showNotifications}
-        onClose={() => setShowNotifications(false)}
-        onOpenInvite={(inviteId) => {
+        onClose={async () => {
           setShowNotifications(false);
-          setInviteModalId(inviteId);
         }}
       />
-
-      {inviteModalId && (
-        <WorkspaceInviteModal
-          inviteId={inviteModalId}
-          onClose={() => setInviteModalId(null)}
-          onDone={() => void refreshNotifications()}
-        />
-      )}
 
       {toast ? (
         <div className="fixed bottom-4 right-4 z-50 w-full max-w-sm">

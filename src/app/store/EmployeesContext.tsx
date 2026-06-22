@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import type { User, Department, Group, UserRole } from '../types';
 import { users as initialUsers } from './mockData';
-import { usersApi, departmentsApi, groupsApi, workspacesApi } from '../services/api';
+import { usersApi, departmentsApi, groupsApi } from '../services/api';
 import { useApp } from './AppContext';
 
 interface EmployeesContextType {
@@ -29,10 +29,8 @@ interface EmployeesContextType {
     data: { name?: string; description?: string; leaderId?: string | null },
   ) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
-  createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ email?: string; inviteSent?: boolean; initialPassword?: string } | void>;
-  inviteExistingUser: (data: { email: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[] }) => Promise<{ emailSent: boolean }>;
-  removeMemberFromWorkspace: (userId: string) => Promise<void>;
-  updateUser: (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[]; workspaceId?: string }) => Promise<void>;
+  createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ email?: string; inviteSent?: boolean; inviteUrl?: string } | void>;
+  updateUser: (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[] }) => Promise<void>;
   updateDepartmentMembers: (departmentId: string, memberIds: string[]) => Promise<void>;
   updateGroupMembers: (groupId: string, memberIds: string[]) => Promise<void>;
   refreshData: () => Promise<void>;
@@ -123,31 +121,13 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
     return {
       email: created?.email as string | undefined,
       inviteSent: !!created?.inviteSent,
-      initialPassword: created?.initialPassword as string | undefined,
+      inviteUrl: created?.inviteUrl as string | undefined,
     };
   };
 
-  const inviteExistingUser = async (data: { email: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[] }) => {
-    const result = await workspacesApi.createInvite(data.workspaceId, {
-      email: data.email,
-      role: data.role,
-      departmentId: data.departmentId,
-      groupIds: data.groupIds,
-    });
-    return { emailSent: !!result.emailSent };
-  };
-
-  const removeMemberFromWorkspace = async (userId: string) => {
-    if (!currentWorkspace) throw new Error('Не выбрано рабочее пространство');
-    await workspacesApi.removeMember(currentWorkspace.id, userId);
-    await refreshData();
-  };
-
-  const updateUser = async (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[]; workspaceId?: string }) => {
+  const updateUser = async (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[] }) => {
     try {
-      const workspaceId = data.workspaceId ?? currentWorkspace?.id;
-      if (!workspaceId) throw new Error('Не выбрано рабочее пространство');
-      const updatedUser = await usersApi.update(userId, { ...data, workspaceId });
+      const updatedUser = await usersApi.update(userId, data);
       setUsers(users.map(user =>
         user.id === userId ? updatedUser : user
       ));
@@ -182,8 +162,6 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
         updateGroup,
         deleteGroup,
         createUser,
-        inviteExistingUser,
-        removeMemberFromWorkspace,
         updateUser,
         updateDepartmentMembers,
         updateGroupMembers,

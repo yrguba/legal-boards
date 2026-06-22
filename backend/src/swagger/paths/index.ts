@@ -493,7 +493,15 @@ export const pushPaths = {
 
 export const chatPaths = {
   '/api/workspace-chats/workspace/{workspaceId}/channels': {
-    get: op('Workspace Chats', 'Каналы чата пространства', { parameters: [parameters.workspaceId] }),
+    get: op('Workspace Chats', 'Каналы чата пространства (включая личные)', {
+      parameters: [parameters.workspaceId],
+    }),
+  },
+  '/api/workspace-chats/workspace/{workspaceId}/direct': {
+    post: op('Workspace Chats', 'Открыть или создать личный чат с участником', {
+      parameters: [parameters.workspaceId],
+      requestBody: jsonBodyObject('participantUserId'),
+    }),
   },
   '/api/workspace-chats/channels/{channelId}/messages': {
     get: op('Workspace Chats', 'Сообщения канала', { parameters: [parameters.channelId] }),

@@ -1,27 +1,17 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { X } from 'lucide-react';
 import type { UserRole } from '../types';
 import { useEmployees } from '../store/EmployeesContext';
 import { useApp } from '../store/AppContext';
-import { usersApi, ApiError } from '../services/api';
-
-type LookupState =
-  | { status: 'idle' }
-  | { status: 'checking' }
-  | { status: 'new' }
-  | { status: 'existing'; name: string; pendingInviteId: string | null }
-  | { status: 'member'; name: string }
-  | { status: 'error'; message: string };
 
 interface CreateEmployeeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
 }
 
-export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmployeeModalProps) {
+export function CreateEmployeeModal({ isOpen, onClose }: CreateEmployeeModalProps) {
   const { currentWorkspace } = useApp();
-  const { departments, groups, createUser, inviteExistingUser } = useEmployees();
+  const { departments, groups, createUser } = useEmployees();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -29,95 +19,28 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
     departmentId: '',
     groupIds: [] as string[],
   });
-  const [lookup, setLookup] = useState<LookupState>({ status: 'idle' });
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [initialPassword, setInitialPassword] = useState<string | null>(null);
+  const [inviteSentTo, setInviteSentTo] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteEmailSent, setInviteEmailSent] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const workspaceDepartments = departments.filter((d) => d.workspaceId === currentWorkspace?.id);
   const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
 
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      email: '',
-      role: 'member',
-      departmentId: '',
-      groupIds: [],
-    });
-    setLookup({ status: 'idle' });
-    setSuccessMessage(null);
-    setInitialPassword(null);
-    setSubmitError(null);
-  };
-
   const handleClose = () => {
-    resetForm();
+    setInviteSentTo(null);
+    setInviteUrl(null);
+    setInviteEmailSent(false);
+    setSubmitError(null);
     onClose();
-  };
-
-  const resolveLookup = useCallback(
-    async (email: string): Promise<LookupState> => {
-      if (!email.trim() || !currentWorkspace) {
-        return { status: 'idle' };
-      }
-      setLookup({ status: 'checking' });
-      try {
-        const result = await usersApi.lookupInWorkspace(currentWorkspace.id, email.trim());
-        if (!result.exists) {
-          return { status: 'new' };
-        }
-        if (result.alreadyMember) {
-          return { status: 'member', name: result.name ?? email };
-        }
-        if (result.name) {
-          setFormData((prev) => ({ ...prev, name: result.name! }));
-        }
-        return {
-          status: 'existing',
-          name: result.name ?? email,
-          pendingInviteId: result.pendingInviteId ?? null,
-        };
-      } catch (e: unknown) {
-        return {
-          status: 'error',
-          message: e instanceof Error ? e.message : 'Не удалось проверить email',
-        };
-      }
-    },
-    [currentWorkspace],
-  );
-
-  const checkEmail = useCallback(
-    async (email: string) => {
-      const next = await resolveLookup(email);
-      setLookup(next);
-    },
-    [resolveLookup],
-  );
-
-  const submitInvite = async () => {
-    if (!currentWorkspace) return;
-    const res = await inviteExistingUser({
-      email: formData.email.trim(),
-      role: formData.role,
-      workspaceId: currentWorkspace.id,
-      departmentId: formData.departmentId || undefined,
-      groupIds: formData.groupIds,
-    });
-    const emailPart = res.emailSent ? ' Письмо также отправлено на почту.' : '';
-    setSuccessMessage(
-      `Приглашение создано.${emailPart} Пользователь увидит его в уведомлениях приложения.`,
-    );
-    onSuccess?.();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.email.trim()) {
-      alert('Укажите email');
+    if (!formData.name.trim() || !formData.email.trim()) {
+      alert('Заполните обязательные поля');
       return;
     }
 
@@ -129,69 +52,27 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
     setSubmitError(null);
     setSubmitting(true);
     try {
-      let effectiveLookup = lookup;
-      if (
-        lookup.status === 'idle' ||
-        lookup.status === 'checking' ||
-        lookup.status === 'error'
-      ) {
-        effectiveLookup = await resolveLookup(formData.email);
-        setLookup(effectiveLookup);
-      }
+      const res = await createUser({
+        name: formData.name,
+        email: formData.email,
+        role: formData.role,
+        workspaceId: currentWorkspace.id,
+        departmentId: formData.departmentId || undefined,
+        groupIds: formData.groupIds,
+      });
 
-      if (effectiveLookup.status === 'member') {
-        setSubmitError('Пользователь уже состоит в этом пространстве');
-        return;
-      }
-      if (effectiveLookup.status === 'error') {
-        setSubmitError(effectiveLookup.message);
-        return;
-      }
-
-      const isInvite = effectiveLookup.status === 'existing';
-      if (!isInvite && !formData.name.trim()) {
-        alert('Заполните обязательные поля');
-        return;
-      }
-
-      if (isInvite) {
-        await submitInvite();
-      } else {
-        try {
-          const res = await createUser({
-            name: formData.name,
-            email: formData.email,
-            role: formData.role,
-            workspaceId: currentWorkspace.id,
-            departmentId: formData.departmentId || undefined,
-            groupIds: formData.groupIds,
-          });
-          if (res?.initialPassword) {
-            setInitialPassword(res.initialPassword);
-            setSuccessMessage(`Сотрудник ${formData.email} добавлен.`);
-          } else if (res?.inviteSent) {
-            setInitialPassword(null);
-            setSuccessMessage(`Приглашение отправлено на ${res.email ?? formData.email}.`);
-          } else {
-            setInitialPassword(null);
-            setSuccessMessage(`Сотрудник ${formData.email} добавлен.`);
-          }
-          onSuccess?.();
-        } catch (e: unknown) {
-          if (e instanceof ApiError && e.code === 'USER_EXISTS') {
-            await submitInvite();
-            return;
-          }
-          if (e instanceof ApiError && e.code === 'ALREADY_MEMBER') {
-            setSubmitError('Пользователь уже состоит в этом пространстве');
-            setLookup({ status: 'member', name: formData.name || formData.email });
-            return;
-          }
-          throw e;
-        }
-      }
-    } catch (e: unknown) {
-      setSubmitError(e instanceof Error ? e.message : 'Не удалось выполнить операцию');
+      setInviteSentTo(res?.email ?? formData.email);
+      setInviteEmailSent(!!res?.inviteSent);
+      setInviteUrl(res?.inviteUrl ?? null);
+      setFormData({
+        name: '',
+        email: '',
+        role: 'member',
+        departmentId: '',
+        groupIds: [],
+      });
+    } catch (e: any) {
+      setSubmitError(e?.message || 'Не удалось добавить сотрудника');
     } finally {
       setSubmitting(false);
     }
@@ -208,35 +89,40 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
 
   if (!isOpen) return null;
 
-  const isInviteFlow = lookup.status === 'existing';
-  const showNameField = lookup.status === 'idle' || lookup.status === 'new' || lookup.status === 'checking';
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-slate-900">
-            {isInviteFlow ? 'Пригласить сотрудника' : 'Добавить сотрудника'}
-          </h2>
+          <h2 className="text-xl font-semibold text-slate-900">Добавить сотрудника</h2>
           <button onClick={handleClose} className="p-1 hover:bg-slate-100 rounded transition-colors">
             <X className="w-5 h-5 text-slate-600" />
           </button>
         </div>
 
-        {successMessage ? (
+        {inviteSentTo ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-              {successMessage}
+              {inviteEmailSent ? (
+                <>
+                  Приглашение отправлено на <span className="font-medium">{inviteSentTo}</span>.
+                  <p className="text-xs text-green-700 mt-2">
+                    Сотрудник получит ссылку для активации аккаунта и создания пароля.
+                  </p>
+                </>
+              ) : (
+                <>
+                  Сотрудник <span className="font-medium">{inviteSentTo}</span> добавлен.
+                  <p className="text-xs text-green-700 mt-2">
+                    Email не отправлялся. Передайте ссылку для активации вручную:
+                  </p>
+                  {inviteUrl && (
+                    <p className="text-xs text-green-800 mt-2 break-all font-mono bg-white/60 rounded px-2 py-1">
+                      {inviteUrl}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
-            {initialPassword ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="text-sm font-medium text-amber-900">Временный пароль (показывается один раз)</p>
-                <p className="mt-2 font-mono text-lg text-amber-950 select-all break-all">{initialPassword}</p>
-                <p className="mt-2 text-xs text-amber-800">
-                  Передайте пароль сотруднику. При первом входе потребуется смена пароля.
-                </p>
-              </div>
-            ) : null}
             <button
               type="button"
               onClick={handleClose}
@@ -255,51 +141,28 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
 
             <div className="space-y-4">
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Имя *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
+                  placeholder="Иван Иванов"
+                  required
+                />
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
                 <input
                   type="email"
                   value={formData.email}
-                  onChange={(e) => {
-                    setFormData({ ...formData, email: e.target.value });
-                    setLookup({ status: 'idle' });
-                  }}
-                  onBlur={() => void checkEmail(formData.email)}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
                   placeholder="ivan@example.com"
                   required
                 />
-                {lookup.status === 'checking' && (
-                  <p className="text-xs text-slate-500 mt-1">Проверяем…</p>
-                )}
-                {lookup.status === 'existing' && (
-                  <p className="text-xs text-brand mt-1">
-                    Пользователь уже зарегистрирован: {lookup.name}. Будет отправлено приглашение.
-                    {lookup.pendingInviteId ? ' (обновим ожидающее)' : ''}
-                  </p>
-                )}
-                {lookup.status === 'member' && (
-                  <p className="text-xs text-amber-700 mt-1">
-                    {lookup.name} уже состоит в этом пространстве.
-                  </p>
-                )}
-                {lookup.status === 'new' && (
-                  <p className="text-xs text-slate-500 mt-1">Новый пользователь — будет создан аккаунт.</p>
-                )}
               </div>
-
-              {showNameField && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Имя *</label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
-                    placeholder="Иван Иванов"
-                    required={!isInviteFlow}
-                  />
-                </div>
-              )}
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Роль *</label>
@@ -364,14 +227,10 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
               </button>
               <button
                 type="submit"
-                disabled={submitting || lookup.status === 'member'}
-                className="shrink-0 whitespace-nowrap px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors disabled:opacity-50"
+                disabled={submitting}
+                className="flex-1 px-4 py-2 bg-brand text-white rounded hover:bg-brand-primary-hover transition-colors disabled:opacity-50"
               >
-                {submitting
-                  ? 'Отправка…'
-                  : isInviteFlow
-                    ? 'Отправить приглашение'
-                    : 'Добавить'}
+                {submitting ? 'Отправка…' : 'Добавить'}
               </button>
             </div>
           </form>

@@ -108,6 +108,7 @@ model User {
   taskClientInteractions   TaskClientInteraction[]
   taskAttachments         TaskAttachment[]
   commentAttachments      CommentAttachment[]
+  workspaceChatMessageAttachments WorkspaceChatMessageAttachment[]
   documents                Document[]
   workspaceChatMessages    WorkspaceChatMessage[]
   notifications            Notification[]
@@ -651,6 +652,8 @@ model WorkspaceChatChannel {
   scope        String
   departmentId String?
   groupId      String?
+  /// Участники личного чата (JSON-массив userId, отсортирован)
+  directUserIds Json     @default("[]")
   title        String
   createdAt    DateTime @default(now())
 
@@ -660,6 +663,7 @@ model WorkspaceChatChannel {
   messages   WorkspaceChatMessage[]
 
   @@index([workspaceId])
+  @@index([workspaceId, scope])
   @@index([departmentId])
   @@index([groupId])
 }
@@ -671,11 +675,29 @@ model WorkspaceChatMessage {
   content   String
   createdAt DateTime @default(now())
 
-  channel WorkspaceChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel     WorkspaceChatChannel              @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user        User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attachments WorkspaceChatMessageAttachment[]
 
   @@index([channelId, createdAt])
   @@index([userId])
+}
+
+model WorkspaceChatMessageAttachment {
+  id         String   @id @default(cuid())
+  messageId  String
+  name       String
+  type       String
+  size       Int
+  path       String
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  message  WorkspaceChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  uploader User                 @relation(fields: [uploadedBy], references: [id])
+
+  @@index([messageId])
+  @@index([uploadedBy])
 }
 
 model CalendarEvent {

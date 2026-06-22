@@ -63,8 +63,6 @@ export interface Workspace {
   description?: string;
   ownerId: string;
   isOwner: boolean;
-  /** Роль текущего пользователя в этом пространстве (владелец → admin). */
-  myRole?: UserRole | null;
   createdAt: string;
 }
 
@@ -194,25 +192,12 @@ export interface Task {
   type?: TaskType;
 }
 
-export interface CommentAttachment {
-  id: string;
-  commentId: string;
-  name: string;
-  type: string;
-  size: number;
-  path: string;
-  uploadedBy: string;
-  createdAt: string;
-}
-
 export interface Comment {
   id: string;
   taskId: string;
   userId: string;
   content: string;
   createdAt: string;
-  user?: { id: string; name: string; avatar?: string | null };
-  attachments?: CommentAttachment[];
 }
 
 export interface ChatMessage {
@@ -275,10 +260,6 @@ export interface Notification {
     | 'document'
     | 'mention'
     | 'user_added'
-    | 'workspace_invite'
-    | 'workspace_invite_accepted'
-    | 'workspace_invite_declined'
-    | 'workspace_member_removed'
     | 'conference_invite'
     | 'conference_updated'
     | 'conference_cancelled';

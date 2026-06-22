@@ -66,6 +66,13 @@ export const NOTIFICATION_SETTINGS_CATALOG: NotificationSettingDefinition[] = [
     defaultEnabled: true,
   },
   {
+    key: 'workspace_chat',
+    label: 'Чаты пространства',
+    description: 'Сообщения в каналах и личных чатах',
+    group: 'workspace',
+    defaultEnabled: true,
+  },
+  {
     key: 'workspace',
     label: 'Пространство',
     description: 'Приглашения, принятие и исключение из пространства',
@@ -88,6 +95,7 @@ const EVENT_TYPE_TO_SETTING_KEY: Record<string, string | null> = {
   comment: 'task_comments',
   mention: 'task_comments',
   chat_message: 'task_comments',
+  workspace_chat_message: 'workspace_chat',
   status_change: 'task_status',
   task_status_history: 'task_status',
   task_conclusion_updated: 'task_conclusion',
