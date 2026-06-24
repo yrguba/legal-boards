@@ -1,9 +1,14 @@
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
+import multer from 'multer';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, authorize, requireStaffUser } from '../middleware/auth';
 import { createAndBroadcastNotification } from '../utils/notifications';
 import { isLexClientsTabEnabled } from '../utils/lexClients';
 import { isEmailConfigured } from '../utils/email';
+import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
+import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
 import {
   generateTempPassword,
   hashPassword,
@@ -37,9 +42,80 @@ import {
   type CatalogFilters,
 } from '../utils/employeeProfile';
 import { handleWorkspaceMemberLookup } from '../utils/workspaceInviteAdmin';
+import {
+  assertWorkspaceMemberUser,
+  getEffectivePresenceForUser,
+  listUserAbsences,
+  loadEffectivePresencesForUsers,
+  PRESENCE_STATUS,
+  SETTABLE_PRESENCE_STATUSES,
+  validateAbsenceInput,
+} from '../utils/userPresence';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      const dir = getUploadsPath();
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch (e) {
+        return cb(e as Error, dir);
+      }
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => {
+      const ext = path.extname(decodeMultipartFilename(file.originalname)).toLowerCase() || '.jpg';
+      const safeExt = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext) ? ext : '.jpg';
+      cb(null, `avatar-${Date.now()}-${Math.round(Math.random() * 1e9)}${safeExt}`);
+    },
+  }),
+  limits: { fileSize: AVATAR_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (AVATAR_MIME.has(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Допустимы только изображения JPEG, PNG, WebP или GIF'));
+    }
+  },
+});
+
+function mapMeUser(user: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  avatar: string | null;
+  departmentId?: string | null;
+  mustChangePassword?: boolean;
+}) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    avatar: user.avatar ?? undefined,
+    departmentId: user.departmentId ?? undefined,
+    mustChangePassword: user.mustChangePassword ?? false,
+  };
+}
+
+function deleteStoredAvatarFile(avatarPath: string | null | undefined) {
+  if (!avatarPath) return;
+  const normalized = avatarPath.replace(/\\/g, '/');
+  if (!normalized.includes('uploads/')) return;
+  const fp = path.join(getUploadsPath(), path.basename(normalized));
+  try {
+    fs.unlinkSync(fp);
+  } catch {
+    /* ignore missing file */
+  }
+}
 
 router.get('/lex-clients/config', (_req, res) => {
   res.json({ enabled: isLexClientsTabEnabled() });
@@ -47,6 +123,279 @@ router.get('/lex-clients/config', (_req, res) => {
 
 router.use(authenticate);
 router.use(requireStaffUser);
+
+router.patch('/me', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    const rawName = req.body?.name;
+    if (typeof rawName !== 'string') {
+      return res.status(400).json({ error: 'name обязателен' });
+    }
+    const name = rawName.trim();
+    if (!name) return res.status(400).json({ error: 'Имя не может быть пустым' });
+    if (name.length > 128) {
+      return res.status(400).json({ error: 'Имя не длиннее 128 символов' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: { name },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        avatar: true,
+        departmentId: true,
+        mustChangePassword: true,
+      },
+    });
+
+    res.json({ user: mapMeUser(updated) });
+  } catch (error) {
+    console.error('Update me error:', error);
+    res.status(500).json({ error: 'Ошибка сохранения профиля' });
+  }
+});
+
+router.post('/me/avatar', avatarUpload.single('file'), async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не передан' });
+    }
+
+    const current = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { avatar: true },
+    });
+    if (current?.avatar) {
+      deleteStoredAvatarFile(current.avatar);
+    }
+
+    const avatarPath = toPublicUploadPath(req.file.path);
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: { avatar: avatarPath },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        avatar: true,
+        departmentId: true,
+        mustChangePassword: true,
+      },
+    });
+
+    res.json({ user: mapMeUser(updated) });
+  } catch (error) {
+    if (req.file?.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {
+        /* ignore */
+      }
+    }
+    const msg = error instanceof Error ? error.message : 'Ошибка загрузки аватара';
+    console.error('Upload avatar error:', error);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.delete('/me/avatar', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    const current = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { avatar: true },
+    });
+    if (current?.avatar) {
+      deleteStoredAvatarFile(current.avatar);
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: { avatar: null },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        avatar: true,
+        departmentId: true,
+        mustChangePassword: true,
+      },
+    });
+
+    res.json({ user: mapMeUser(updated) });
+  } catch (error) {
+    console.error('Delete avatar error:', error);
+    res.status(500).json({ error: 'Ошибка удаления аватара' });
+  }
+});
+
+function parseWorkspaceIdQuery(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+router.get('/me/presence', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const workspaceId = parseWorkspaceIdQuery(req.query.workspaceId);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId обязателен' });
+    if (!(await assertWorkspaceMemberUser(prisma, workspaceId, req.userId))) {
+      return res.status(403).json({ error: 'Нет доступа к пространству' });
+    }
+
+    const presence = await getEffectivePresenceForUser(prisma, req.userId, workspaceId);
+    res.json({ presence });
+  } catch (error) {
+    console.error('Get my presence error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки статуса' });
+  }
+});
+
+router.patch('/me/presence', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const workspaceId =
+      typeof req.body?.workspaceId === 'string' ? req.body.workspaceId.trim() : '';
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId обязателен' });
+    if (!(await assertWorkspaceMemberUser(prisma, workspaceId, req.userId))) {
+      return res.status(403).json({ error: 'Нет доступа к пространству' });
+    }
+
+    const status = typeof req.body?.status === 'string' ? req.body.status.trim() : '';
+    if (!SETTABLE_PRESENCE_STATUSES.has(status)) {
+      return res.status(400).json({ error: 'Некорректный статус' });
+    }
+
+    let customText: string | null = null;
+    if (status === PRESENCE_STATUS.custom) {
+      const raw = typeof req.body?.customText === 'string' ? req.body.customText.trim() : '';
+      if (!raw) return res.status(400).json({ error: 'Укажите текст статуса' });
+      if (raw.length > 60) return res.status(400).json({ error: 'Текст статуса не длиннее 60 символов' });
+      customText = raw;
+    }
+
+    let expiresAt: Date | null = null;
+    if (req.body?.expiresAt === null || req.body?.expiresAt === '') {
+      expiresAt = null;
+    } else if (typeof req.body?.expiresAt === 'string' && req.body.expiresAt.trim()) {
+      const parsed = new Date(req.body.expiresAt);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: 'Некорректная дата окончания статуса' });
+      }
+      expiresAt = parsed;
+    }
+
+    await prisma.userPresence.upsert({
+      where: { userId_workspaceId: { userId: req.userId, workspaceId } },
+      create: {
+        userId: req.userId,
+        workspaceId,
+        status,
+        customText,
+        expiresAt,
+      },
+      update: { status, customText, expiresAt },
+    });
+
+    const presence = await getEffectivePresenceForUser(prisma, req.userId, workspaceId);
+    res.json({ presence });
+  } catch (error) {
+    console.error('Update my presence error:', error);
+    res.status(500).json({ error: 'Ошибка сохранения статуса' });
+  }
+});
+
+router.get('/me/absences', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const workspaceId = parseWorkspaceIdQuery(req.query.workspaceId);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId обязателен' });
+    if (!(await assertWorkspaceMemberUser(prisma, workspaceId, req.userId))) {
+      return res.status(403).json({ error: 'Нет доступа к пространству' });
+    }
+
+    const absences = await listUserAbsences(prisma, req.userId, workspaceId);
+    res.json({ absences });
+  } catch (error) {
+    console.error('Get my absences error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки отсутствий' });
+  }
+});
+
+router.post('/me/absences', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const workspaceId =
+      typeof req.body?.workspaceId === 'string' ? req.body.workspaceId.trim() : '';
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId обязателен' });
+    if (!(await assertWorkspaceMemberUser(prisma, workspaceId, req.userId))) {
+      return res.status(403).json({ error: 'Нет доступа к пространству' });
+    }
+
+    const validated = validateAbsenceInput(req.body);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
+
+    const { kind, startDate, endDate, note, substituteUserId } = validated.data;
+    if (substituteUserId) {
+      if (substituteUserId === req.userId) {
+        return res.status(400).json({ error: 'Нельзя указать себя замещающим' });
+      }
+      if (!(await assertWorkspaceMemberUser(prisma, workspaceId, substituteUserId))) {
+        return res.status(400).json({ error: 'Замещающий не состоит в пространстве' });
+      }
+    }
+
+    await prisma.userAbsence.create({
+      data: {
+        userId: req.userId,
+        workspaceId,
+        kind,
+        startDate,
+        endDate,
+        note,
+        substituteUserId,
+      },
+    });
+
+    const absences = await listUserAbsences(prisma, req.userId, workspaceId);
+    const presence = await getEffectivePresenceForUser(prisma, req.userId, workspaceId);
+    res.status(201).json({ absences, presence });
+  } catch (error) {
+    console.error('Create absence error:', error);
+    res.status(500).json({ error: 'Ошибка создания отсутствия' });
+  }
+});
+
+router.delete('/me/absences/:absenceId', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const workspaceId = parseWorkspaceIdQuery(req.query.workspaceId);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId обязателен' });
+
+    const row = await prisma.userAbsence.findUnique({
+      where: { id: req.params.absenceId },
+    });
+    if (!row || row.userId !== req.userId || row.workspaceId !== workspaceId) {
+      return res.status(404).json({ error: 'Запись не найдена' });
+    }
+
+    await prisma.userAbsence.delete({ where: { id: row.id } });
+
+    const absences = await listUserAbsences(prisma, req.userId, workspaceId);
+    const presence = await getEffectivePresenceForUser(prisma, req.userId, workspaceId);
+    res.json({ absences, presence });
+  } catch (error) {
+    console.error('Delete absence error:', error);
+    res.status(500).json({ error: 'Ошибка удаления отсутствия' });
+  }
+});
 
 async function workspaceAccess(req: AuthRequest, workspaceId: string) {
   const workspace = await prisma.workspace.findUnique({
@@ -592,7 +941,18 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
       )
     ).filter((row): row is NonNullable<typeof row> => row !== null);
 
-    res.json(usersWithGroups);
+    const presenceMap = await loadEffectivePresencesForUsers(
+      prisma,
+      workspaceId,
+      usersWithGroups.map((u) => u.id),
+    );
+
+    res.json(
+      usersWithGroups.map((u) => ({
+        ...u,
+        presence: presenceMap.get(u.id) ?? null,
+      })),
+    );
   } catch (error) {
     console.error('Get workspace users error:', error);
     res.status(500).json({ error: 'Ошибка получения пользователей' });

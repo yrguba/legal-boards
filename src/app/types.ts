@@ -12,6 +12,36 @@ export interface User {
   groupIds?: string[];
   profileFields?: Record<string, string | null | undefined>;
   mustChangePassword?: boolean;
+  presence?: UserPresenceInfo | null;
+}
+
+export type UserPresenceStatus =
+  | 'available'
+  | 'busy'
+  | 'dnd'
+  | 'meeting'
+  | 'vacation'
+  | 'custom';
+
+export interface UserPresenceInfo {
+  status: UserPresenceStatus;
+  customText: string | null;
+  onAbsence: boolean;
+  absenceKind: string | null;
+  absenceId: string | null;
+  expiresAt: string | null;
+}
+
+export interface UserAbsence {
+  id: string;
+  kind: string;
+  startDate: string;
+  endDate: string;
+  note: string | null;
+  substituteUserId: string | null;
+  substitute: { id: string; name: string } | null;
+  isActive: boolean;
+  isUpcoming: boolean;
 }
 
 export type ProfileFieldMask = 'passport' | 'departmentCode' | 'snils' | 'phone' | 'digits';

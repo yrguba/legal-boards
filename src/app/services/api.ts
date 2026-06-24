@@ -122,6 +122,91 @@ export const authApi = {
 
 // Users API
 export const usersApi = {
+  async updateMe(data: { name: string }) {
+    return fetchApi<{ user: import('../types').User }>('/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async uploadAvatar(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/users/me/avatar`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(response.status, error.error || 'Ошибка загрузки аватара');
+    }
+
+    return response.json() as Promise<{ user: import('../types').User }>;
+  },
+
+  async deleteAvatar() {
+    return fetchApi<{ user: import('../types').User }>('/users/me/avatar', {
+      method: 'DELETE',
+    });
+  },
+
+  async getMyPresence(workspaceId: string) {
+    const q = new URLSearchParams({ workspaceId });
+    return fetchApi<{ presence: import('../types').UserPresenceInfo }>(
+      `/users/me/presence?${q}`,
+    );
+  },
+
+  async updateMyPresence(data: {
+    workspaceId: string;
+    status: string;
+    customText?: string;
+    expiresAt?: string | null;
+  }) {
+    return fetchApi<{ presence: import('../types').UserPresenceInfo }>('/users/me/presence', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async getMyAbsences(workspaceId: string) {
+    const q = new URLSearchParams({ workspaceId });
+    return fetchApi<{ absences: import('../types').UserAbsence[] }>(
+      `/users/me/absences?${q}`,
+    );
+  },
+
+  async createAbsence(data: {
+    workspaceId: string;
+    kind: string;
+    startDate: string;
+    endDate: string;
+    note?: string;
+    substituteUserId?: string;
+  }) {
+    return fetchApi<{
+      absences: import('../types').UserAbsence[];
+      presence: import('../types').UserPresenceInfo;
+    }>('/users/me/absences', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deleteAbsence(absenceId: string, workspaceId: string) {
+    const q = new URLSearchParams({ workspaceId });
+    return fetchApi<{
+      absences: import('../types').UserAbsence[];
+      presence: import('../types').UserPresenceInfo;
+    }>(`/users/me/absences/${absenceId}?${q}`, {
+      method: 'DELETE',
+    });
+  },
+
   async getLexClientsConfig() {
     return fetchApi<{ enabled: boolean }>('/users/lex-clients/config');
   },
@@ -866,9 +951,10 @@ export const conferencesApi = {
     return fetchApi<{ message: string }>(`/conferences/${id}`, { method: 'DELETE' });
   },
 
-  async shareToChat(id: string) {
-    return fetchApi<{ message: string; channelsCount: number }>(`/conferences/${id}/share-chat`, {
+  async shareToChat(id: string, channelId: string) {
+    return fetchApi<{ message: string; channelTitle?: string }>(`/conferences/${id}/share-chat`, {
       method: 'POST',
+      body: JSON.stringify({ channelId }),
     });
   },
 };
@@ -982,6 +1068,7 @@ export type AppPublicConfig = {
   chat: boolean;
   calendar: boolean;
   workspaceInviteEmail: boolean;
+  feedbackEnabled: boolean;
 };
 
 export const configApi = {
@@ -1096,5 +1183,78 @@ export const reportsApi = {
     return fetchApi<import('../utils/boardReports').BoardDashboardReport>(
       `/reports/boards/${encodeURIComponent(boardId)}/dashboard${q ? `?${q}` : ''}`,
     );
+  },
+};
+
+export type FeedbackCategory = 'bug' | 'improvement' | 'question' | 'other';
+
+export type FeedbackTicket = {
+  id: string;
+  shortId: string;
+  category: FeedbackCategory;
+  categoryLabel: string;
+  subject: string;
+  description: string;
+  status: string;
+  statusLabel: string;
+  userId: string;
+  workspaceId: string | null;
+  pageUrl: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
+  workspace?: { id: string; name: string } | null;
+  attachments: {
+    id: string;
+    name: string;
+    type: string;
+    size: number;
+    path: string;
+    createdAt: string;
+  }[];
+};
+
+export const feedbackApi = {
+  async listMine() {
+    return fetchApi<{ tickets: FeedbackTicket[] }>('/feedback/mine');
+  },
+
+  async get(id: string) {
+    return fetchApi<FeedbackTicket>(`/feedback/${encodeURIComponent(id)}`);
+  },
+
+  async submit(data: {
+    category: FeedbackCategory;
+    subject: string;
+    description: string;
+    workspaceId?: string | null;
+    pageUrl?: string | null;
+    includeContext?: boolean;
+    files?: File[];
+  }) {
+    const formData = new FormData();
+    formData.append('category', data.category);
+    formData.append('subject', data.subject);
+    formData.append('description', data.description);
+    if (data.workspaceId) formData.append('workspaceId', data.workspaceId);
+    if (data.pageUrl) formData.append('pageUrl', data.pageUrl);
+    if (data.includeContext === false) formData.append('includeContext', 'false');
+    for (const file of data.files ?? []) {
+      formData.append('files', file);
+    }
+
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/feedback`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(response.status, error.error || 'Не удалось отправить обращение');
+    }
+
+    return response.json() as Promise<{ message: string; ticket: FeedbackTicket }>;
   },
 };

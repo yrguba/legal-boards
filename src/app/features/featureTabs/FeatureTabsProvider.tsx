@@ -7,6 +7,7 @@ const DEFAULT_CONFIG: AppPublicConfig = {
   chat: true,
   calendar: true,
   workspaceInviteEmail: false,
+  feedbackEnabled: true,
 };
 
 type FeatureTabsContextValue = AppPublicConfig & { loading: boolean };

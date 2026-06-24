@@ -2,10 +2,17 @@ import https from 'https';
 import dns from 'dns';
 import { getResendConfig } from './registration';
 
+export type EmailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+};
+
 type SendEmailParams = {
   to: string;
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
 };
 
 export function isConsoleEmailMode(): boolean {
@@ -18,10 +25,15 @@ export function isEmailConfigured(): boolean {
 }
 
 /** Отправка через HTTPS (обход проблем Node fetch / DNS на части окружений). */
-function sendViaHttps(
-  apiKey: string,
-  payload: { from: string; to: string; subject: string; html: string },
-): Promise<void> {
+type ResendEmailPayload = {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  attachments?: { filename: string; content: string; content_type?: string }[];
+};
+
+function sendViaHttps(apiKey: string, payload: ResendEmailPayload): Promise<void> {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
     const req = https.request(
@@ -95,6 +107,11 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     console.log(`  to: ${params.to}`);
     console.log(`  subject: ${params.subject}`);
     console.log(`  html preview: ${params.html.slice(0, 120)}…`);
+    if (params.attachments?.length) {
+      console.log(
+        `  attachments: ${params.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`).join(', ')}`,
+      );
+    }
     return;
   }
 
@@ -103,6 +120,15 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     to: params.to,
     subject: params.subject,
     html: params.html,
+    ...(params.attachments?.length
+      ? {
+          attachments: params.attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content.toString('base64'),
+            ...(a.contentType ? { content_type: a.contentType } : {}),
+          })),
+        }
+      : {}),
   });
 }
 

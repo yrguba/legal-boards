@@ -23,6 +23,7 @@ import conferenceRoutes from './routes/conferences';
 import inviteRoutes from './routes/invites';
 import configRoutes from './routes/config';
 import pushRoutes from './routes/push';
+import feedbackRoutes from './routes/feedback';
 import { initRealtime } from './realtime';
 import { setupSwagger } from './swagger/setup';
 
@@ -62,6 +63,7 @@ app.use('/api/conferences', conferenceRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 setupSwagger(app);
 

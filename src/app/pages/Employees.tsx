@@ -14,6 +14,8 @@ import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMemb
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
 import type { User, UserRole, Department, Group } from '../types';
 import { useWorkspacePermissions } from '../utils/workspacePermissions';
+import { resolveUserAvatarUrl } from '../utils/userAvatar';
+import { UserPresenceBadge } from '../components/UserPresenceBadge';
 
 type ViewMode = 'all' | 'catalog' | 'departments' | 'groups';
 
@@ -348,6 +350,9 @@ export function Employees() {
                   Сотрудник
                 </th>
                 <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">
+                  Статус
+                </th>
+                <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">
                   Email
                 </th>
                 <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">
@@ -367,20 +372,29 @@ export function Employees() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {users.map((user) => {
+                const avatarUrl = resolveUserAvatarUrl(user.avatar);
+                return (
                 <tr
                   key={user.id}
                   className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
-                        <span className="text-sm font-medium text-brand">
-                          {user.name.charAt(0)}
-                        </span>
+                      <div className="w-10 h-10 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        {avatarUrl ? (
+                          <img src={avatarUrl} alt="" className="size-full object-cover" />
+                        ) : (
+                          <span className="text-sm font-medium text-brand">
+                            {user.name.charAt(0)}
+                          </span>
+                        )}
                       </div>
                       <span className="text-sm font-medium text-slate-900">{user.name}</span>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <UserPresenceBadge presence={user.presence} />
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-slate-600">{user.email}</span>
@@ -427,7 +441,8 @@ export function Employees() {
                     </td>
                   ) : null}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

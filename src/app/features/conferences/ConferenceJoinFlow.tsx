@@ -14,7 +14,9 @@ type Props = {
   requireName: boolean;
   conferenceId?: string;
   joinUrl?: string;
-  onShareChat?: () => Promise<void>;
+  /** Полноэкранный режим (гостевая страница без Layout). */
+  standalone?: boolean;
+  onShareChat?: () => void;
   onEnd?: () => Promise<void>;
   /** Выход из Jitsi (hangup). Организатор завершает конференцию на сервере. */
   onMeetingLeft?: () => void | Promise<void>;
@@ -26,6 +28,7 @@ export function ConferenceJoinFlow({
   defaultDisplayName,
   requireName,
   joinUrl,
+  standalone = false,
   onShareChat,
   onEnd,
   onMeetingLeft,
@@ -36,7 +39,6 @@ export function ConferenceJoinFlow({
   const [micOn, setMicOn] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [sharing, setSharing] = useState(false);
   const [ending, setEnding] = useState(false);
   const [jitsiError, setJitsiError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -117,19 +119,14 @@ export function ConferenceJoinFlow({
     }
   };
 
-  const handleShareChat = async () => {
-    if (!onShareChat) return;
-    setSharing(true);
-    try {
-      await onShareChat();
-    } finally {
-      setSharing(false);
-    }
-  };
 
   if (step === 'intro') {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center bg-slate-900 p-6">
+      <div
+        className={`flex flex-col items-center justify-center bg-slate-900 p-6 ${
+          standalone ? 'min-h-0 flex-1' : 'min-h-[calc(100vh-4rem)]'
+        }`}
+      >
         <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-xl">
           <h1 className="text-xl font-semibold text-white mb-1">{info.title}</h1>
           <p className="text-sm text-slate-400 mb-6">Подготовка к входу в конференцию</p>
@@ -193,7 +190,11 @@ export function ConferenceJoinFlow({
   }
 
   return (
-    <div className="flex h-full min-h-[24rem] flex-1 flex-col bg-slate-900">
+    <div
+      className={`flex min-h-0 flex-col bg-slate-900 ${
+        standalone ? 'h-full flex-1' : 'h-full min-h-[24rem] flex-1'
+      }`}
+    >
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-800 px-4 py-2">
         <span className="text-sm font-medium text-white truncate flex-1">{info.title}</span>
         {joinUrl ? (
@@ -209,11 +210,10 @@ export function ConferenceJoinFlow({
         {onShareChat ? (
           <button
             type="button"
-            disabled={sharing}
-            onClick={() => void handleShareChat()}
-            className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+            onClick={onShareChat}
+            className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
           >
-            {sharing ? 'Отправка…' : 'Поделиться в чат'}
+            Поделиться в чат
           </button>
         ) : null}
         {canEnd && onEnd ? (
@@ -237,7 +237,7 @@ export function ConferenceJoinFlow({
           </button>
         ) : null}
       </div>
-      <div ref={containerRef} className="flex-1 min-h-0">
+      <div ref={containerRef} className="relative min-h-0 w-full flex-1">
         {jitsiError ? (
           <p className="p-4 text-sm text-red-300">{jitsiError}</p>
         ) : null}

@@ -1,14 +1,18 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useApp } from '../store/AppContext';
+import { useFeatureTabsConfig } from '../features/featureTabs/useFeatureTabsConfig';
 import { NotificationSettingsPanel } from '../components/NotificationSettingsPanel';
-import { Building2, Users, Shield, Bell } from 'lucide-react';
+import { MyProfileSettingsPanel } from '../components/MyProfileSettingsPanel';
+import { MyFeedbackPanel } from '../components/MyFeedbackPanel';
+import { Building2, Users, Shield, Bell, UserCircle, MessageSquarePlus } from 'lucide-react';
 
-type SettingsTab = 'workspace' | 'users' | 'permissions' | 'notifications';
+type SettingsTab = 'profile' | 'feedback' | 'workspace' | 'users' | 'permissions' | 'notifications';
 
 export function Settings() {
   const { currentWorkspace } = useApp();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('workspace');
+  const { feedbackEnabled } = useFeatureTabsConfig();
+  const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
 
   return (
     <div className="p-6">
@@ -22,6 +26,30 @@ export function Settings() {
       <div className="flex gap-6">
         <div className="w-64 flex-shrink-0">
           <nav className="space-y-1">
+            <button
+              onClick={() => setActiveTab('profile')}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
+                activeTab === 'profile'
+                  ? 'bg-brand-light text-brand'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <UserCircle className="w-5 h-5" />
+              <span>Мой профиль</span>
+            </button>
+            {feedbackEnabled ? (
+              <button
+                onClick={() => setActiveTab('feedback')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
+                  activeTab === 'feedback'
+                    ? 'bg-brand-light text-brand'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <MessageSquarePlus className="w-5 h-5" />
+                <span>Обратная связь</span>
+              </button>
+            ) : null}
             <button
               onClick={() => setActiveTab('workspace')}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
@@ -70,6 +98,10 @@ export function Settings() {
         </div>
 
         <div className="flex-1">
+          {activeTab === 'profile' && <MyProfileSettingsPanel />}
+
+          {activeTab === 'feedback' && feedbackEnabled ? <MyFeedbackPanel /> : null}
+
           {activeTab === 'workspace' && (
             <div className="bg-white rounded-lg border border-slate-200 p-6">
               <h2 className="text-lg font-semibold text-slate-900 mb-2">Рабочее пространство</h2>

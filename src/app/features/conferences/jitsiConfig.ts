@@ -7,7 +7,7 @@ export const CONFERENCE_CONFIG_OVERWRITE = {
   disableModeratorIndicator: true,
   startScreenSharing: false,
   enableEmailInStats: false,
-  toolbarButtons: ['camera', 'microphone', 'hangup', 'tileview'],
+  toolbarButtons: ['camera', 'microphone', 'desktop', 'hangup', 'tileview'],
 };
 
 export const INTERFACE_CONFIG_OVERWRITE = {
@@ -138,4 +138,7 @@ export function buildJitsiEmbedUrl(
 export function applyIframeContainerStyles(parentNode: HTMLDivElement) {
   parentNode.style.width = '100%';
   parentNode.style.height = '100%';
+  parentNode.style.minHeight = '0';
+  parentNode.style.position = 'relative';
+  parentNode.style.overflow = 'hidden';
 }

@@ -6,6 +6,7 @@ import { useApp } from '../store/AppContext';
 import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import { conferencesApi } from '../services/api';
 import { ConferenceJoinFlow } from '../features/conferences/ConferenceJoinFlow';
+import { ShareConferenceToChatModal } from '../components/ShareConferenceToChatModal';
 import type { Conference, ConferencePublicInfo } from '../types';
 
 export function ConferenceRoom() {
@@ -16,6 +17,7 @@ export function ConferenceRoom() {
   const [conference, setConference] = useState<Conference | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -89,33 +91,39 @@ export function ConferenceRoom() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-8rem)] flex-col">
-    <ConferenceJoinFlow
-      info={info}
-      defaultDisplayName={currentUser?.name ?? ''}
-      requireName={false}
-      conferenceId={conference.id}
-      joinUrl={conference.joinUrl}
-      onShareChat={async () => {
-        const r = await conferencesApi.shareToChat(conference.id);
-        window.alert(r.message);
-      }}
-      canEnd={canEnd}
-      onEnd={async () => {
-        await conferencesApi.end(conference.id);
-        navigate('/conferences');
-      }}
-      onMeetingLeft={async () => {
-        if (canEnd && conference.status !== 'ended') {
-          try {
+    <>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ConferenceJoinFlow
+          info={info}
+          defaultDisplayName={currentUser?.name ?? ''}
+          requireName={false}
+          conferenceId={conference.id}
+          joinUrl={conference.joinUrl}
+          onShareChat={() => setShareOpen(true)}
+          canEnd={canEnd}
+          onEnd={async () => {
             await conferencesApi.end(conference.id);
-          } catch {
-            /* уже завершена */
-          }
-        }
-        navigate('/conferences');
-      }}
-    />
-    </div>
+            navigate('/conferences');
+          }}
+          onMeetingLeft={async () => {
+            if (canEnd && conference.status !== 'ended') {
+              try {
+                await conferencesApi.end(conference.id);
+              } catch {
+                /* уже завершена */
+              }
+            }
+            navigate('/conferences');
+          }}
+        />
+      </div>
+      <ShareConferenceToChatModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        conferenceId={conference.id}
+        workspaceId={conference.workspaceId}
+        onShared={(message) => window.alert(message)}
+      />
+    </>
   );
 }

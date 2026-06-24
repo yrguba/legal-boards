@@ -124,9 +124,89 @@ model User {
   workspaceInvitesSent     WorkspaceInvite[] @relation("WorkspaceInviter")
   pushDevices              PushDevice[]
   notificationPreferences  NotificationPreference[]
+  presences                UserPresence[]
+  absences                 UserAbsence[] @relation("UserAbsences")
+  absencesSubstituting     UserAbsence[] @relation("UserAbsenceSubstitute")
+  feedbackTickets          FeedbackTicket[]
 
   @@index([email])
   @@index([departmentId])
+}
+
+/// Статус присутствия сотрудника в рамках пространства
+model UserPresence {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  status      String    @default("available")
+  customText  String?
+  expiresAt   DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+/// Период отсутствия (отпуск, больничный и т.д.)
+model UserAbsence {
+  id               String   @id @default(cuid())
+  userId           String
+  workspaceId      String
+  kind             String   @default("vacation")
+  startDate        DateTime @db.Date
+  endDate          DateTime @db.Date
+  note             String?
+  substituteUserId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user       User       @relation("UserAbsences", fields: [userId], references: [id], onDelete: Cascade)
+  substitute User?      @relation("UserAbsenceSubstitute", fields: [substituteUserId], references: [id], onDelete: SetNull)
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, workspaceId])
+  @@index([workspaceId, startDate, endDate])
+}
+
+/// Обратная связь: ошибки, предложения, вопросы
+model FeedbackTicket {
+  id          String   @id @default(cuid())
+  category    String
+  subject     String
+  description String   @db.Text
+  status      String   @default("new")
+  userId      String
+  workspaceId String?
+  pageUrl     String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  attachments FeedbackAttachment[]
+
+  @@index([userId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([status, createdAt])
+}
+
+model FeedbackAttachment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  name      String
+  type      String
+  size      Int
+  path      String
+  createdAt DateTime @default(now())
+
+  ticket FeedbackTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
 }
 
 /// Пользователи приложения LEXPRO (отдельно от User / Legal Boards)
@@ -185,6 +265,9 @@ model Workspace {
   knowledgeArticles KnowledgeArticle[]
   lexClients LexClientWorkspace[]
   invites           WorkspaceInvite[]
+  userPresences     UserPresence[]
+  userAbsences      UserAbsence[]
+  feedbackTickets   FeedbackTicket[]
 
   @@index([ownerId])
 }

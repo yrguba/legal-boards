@@ -20,15 +20,21 @@ import {
   BarChart3,
   Video,
   Plus,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
 import { BrowserNotificationPermissionBanner } from './BrowserNotificationPermissionBanner';
 import { QuickCreateTaskModal, type QuickCreateSuccess } from './QuickCreateTaskModal';
+import { FeedbackModal } from './FeedbackModal';
 import { useNotifications } from '../store/NotificationsContext';
 import { useConferencesConfig } from '../features/conferences/useConferencesConfig';
 import { useLexClientsConfig } from '../features/lexClients/useLexClientsConfig';
 import { useFeatureTabsConfig } from '../features/featureTabs/useFeatureTabsConfig';
+import { resolveUserAvatarUrl } from '../utils/userAvatar';
+import { UserPresenceBadge } from './UserPresenceBadge';
+import { usersApi } from '../services/api';
+import type { UserPresenceInfo } from '../types';
 
 export function Layout() {
   const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace } = useApp();
@@ -38,8 +44,11 @@ export function Layout() {
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
   const [quickCreateToast, setQuickCreateToast] = useState<QuickCreateSuccess | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [myPresence, setMyPresence] = useState<UserPresenceInfo | null>(null);
   const { unreadCount, toast } = useNotifications();
 
   useEffect(() => {
@@ -49,9 +58,33 @@ export function Layout() {
   }, [quickCreateToast]);
 
   useEffect(() => {
+    if (!feedbackToast) return;
+    const timer = window.setTimeout(() => setFeedbackToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [feedbackToast]);
+
+  useEffect(() => {
     const saved = localStorage.getItem('sidebar_collapsed');
     if (saved === '1') setIsSidebarCollapsed(true);
   }, []);
+
+  useEffect(() => {
+    if (!currentWorkspace?.id) {
+      setMyPresence(null);
+      return;
+    }
+
+    const load = () => {
+      void usersApi
+        .getMyPresence(currentWorkspace.id)
+        .then((r) => setMyPresence(r.presence))
+        .catch(() => setMyPresence(null));
+    };
+
+    load();
+    window.addEventListener('lb-presence-updated', load);
+    return () => window.removeEventListener('lb-presence-updated', load);
+  }, [currentWorkspace?.id]);
 
   // notifications handled globally
 
@@ -81,7 +114,7 @@ export function Layout() {
   const canViewAnalytics = canManageLexClients;
   const { enabled: conferencesEnabled } = useConferencesConfig();
   const { enabled: lexClientsEnabled } = useLexClientsConfig();
-  const { documents, knowledge, chat, calendar } = useFeatureTabsConfig();
+  const { documents, knowledge, chat, calendar, feedbackEnabled } = useFeatureTabsConfig();
 
   const navItems = useMemo(() => {
     const items: { to: string; end?: boolean; label: string; icon: typeof LayoutDashboard }[] = [
@@ -110,6 +143,8 @@ export function Layout() {
     }
     return items;
   }, [canManageLexClients, canViewAnalytics, conferencesEnabled, lexClientsEnabled, documents, knowledge, chat, calendar]);
+
+  const sidebarAvatarUrl = resolveUserAvatarUrl(currentUser?.avatar);
 
   return (
     <div className="flex h-screen bg-slate-50">
@@ -151,26 +186,45 @@ export function Layout() {
           })}
         </nav>
 
-        <div className={`${isSidebarCollapsed ? 'p-2' : 'p-4'} border-t border-slate-200`}>
-          <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : ''} mb-3`}>
-            <div className="w-8 h-8 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
-              <span className="text-sm text-brand font-medium">{currentUser?.name.charAt(0)}</span>
+        <div className={`${isSidebarCollapsed ? 'p-2' : 'px-3 py-3'} border-t border-slate-200`}>
+          <div
+            className={`flex min-w-0 gap-3 ${isSidebarCollapsed ? 'justify-center mb-2' : 'items-center mb-2'}`}
+          >
+            <div className="size-9 shrink-0 rounded-full bg-brand-light flex items-center justify-center overflow-hidden ring-1 ring-slate-200/80">
+              {sidebarAvatarUrl ? (
+                <img src={sidebarAvatarUrl} alt="" className="size-full object-cover" />
+              ) : (
+                <span className="text-sm font-medium text-brand">
+                  {currentUser?.name.charAt(0)}
+                </span>
+              )}
             </div>
             {!isSidebarCollapsed && (
-              <div className="min-w-0 ml-2">
-                <div className="text-sm text-slate-900 truncate">{currentUser?.name}</div>
-                <div className="text-xs text-slate-500 truncate">{workspaceRole ?? currentUser?.role}</div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-900 truncate leading-none">
+                  {currentUser?.name}
+                </p>
+                <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <UserPresenceBadge
+                    presence={myPresence}
+                    showLabel
+                    className="text-[11px] leading-none text-slate-500"
+                  />
+                  <span className="text-[11px] leading-none text-slate-400 truncate">
+                    {workspaceRole ?? currentUser?.role}
+                  </span>
+                </div>
               </div>
             )}
           </div>
           <button
             onClick={handleLogout}
-            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded transition-colors ${
+            className={`w-full flex items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-100 transition-colors ${
               isSidebarCollapsed ? 'justify-center' : ''
             }`}
             title={isSidebarCollapsed ? 'Выйти' : undefined}
           >
-            <LogOut className="size-5" />
+            <LogOut className="size-4 shrink-0" />
             {!isSidebarCollapsed && <span>Выйти</span>}
           </button>
         </div>
@@ -239,7 +293,18 @@ export function Layout() {
             </button>
           </div>
 
-          <div className="flex items-center">
+          <div className="flex items-center gap-1">
+            {feedbackEnabled ? (
+              <button
+                type="button"
+                onClick={() => setFeedbackOpen(true)}
+                className="p-2 text-slate-600 hover:text-slate-900 rounded transition-colors"
+                aria-label="Обратная связь"
+                title="Обратная связь"
+              >
+                <MessageSquarePlus className="w-5 h-5" />
+              </button>
+            ) : null}
             <button
               onClick={() => setShowNotifications(true)}
               className="relative p-2 text-slate-600 hover:text-slate-900 rounded transition-colors"
@@ -288,11 +353,28 @@ export function Layout() {
         </div>
       ) : null}
 
+      {feedbackToast ? (
+        <div className="fixed bottom-4 right-4 z-50 w-full max-w-sm">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 shadow-lg p-4">
+            <div className="text-sm font-medium text-emerald-900">Обратная связь</div>
+            <div className="mt-1 text-sm text-emerald-800">{feedbackToast}</div>
+          </div>
+        </div>
+      ) : null}
+
       <QuickCreateTaskModal
         open={quickCreateOpen}
         onOpenChange={setQuickCreateOpen}
         onSuccess={(task) => setQuickCreateToast(task)}
       />
+
+      {feedbackEnabled ? (
+        <FeedbackModal
+          open={feedbackOpen}
+          onClose={() => setFeedbackOpen(false)}
+          onSubmitted={(message) => setFeedbackToast(message)}
+        />
+      ) : null}
     </div>
   );
 }

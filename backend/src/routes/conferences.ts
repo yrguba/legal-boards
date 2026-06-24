@@ -9,7 +9,13 @@ import {
   getJitsiDomain,
   isConferencesEnabled,
 } from '../utils/conferences';
-import { postConferenceToAllChannels } from '../utils/conferenceChat';
+import { postConferenceToChannel } from '../utils/conferenceChat';
+import { getUserDocumentAccess } from '../utils/documentAccess';
+import {
+  CHAT_SCOPE,
+  userCanSeeChannel,
+  userIsDirectParticipant,
+} from '../utils/workspaceChatChannels';
 import {
   sendScheduledConferenceInvites,
   sendConferenceCancellationNotices,
@@ -588,6 +594,12 @@ router.post('/:id/end', async (req: AuthRequest, res) => {
 
 router.post('/:id/share-chat', async (req: AuthRequest, res) => {
   try {
+    const channelId =
+      typeof req.body?.channelId === 'string' ? req.body.channelId.trim() : '';
+    if (!channelId) {
+      return res.status(400).json({ error: 'channelId обязателен' });
+    }
+
     const conference = await prisma.conference.findUnique({
       where: { id: req.params.id },
       include: { createdBy: { select: { id: true, name: true } } },
@@ -597,8 +609,33 @@ router.post('/:id/share-chat', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Нет доступа' });
     }
 
-    const count = await postConferenceToAllChannels(prisma, {
-      workspaceId: conference.workspaceId,
+    const channel = await prisma.workspaceChatChannel.findUnique({
+      where: { id: channelId },
+    });
+    if (!channel || channel.workspaceId !== conference.workspaceId) {
+      return res.status(404).json({ error: 'Канал не найден' });
+    }
+
+    if (channel.scope === CHAT_SCOPE.direct) {
+      if (!userIsDirectParticipant(req.userId!, channel.directUserIds)) {
+        return res.status(403).json({ error: 'Нет доступа к каналу' });
+      }
+    } else {
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: channel.workspaceId },
+        select: { ownerId: true },
+      });
+      const isWorkspaceOwner = workspace?.ownerId === req.userId;
+      if (req.userRole !== 'admin' && !isWorkspaceOwner) {
+        const access = await getUserDocumentAccess(prisma, req.userId!, channel.workspaceId);
+        if (!userCanSeeChannel(access, channel, req.userId!)) {
+          return res.status(403).json({ error: 'Нет доступа к каналу' });
+        }
+      }
+    }
+
+    await postConferenceToChannel(prisma, {
+      channelId: channel.id,
       userId: req.userId!,
       title: conference.title,
       shareToken: conference.shareToken,
@@ -607,7 +644,7 @@ router.post('/:id/share-chat', async (req: AuthRequest, res) => {
       endAt: conference.endAt,
     });
 
-    res.json({ message: `Ссылка отправлена в ${count} канал(ов)`, channelsCount: count });
+    res.json({ message: `Ссылка отправлена в «${channel.title}»`, channelTitle: channel.title });
   } catch (error) {
     console.error('Share conference to chat error:', error);
     res.status(500).json({ error: 'Ошибка отправки в чат' });

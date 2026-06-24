@@ -56,8 +56,8 @@ export function ConferenceJoin() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900">
-      <div className="flex items-center gap-2 border-b border-slate-700 px-4 py-2">
+    <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-900">
+      <div className="flex shrink-0 items-center gap-2 border-b border-slate-700 px-4 py-2">
         <Briefcase className="size-4 text-brand" />
         <span className="text-sm text-slate-300">Legal Boards — конференция</span>
         <Link to="/login" className="ml-auto text-xs text-slate-400 hover:text-white">
@@ -69,6 +69,7 @@ export function ConferenceJoin() {
         defaultDisplayName=""
         requireName
         joinUrl={joinUrl}
+        standalone
       />
     </div>
   );
