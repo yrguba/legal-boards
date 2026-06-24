@@ -1,4 +1,5 @@
 import { Calendar, Clock, Flag, Paperclip, Tag, User } from 'lucide-react';
+import { MarkdownBlockNote, MarkdownEditorRoot } from '../../../components/markdown';
 import { t } from '../taskPage.classes';
 import type { TaskMainColumnProps } from '../types';
 import type { TaskField } from '../../../types';
@@ -373,36 +374,36 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
           ))}
       </div>
 
-      <InlineEditField
-        fieldKey="description"
-        label={<h3 className="text-sm font-medium text-slate-900">Описание</h3>}
-        layout="full"
-        className="border-t border-slate-200 pt-4"
-        saving={savingField === 'description'}
-        locked={isFieldLocked('description')}
-        error={fieldError(fieldErrors, 'description')}
-        placeholder="Добавить описание…"
-        getValue={() => task.description || ''}
-        isEmpty={(v) => !String(v).trim()}
-        onSave={(v) => onSaveField('description', v)}
-        renderView={(v) => (
-          <p className="text-sm text-slate-700 whitespace-pre-wrap">{String(v)}</p>
-        )}
-        renderEditor={({ value, onChange, onCommit, saving, inputRef }) => (
-          <textarea
-            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-            rows={5}
-            value={String(value)}
-            disabled={saving}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.metaKey) void onCommit();
-            }}
-            placeholder="Описание задачи"
-            className={t.textarea}
-          />
-        )}
-      />
+      <MarkdownEditorRoot>
+        <InlineEditField
+          fieldKey="description"
+          label={<h3 className="text-sm font-medium text-slate-900">Описание</h3>}
+          layout="full"
+          className="border-t border-slate-200 pt-4"
+          saving={savingField === 'description'}
+          locked={isFieldLocked('description')}
+          error={fieldError(fieldErrors, 'description')}
+          placeholder="Добавить описание…"
+          getValue={() => task.description || ''}
+          isEmpty={(v) => !String(v).trim()}
+          onSave={(v) => onSaveField('description', v)}
+          renderView={(v) => (
+            <MarkdownBlockNote
+              instanceKey={`task-description-view-${task.id}`}
+              markdown={String(v)}
+            />
+          )}
+          renderEditor={({ value, onChange, saving }) => (
+            <div className={saving ? 'pointer-events-none opacity-60' : ''}>
+              <MarkdownBlockNote
+                instanceKey={`task-description-edit-${task.id}`}
+                markdown={String(value)}
+                onMarkdownChange={onChange}
+              />
+            </div>
+          )}
+        />
+      </MarkdownEditorRoot>
 
       {attachmentsEnabled && (
         <div className="border-t border-slate-200 pt-4 mt-4">

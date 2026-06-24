@@ -63,6 +63,8 @@ export interface Workspace {
   description?: string;
   ownerId: string;
   isOwner: boolean;
+  /** Роль текущего пользователя в этом пространстве */
+  myRole?: UserRole | null;
   createdAt: string;
 }
 
@@ -260,6 +262,10 @@ export interface Notification {
     | 'document'
     | 'mention'
     | 'user_added'
+    | 'workspace_invite'
+    | 'workspace_invite_accepted'
+    | 'workspace_invite_declined'
+    | 'workspace_member_removed'
     | 'conference_invite'
     | 'conference_updated'
     | 'conference_cancelled';

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { FileSearch } from 'lucide-react';
 import { useApp } from '../store/AppContext';
+import { canManageWorkspace } from '../utils/workspacePermissions';
 import { usersApi } from '../services/api';
 import { useLexClientsConfig } from '../features/lexClients/useLexClientsConfig';
 import { CLIENT_INTERACTION_KINDS } from './task/constants';
@@ -43,11 +44,9 @@ function kindLabel(kind: string) {
 }
 
 export function LexClients() {
-  const { currentWorkspace, currentUser } = useApp();
+  const { currentWorkspace } = useApp();
   const { enabled: lexClientsEnabled, loading: configLoading } = useLexClientsConfig();
-  const canManage =
-    !!currentWorkspace &&
-    (currentWorkspace.isOwner || currentUser?.role === 'admin' || currentUser?.role === 'manager');
+  const canManage = canManageWorkspace(currentWorkspace);
 
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');

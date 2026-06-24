@@ -225,7 +225,7 @@ export async function resolvePushJobs(event: Record<string, unknown>): Promise<P
         title,
         body: truncate(content),
         eventType: 'workspace_chat_message',
-        route: '/chat',
+        route: `/chat/${channelId}`,
         relatedId: channelId,
       },
       dedupKey: typeof message.id === 'string' ? `workspace_chat:${message.id}` : undefined,

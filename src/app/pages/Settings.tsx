@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useApp } from '../store/AppContext';
+import { NotificationSettingsPanel } from '../components/NotificationSettingsPanel';
 import { Building2, Users, Shield, Bell } from 'lucide-react';
 
 type SettingsTab = 'workspace' | 'users' | 'permissions' | 'notifications';
@@ -215,66 +216,7 @@ export function Settings() {
             </div>
           )}
 
-          {activeTab === 'notifications' && (
-            <div className="bg-white rounded-lg border border-slate-200 p-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Уведомления</h2>
-              <div className="space-y-4">
-                <label className="flex items-center justify-between py-3 border-b border-slate-200">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Новые задачи
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления при назначении новой задачи
-                    </div>
-                  </div>
-                  <input type="checkbox" defaultChecked className="w-4 h-4 text-brand" />
-                </label>
-
-                <label className="flex items-center justify-between py-3 border-b border-slate-200">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Комментарии
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления о новых комментариях к задачам
-                    </div>
-                  </div>
-                  <input type="checkbox" defaultChecked className="w-4 h-4 text-brand" />
-                </label>
-
-                <label className="flex items-center justify-between py-3 border-b border-slate-200">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Изменения статуса
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления об изменении статуса задачи
-                    </div>
-                  </div>
-                  <input type="checkbox" defaultChecked className="w-4 h-4 text-brand" />
-                </label>
-
-                <label className="flex items-center justify-between py-3">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      Новые документы
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      Уведомления о загрузке новых документов
-                    </div>
-                  </div>
-                  <input type="checkbox" className="w-4 h-4 text-brand" />
-                </label>
-              </div>
-
-              <div className="pt-6 mt-6 border-t border-slate-200">
-                <button className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors">
-                  Сохранить настройки
-                </button>
-              </div>
-            </div>
-          )}
+          {activeTab === 'notifications' && <NotificationSettingsPanel />}
         </div>
       </div>
     </div>

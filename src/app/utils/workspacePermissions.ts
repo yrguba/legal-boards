@@ -1,4 +1,6 @@
+import { useMemo } from 'react';
 import type { UserRole, Workspace } from '../types';
+import { useApp } from '../store/AppContext';
 
 export function getWorkspaceRole(workspace: Workspace | null | undefined): UserRole | null {
   if (!workspace) return null;
@@ -15,4 +17,17 @@ export function canManageWorkspace(workspace: Workspace | null | undefined): boo
 /** Владелец или администратор пространства (не менеджер). */
 export function isWorkspaceAdmin(workspace: Workspace | null | undefined): boolean {
   return getWorkspaceRole(workspace) === 'admin';
+}
+
+/** Права в текущем выбранном пространстве (не глобальная User.role из JWT). */
+export function useWorkspacePermissions() {
+  const { currentWorkspace } = useApp();
+  return useMemo(
+    () => ({
+      workspaceRole: getWorkspaceRole(currentWorkspace),
+      canManageWorkspace: canManageWorkspace(currentWorkspace),
+      isWorkspaceAdmin: isWorkspaceAdmin(currentWorkspace),
+    }),
+    [currentWorkspace],
+  );
 }

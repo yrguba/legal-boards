@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { Plus, LayoutGrid, List, Pencil, Trash2, Layers } from 'lucide-react';
 import { useApp } from '../store/AppContext';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import { CreateBoardModal } from '../components/CreateBoardModal';
 import { CreateAggregatedBoardModal } from '../components/CreateAggregatedBoardModal';
 import { boardsApi, tasksApi } from '../services/api';
@@ -19,7 +20,8 @@ import { buttonVariants } from '../components/ui/button';
 import { cn } from '../components/ui/utils';
 
 export function Boards() {
-  const { currentWorkspace, currentUser } = useApp();
+  const { currentWorkspace } = useApp();
+  const { canManageWorkspace } = useWorkspacePermissions();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreateAggregatedOpen, setIsCreateAggregatedOpen] = useState(false);
   const [isEditAggregatedOpen, setIsEditAggregatedOpen] = useState(false);
@@ -37,7 +39,7 @@ export function Boards() {
   const [error, setError] = useState<string | null>(null);
   const [boardPendingDelete, setBoardPendingDelete] = useState<Board | null>(null);
   const [isDeletingBoard, setIsDeletingBoard] = useState(false);
-  const canCreateBoards = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const canCreateBoards = canManageWorkspace;
 
   useEffect(() => {
     const workspaceId = currentWorkspace?.id;

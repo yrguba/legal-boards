@@ -1,3 +1,5 @@
+import { parseEnvFlag } from './envFlags';
+
 export type FeatureTabsConfig = {
   documents: boolean;
   knowledge: boolean;
@@ -5,12 +7,11 @@ export type FeatureTabsConfig = {
   calendar: boolean;
 };
 
-function parseEnvFlag(name: string, defaultValue = true): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  if (!raw) return defaultValue;
-  if (raw === 'false' || raw === '0' || raw === 'no') return false;
-  return raw === 'true' || raw === '1' || raw === 'yes';
-}
+export type FeatureTabKey = keyof FeatureTabsConfig;
+
+export type AppPublicConfig = FeatureTabsConfig & {
+  workspaceInviteEmail: boolean;
+};
 
 export function getFeatureTabsConfig(): FeatureTabsConfig {
   return {
@@ -18,5 +19,12 @@ export function getFeatureTabsConfig(): FeatureTabsConfig {
     knowledge: parseEnvFlag('KNOWLEDGE_ENABLED', true),
     chat: parseEnvFlag('CHAT_ENABLED', true),
     calendar: parseEnvFlag('CALENDAR_ENABLED', true),
+  };
+}
+
+export function getAppPublicConfig(): AppPublicConfig {
+  return {
+    ...getFeatureTabsConfig(),
+    workspaceInviteEmail: parseEnvFlag('WORKSPACE_INVITE_EMAIL', false),
   };
 }

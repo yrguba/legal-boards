@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { AlertTriangle, BarChart3, ClipboardCheck, Clock, Loader2, RefreshCw, TrendingUp } from 'lucide-react';
 import { useApp } from '../store/AppContext';
+import { canManageWorkspace } from '../utils/workspacePermissions';
 import { boardsApi, reportsApi, usersApi } from '../services/api';
 import type { Board } from '../types';
 import type { BoardDashboardReport } from '../utils/boardReports';
@@ -33,12 +34,8 @@ function formatDateTime(iso: string) {
 }
 
 export function Analytics() {
-  const { currentWorkspace, currentUser } = useApp();
-  const canView =
-    !!currentWorkspace &&
-    (currentWorkspace.isOwner ||
-      currentUser?.role === 'admin' ||
-      currentUser?.role === 'manager');
+  const { currentWorkspace } = useApp();
+  const canView = canManageWorkspace(currentWorkspace);
 
   const [boards, setBoards] = useState<Board[]>([]);
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);

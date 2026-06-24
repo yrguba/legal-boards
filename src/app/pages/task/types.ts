@@ -143,6 +143,7 @@ export type TaskSidePanelsProps = {
   assistantPanelChat: any[];
   assistantChatError: string | null;
   commentText: string;
+  commentComposeKey: number;
   assistantMessage: string;
   isPostingComment: boolean;
   isPostingAssistant: boolean;

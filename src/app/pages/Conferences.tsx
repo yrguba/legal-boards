@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Video, Plus, ExternalLink, CalendarPlus, Pencil, Trash2, Ban } from 'lucide-react';
 import { useApp } from '../store/AppContext';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import { conferencesApi, usersApi } from '../services/api';
 import { useConferencesConfig } from '../features/conferences/useConferencesConfig';
 import {
@@ -14,6 +15,7 @@ import type { Conference } from '../types';
 
 export function Conferences() {
   const { currentWorkspace, currentUser } = useApp();
+  const { isWorkspaceAdmin } = useWorkspacePermissions();
   const navigate = useNavigate();
   const { enabled, loading: configLoading } = useConferencesConfig();
   const [rows, setRows] = useState<Conference[]>([]);
@@ -78,7 +80,7 @@ export function Conferences() {
   };
 
   const canManage = (c: Conference) =>
-    currentUser?.id === c.createdById || currentUser?.role === 'admin';
+    currentUser?.id === c.createdById || isWorkspaceAdmin;
 
   const hasInvitees = (c: Conference) =>
     (c.attendeeIds ?? []).some((id) => id !== c.createdById);

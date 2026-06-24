@@ -33,6 +33,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CreateTaskModal } from '../components/CreateTaskModal';
+import { uploadPendingTaskAttachments } from '../components/TaskCreateFormFields';
 import { AggregatedBoardView } from '../components/AggregatedBoardView';
 import { TransferTaskModal } from '../components/TransferTaskModal';
 import { ColumnActionTransitionModal } from '../components/ColumnActionTransitionModal';
@@ -49,6 +50,7 @@ import { TaskPriorityBadge } from '../components/TaskPriorityBadge';
 import { TASK_PRIORITY_KEYS, normalizeTaskPriority } from '../utils/taskPriority';
 import { boardTimeTrackingIsConfigured } from '../utils/boardTimeTracking';
 import { useApp } from '../store/AppContext';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -277,6 +279,7 @@ export function Board() {
   const { boardId } = useParams();
   const navigate = useNavigate();
   const { currentUser } = useApp();
+  const { canManageWorkspace } = useWorkspacePermissions();
   const [board, setBoard] = useState<BoardType | null>(null);
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   const [tasks, setTasks] = useState<TaskType[]>([]);
@@ -312,8 +315,7 @@ export function Board() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
 
-  const canManageBoardSettings =
-    currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const canManageBoardSettings = canManageWorkspace;
 
   const UNASSIGNED_FILTER = '__unassigned__';
 
@@ -556,14 +558,17 @@ export function Board() {
     setIsCreateTaskOpen(true);
   };
 
-  const handleCreateTask = async (data: {
-    title: string;
-    description?: string;
-    typeId: string;
-    assigneeId?: string;
-    priority: string;
-    customFields: Record<string, any>;
-  }) => {
+  const handleCreateTask = async (
+    data: {
+      title: string;
+      description?: string;
+      typeId: string;
+      assigneeId?: string;
+      priority: string;
+      customFields: Record<string, any>;
+    },
+    pendingFiles: File[] = [],
+  ) => {
     if (!board) throw new Error('Доска не загружена');
     if (!createTaskColumnId) throw new Error('Не выбрана колонка');
 
@@ -577,6 +582,10 @@ export function Board() {
       priority: data.priority,
       customFields: data.customFields,
     });
+
+    if (pendingFiles.length > 0 && created?.id) {
+      await uploadPendingTaskAttachments(String(created.id), pendingFiles);
+    }
 
     setTasks((prev) => {
       const next = prev.map((t) =>

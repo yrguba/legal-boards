@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import type { User, Department, Group, UserRole } from '../types';
 import { users as initialUsers } from './mockData';
-import { usersApi, departmentsApi, groupsApi } from '../services/api';
+import { usersApi, departmentsApi, groupsApi, workspacesApi } from '../services/api';
 import { useApp } from './AppContext';
 
 interface EmployeesContextType {
@@ -29,7 +29,8 @@ interface EmployeesContextType {
     data: { name?: string; description?: string; leaderId?: string | null },
   ) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
-  createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ email?: string; inviteSent?: boolean; inviteUrl?: string } | void>;
+  createUser: (data: { email: string; name: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[]; password?: string }) => Promise<{ email?: string; inviteSent?: boolean; inviteUrl?: string; initialPassword?: string } | void>;
+  inviteExistingUser: (data: { email: string; role: UserRole; workspaceId: string; departmentId?: string; groupIds?: string[] }) => Promise<{ emailSent: boolean }>;
   updateUser: (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[] }) => Promise<void>;
   updateDepartmentMembers: (departmentId: string, memberIds: string[]) => Promise<void>;
   updateGroupMembers: (groupId: string, memberIds: string[]) => Promise<void>;
@@ -122,12 +123,37 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
       email: created?.email as string | undefined,
       inviteSent: !!created?.inviteSent,
       inviteUrl: created?.inviteUrl as string | undefined,
+      initialPassword:
+        typeof created?.initialPassword === 'string' ? created.initialPassword : undefined,
     };
   };
 
+  const inviteExistingUser = async (data: {
+    email: string;
+    role: UserRole;
+    workspaceId: string;
+    departmentId?: string;
+    groupIds?: string[];
+  }) => {
+    const res = await workspacesApi.createInvite(data.workspaceId, {
+      email: data.email,
+      role: data.role,
+      departmentId: data.departmentId,
+      groupIds: data.groupIds,
+    });
+    await refreshData();
+    return { emailSent: !!res.emailSent };
+  };
+
   const updateUser = async (userId: string, data: { name?: string; role?: UserRole; departmentId?: string; groupIds?: string[] }) => {
+    if (!currentWorkspace?.id) {
+      throw new Error('Пространство не выбрано');
+    }
     try {
-      const updatedUser = await usersApi.update(userId, data);
+      const updatedUser = await usersApi.update(userId, {
+        ...data,
+        workspaceId: currentWorkspace.id,
+      });
       setUsers(users.map(user =>
         user.id === userId ? updatedUser : user
       ));
@@ -162,6 +188,7 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
         updateGroup,
         deleteGroup,
         createUser,
+        inviteExistingUser,
         updateUser,
         updateDepartmentMembers,
         updateGroupMembers,

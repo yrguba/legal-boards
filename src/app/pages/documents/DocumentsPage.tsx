@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useApp } from '../../store/AppContext';
+import { useWorkspacePermissions } from '../../utils/workspacePermissions';
 import { documentsApi } from '../../services/api';
 import { getApiBaseUrl } from '../task/utils/apiBaseUrl';
 import { useDocumentsPageData } from './hooks/useDocumentsPageData';
@@ -10,6 +11,7 @@ import type { Document } from '../../types';
 
 export function DocumentsPage() {
   const { currentWorkspace, currentUser } = useApp();
+  const { isWorkspaceAdmin } = useWorkspacePermissions();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -102,7 +104,7 @@ export function DocumentsPage() {
           apiBaseUrl={apiBaseUrl}
           onDelete={handleDelete}
           canDelete={(doc) =>
-            currentUser?.role === 'admin' || doc.uploadedBy === currentUser?.id
+            isWorkspaceAdmin || doc.uploadedBy === currentUser?.id
           }
           noSearchMatch={Boolean(searchQuery.trim() && allCount > 0 && documents.length === 0)}
         />

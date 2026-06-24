@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useNavigate, useParams } from 'react-router';
 import { MessageCircle, Paperclip, Plus, Send, ChevronUp, User } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { usersApi, workspaceChatsApi } from '../services/api';
@@ -110,6 +111,8 @@ function ChannelButton({
 
 export function Chat() {
   const { currentWorkspace, currentUser } = useApp();
+  const navigate = useNavigate();
+  const { channelId: channelIdParam } = useParams();
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
@@ -147,6 +150,14 @@ export function Chat() {
   );
   const activeChannel = channels.find((c) => c.id === activeId) ?? null;
 
+  const selectChannel = useCallback(
+    (channelId: string, opts?: { replace?: boolean }) => {
+      setActiveId(channelId);
+      navigate(`/chat/${channelId}`, opts?.replace ? { replace: true } : undefined);
+    },
+    [navigate],
+  );
+
   const loadChannels = useCallback(async () => {
     if (!currentWorkspace) return;
     setLoadingChannels(true);
@@ -155,6 +166,9 @@ export function Chat() {
       const list = await workspaceChatsApi.listChannels(currentWorkspace.id);
       setChannels(list);
       setActiveId((prev) => {
+        if (channelIdParam && list.some((c) => c.id === channelIdParam)) {
+          return channelIdParam;
+        }
         if (prev && list.some((c) => c.id === prev)) return prev;
         return list[0]?.id ?? null;
       });
@@ -163,11 +177,28 @@ export function Chat() {
     } finally {
       setLoadingChannels(false);
     }
-  }, [currentWorkspace]);
+  }, [currentWorkspace, channelIdParam]);
 
   useEffect(() => {
     loadChannels();
   }, [loadChannels]);
+
+  useEffect(() => {
+    if (!channels.length || channelIdParam) return;
+    const targetId =
+      (activeId && channels.some((c) => c.id === activeId) ? activeId : null) ??
+      channels[0]?.id;
+    if (targetId) navigate(`/chat/${targetId}`, { replace: true });
+  }, [channels, channelIdParam, activeId, navigate]);
+
+  useEffect(() => {
+    if (!channelIdParam || !channels.length) return;
+    if (channels.some((c) => c.id === channelIdParam)) {
+      setActiveId(channelIdParam);
+      return;
+    }
+    navigate(`/chat/${channels[0].id}`, { replace: true });
+  }, [channelIdParam, channels, navigate]);
 
   useEffect(() => {
     if (!newChatOpen || !currentWorkspace) return;
@@ -218,6 +249,7 @@ export function Chat() {
         return [channel, ...prev];
       });
       setActiveId(channel.id);
+      selectChannel(channel.id);
       setNewChatOpen(false);
       setMemberQuery('');
     } catch (e) {
@@ -457,7 +489,7 @@ export function Chat() {
                   key={c.id}
                   channel={c}
                   active={c.id === activeId}
-                  onSelect={() => setActiveId(c.id)}
+                  onSelect={() => selectChannel(c.id)}
                 />
               ))}
             </div>
@@ -473,7 +505,7 @@ export function Chat() {
                   key={c.id}
                   channel={c}
                   active={c.id === activeId}
-                  onSelect={() => setActiveId(c.id)}
+                  onSelect={() => selectChannel(c.id)}
                 />
               ))}
             </div>

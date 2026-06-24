@@ -9,6 +9,7 @@ import { boardTimeTrackingIsConfigured } from '../../utils/boardTimeTracking';
 import { renderCustomFieldValue } from './utils/customFieldValue';
 import { formatTaskDate, toDatetimeLocalValue } from './utils/format';
 import { mergeChatMessage, isLawyerClientChannelMessage } from './utils/chatMessages';
+import { setActiveTaskFocus } from '../../utils/activeTaskFocus';
 import { useTaskFieldUpdate } from './hooks/useTaskFieldUpdate';
 import type { TaskPanelType, TaskRecord, DocumentPreviewState, ClientSubPanel } from './types';
 import { TaskPageHeader } from './components/TaskPageHeader';
@@ -30,12 +31,16 @@ import { ColumnActionTransitionModal } from '../../components/ColumnActionTransi
 import { TransferTaskModal } from '../../components/TransferTaskModal';
 import type { TaskActivityItem } from '../../utils/activityLog';
 import { useApp } from '../../store/AppContext';
+import { useWorkspacePermissions } from '../../utils/workspacePermissions';
 import { getWsUrl } from '../../utils/wsUrl';
 import { taskPath } from '../../utils/taskUrls';
 import { isExternalClientTask } from './utils/externalClientTask';
+import { useFeatureTabsConfig } from '../../features/featureTabs/useFeatureTabsConfig';
 
 export function TaskPage() {
   const { currentUser } = useApp();
+  const { canManageWorkspace } = useWorkspacePermissions();
+  const { documents: documentsTabEnabled } = useFeatureTabsConfig();
   const navigate = useNavigate();
   const { taskKey } = useParams();
   const activeTaskIdRef = useRef<string | undefined>(undefined);
@@ -61,6 +66,7 @@ export function TaskPage() {
   const [isPostingInteraction, setIsPostingInteraction] = useState(false);
   const [interactionError, setInteractionError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
+  const [commentComposeKey, setCommentComposeKey] = useState(0);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -111,8 +117,7 @@ export function TaskPage() {
   const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
 
-  const canTransfer =
-    currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const canTransfer = canManageWorkspace;
   const [activityItems, setActivityItems] = useState<TaskActivityItem[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -155,11 +160,12 @@ export function TaskPage() {
           }
         })(),
     }));
-    const staticEntries = showClientPanel
+    const staticEntries = (showClientPanel
       ? TASK_SIDEBAR_STATIC_ENTRIES
-      : TASK_SIDEBAR_STATIC_ENTRIES.filter((e) => e.id !== 'client');
+      : TASK_SIDEBAR_STATIC_ENTRIES.filter((e) => e.id !== 'client')
+    ).filter((e) => documentsTabEnabled || e.id !== 'documents');
     return [...staticEntries, ...iframeEntries];
-  }, [boardIframeServices, showClientPanel]);
+  }, [boardIframeServices, showClientPanel, documentsTabEnabled]);
 
   const iframeServiceForPanel = useMemo(() => {
     const sid = parseIframePanelId(activePanel);
@@ -240,6 +246,11 @@ export function TaskPage() {
   useEffect(() => {
     activeTaskIdRef.current = task?.id ?? taskKey;
   }, [task?.id, taskKey]);
+
+  useEffect(() => {
+    setActiveTaskFocus(task?.id ?? null);
+    return () => setActiveTaskFocus(null);
+  }, [task?.id]);
 
   const loadActivity = useCallback(async () => {
     if (!activeTaskId) return;
@@ -360,7 +371,12 @@ export function TaskPage() {
   }, [currentUser?.id, activeTaskId]);
 
   useEffect(() => {
-    if (!board?.workspaceId) return;
+    if (documentsTabEnabled) return;
+    if (activePanel === 'documents') setActivePanel('comments');
+  }, [documentsTabEnabled, activePanel]);
+
+  useEffect(() => {
+    if (!board?.workspaceId || !documentsTabEnabled) return;
     let cancelled = false;
     (async () => {
       setDocumentsLoading(true);
@@ -379,7 +395,7 @@ export function TaskPage() {
     return () => {
       cancelled = true;
     };
-  }, [board?.workspaceId]);
+  }, [board?.workspaceId, documentsTabEnabled]);
 
   const postAssistantMessage = async () => {
     if (!activeTaskId) return;
@@ -477,6 +493,7 @@ export function TaskPage() {
         comments: [created, ...(prev?.comments || [])],
       }));
       setCommentText('');
+      setCommentComposeKey((k) => k + 1);
       setActivePanel('comments');
     } finally {
       setIsPostingComment(false);
@@ -795,6 +812,7 @@ export function TaskPage() {
                   assistantPanelChat={assistantDisplayChat}
                   assistantChatError={assistantChatError}
                   commentText={commentText}
+                  commentComposeKey={commentComposeKey}
                   assistantMessage={assistantMessage}
                   isPostingComment={isPostingComment}
                   isPostingAssistant={isPostingAssistant}

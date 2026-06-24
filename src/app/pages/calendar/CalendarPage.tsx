@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Calendar } from 'lucide-react';
 import { useApp } from '../../store/AppContext';
+import { useWorkspacePermissions } from '../../utils/workspacePermissions';
 import { usersApi } from '../../services/api';
 import type { CalendarEventDto } from '../../services/api';
 import { CalendarToolbar } from './components/CalendarToolbar';
@@ -11,6 +12,7 @@ import { useCalendarEventsForMonth } from './hooks/useCalendarEventsForMonth';
 
 export function CalendarPage() {
   const { currentWorkspace, currentUser } = useApp();
+  const { isWorkspaceAdmin } = useWorkspacePermissions();
   const { month, goPrev, goNext, goToday } = useMonthNavigation();
   const { events, loading, error, refresh } = useCalendarEventsForMonth(
     currentWorkspace?.id,
@@ -114,7 +116,7 @@ export function CalendarPage() {
           event={editing}
           onSaved={refresh}
           currentUserId={currentUser.id}
-          isGlobalAdmin={currentUser.role === 'admin'}
+          isGlobalAdmin={isWorkspaceAdmin}
         />
       )}
     </div>

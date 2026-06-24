@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { usersApi, ApiError } from '../services/api';
 import type { User } from '../types';
+import { useFeatureTabsConfig } from '../features/featureTabs/useFeatureTabsConfig';
+import { useApp } from '../store/AppContext';
+import { TemporaryPasswordField } from './TemporaryPasswordField';
 
 type Props = {
   open: boolean;
@@ -10,26 +13,64 @@ type Props = {
 };
 
 export function ResetPasswordModal({ open, employee, onClose }: Props) {
+  const { currentWorkspace } = useApp();
+  const { workspaceInviteEmail, loading: configLoading } = useFeatureTabsConfig();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteSent, setInviteSent] = useState(false);
+  const [loginEmail, setLoginEmail] = useState<string | null>(null);
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(false);
+    setError(null);
+    setInviteSent(false);
+    setLoginEmail(null);
+    setTemporaryPassword(null);
+  }, [open, employee?.id]);
 
   if (!open || !employee) return null;
 
   const handleReset = async () => {
-    if (
-      !confirm(
-        `Сбросить пароль для ${employee.name}? На ${employee.email} будет отправлена ссылка для создания нового пароля.`,
-      )
-    ) {
+    const confirmText = workspaceInviteEmail
+      ? `Сбросить пароль для ${employee.name}? На ${employee.email} будет отправлен временный пароль, он также отобразится здесь.`
+      : `Сбросить пароль для ${employee.name}? Будет сгенерирован временный пароль — email не отправляется. При первом входе сотруднику нужно будет задать новый пароль.`;
+
+    if (!confirm(confirmText)) {
       return;
     }
+
+    if (!currentWorkspace?.id) {
+      setError('Пространство не выбрано');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setInviteSent(false);
+    setLoginEmail(null);
+    setTemporaryPassword(null);
     try {
-      await usersApi.resetPassword(employee.id);
-      setInviteSent(true);
+      const result = await usersApi.resetPassword(employee.id, currentWorkspace.id);
+      const password =
+        typeof result.initialPassword === 'string' ? result.initialPassword : '';
+      const email =
+        typeof result.loginEmail === 'string' ? result.loginEmail.trim() : employee.email;
+
+      if (password) {
+        setTemporaryPassword(password);
+        setLoginEmail(email || null);
+        setInviteSent(!!result.inviteSent);
+        return;
+      }
+
+      if (result.inviteSent) {
+        setInviteSent(true);
+        return;
+      }
+
+      setError(result.message || 'Не удалось сбросить пароль');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Не удалось сбросить пароль');
     } finally {
@@ -40,8 +81,12 @@ export function ResetPasswordModal({ open, employee, onClose }: Props) {
   const handleClose = () => {
     setError(null);
     setInviteSent(false);
+    setLoginEmail(null);
+    setTemporaryPassword(null);
     onClose();
   };
+
+  const done = Boolean(temporaryPassword) || inviteSent;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -61,18 +106,40 @@ export function ResetPasswordModal({ open, employee, onClose }: Props) {
           </button>
         </div>
 
-        {inviteSent ? (
+        {done ? (
           <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-            Приглашение отправлено на <span className="font-medium">{employee.email}</span>.
-            <p className="text-xs text-green-700 mt-2">
-              Сотрудник перейдёт по ссылке из письма и задаст новый пароль. Старая ссылка перестанет
-              действовать после активации.
-            </p>
+            {temporaryPassword ? (
+              <>
+                Пароль для <span className="font-medium">{employee.name}</span> сброшен.
+                {inviteSent ? (
+                  <p className="text-xs text-green-700 mt-2">
+                    Временный пароль также отправлен на{' '}
+                    <span className="font-medium">{employee.email}</span>.
+                  </p>
+                ) : null}
+                <p className="text-xs text-green-700 mt-2">
+                  Для входа используйте email{' '}
+                  <span className="font-medium font-mono">{loginEmail ?? employee.email}</span>
+                  {' '}и временный пароль ниже. При первом входе потребуется сменить пароль.
+                </p>
+                <TemporaryPasswordField password={temporaryPassword} className="mt-2" />
+              </>
+            ) : (
+              <>
+                Приглашение отправлено на <span className="font-medium">{employee.email}</span>.
+                <p className="text-xs text-green-700 mt-2">
+                  Сотрудник перейдёт по ссылке из письма и задаст новый пароль.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <p className="text-sm text-slate-600 mb-4">
-            На email сотрудника будет отправлена ссылка для создания нового пароля. Временный пароль в
-            интерфейсе показан не будет.
+            {configLoading
+              ? 'Загрузка настроек…'
+              : workspaceInviteEmail
+                ? 'На email будет отправлен временный пароль. Он также отобразится здесь — при первом входе потребуется сменить пароль.'
+                : 'Будет сгенерирован временный пароль. Email не отправляется — передайте пароль сотруднику вручную. При первом входе потребуется сменить пароль.'}
           </p>
         )}
 
@@ -84,16 +151,16 @@ export function ResetPasswordModal({ open, employee, onClose }: Props) {
             onClick={handleClose}
             className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-800 hover:bg-slate-50"
           >
-            {inviteSent ? 'Закрыть' : 'Отмена'}
+            {done ? 'Закрыть' : 'Отмена'}
           </button>
-          {!inviteSent ? (
+          {!done ? (
             <button
               type="button"
-              disabled={loading}
+              disabled={loading || configLoading}
               onClick={() => void handleReset()}
               className="px-4 py-2 text-sm rounded-lg bg-brand text-white disabled:opacity-50"
             >
-              {loading ? 'Отправка…' : 'Сбросить пароль'}
+              {loading ? 'Сброс…' : 'Сбросить пароль'}
             </button>
           ) : null}
         </div>

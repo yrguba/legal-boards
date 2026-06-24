@@ -1,12 +1,15 @@
-import { useState, FormEvent, useEffect } from 'react';
+import { useState, FormEvent, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { Briefcase } from 'lucide-react';
 import { ApiError, authApi } from '../services/api';
+import { PasswordInput } from '../components/PasswordInput';
 
 export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,14 +34,37 @@ export function Login() {
       .catch(() => setRegistrationEnabled(false));
   }, []);
 
-  const handleSubmit = async (e: FormEvent) => {
+  // Браузерное автозаполнение не всегда вызывает onChange у controlled inputs
+  useEffect(() => {
+    const syncAutofill = () => {
+      const emailEl = emailRef.current;
+      const passwordEl = passwordRef.current;
+      if (emailEl?.value) setEmail(emailEl.value);
+      if (passwordEl?.value) setPassword(passwordEl.value);
+    };
+
+    syncAutofill();
+    const timer = window.setTimeout(syncAutofill, 100);
+    const timer2 = window.setTimeout(syncAutofill, 500);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(timer2);
+    };
+  }, []);
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setInfo(null);
     setUnverifiedEmail(null);
+
+    const formData = new FormData(e.currentTarget);
+    const emailValue = String(formData.get('email') ?? emailRef.current?.value ?? email).trim();
+    const passwordValue = String(formData.get('password') ?? passwordRef.current?.value ?? password).trim();
+
     try {
-      const user = await login(email, password);
+      const user = await login(emailValue, passwordValue);
       navigate(user.mustChangePassword ? '/change-password' : from);
     } catch (error) {
       console.error('Login failed:', error);
@@ -46,7 +72,7 @@ export function Login() {
         setError(error.message);
       } else if (error instanceof ApiError && error.code === 'EMAIL_NOT_VERIFIED') {
         setError('Подтвердите email перед входом');
-        setUnverifiedEmail(email.trim());
+        setUnverifiedEmail(emailValue);
       } else if (error instanceof ApiError && error.code === 'PASSWORD_INVITE_REQUIRED') {
         setError(error.message);
         setInfo('Проверьте почту — вам должно прийти письмо со ссылкой для активации аккаунта.');
@@ -111,18 +137,25 @@ export function Login() {
             </button>
           ) : null}
 
-          <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+          <form
+            onSubmit={(e) => void handleSubmit(e)}
+            className="space-y-4"
+            autoComplete="on"
+          >
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
                 Email
               </label>
               <input
+                ref={emailRef}
                 id="email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="admin@legalboards.com"
                 required
+                autoComplete="username"
                 className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
               />
             </div>
@@ -131,14 +164,15 @@ export function Login() {
               <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
                 Пароль
               </label>
-              <input
+              <PasswordInput
+                ref={passwordRef}
                 id="password"
-                type="password"
+                name="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                autoComplete="current-password"
               />
             </div>
 

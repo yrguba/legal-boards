@@ -4,6 +4,7 @@ import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import { requireFeatureTab } from '../middleware/featureTabs';
 import { broadcast } from '../realtime';
 import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
@@ -41,6 +42,7 @@ const upload = multer({
 
 router.use(authenticate);
 router.use(requireStaffUser);
+router.use(requireFeatureTab('documents'));
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
   try {
