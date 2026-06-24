@@ -4,6 +4,7 @@ import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
+import { requireFeatureTab } from '../middleware/featureTabs';
 import { broadcast } from '../realtime';
 import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
@@ -152,6 +153,7 @@ async function mapChannelForUser(channel: ChannelRow, userId: string) {
 
 router.use(authenticate);
 router.use(requireStaffUser);
+router.use(requireFeatureTab('chat'));
 
 router.get('/workspace/:workspaceId/channels', async (req: AuthRequest, res) => {
   try {

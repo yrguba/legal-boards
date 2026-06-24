@@ -20,7 +20,9 @@ import { ConferenceRoom } from './pages/ConferenceRoom';
 import { ConferenceJoin } from './pages/ConferenceJoin';
 import { ChangePassword } from './pages/ChangePassword';
 import { Invite } from './pages/Invite';
+import { FeatureTabGuard } from './components/FeatureTabGuard';
 import { useApp } from './store/AppContext';
+import { BrowserNotificationNavigation } from './store/BrowserNotificationNavigation';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useApp();
@@ -37,7 +39,12 @@ function AppLayout() {
   if (currentUser?.mustChangePassword) {
     return <Navigate to="/change-password" replace />;
   }
-  return <Layout />;
+  return (
+    <>
+      <BrowserNotificationNavigation />
+      <Layout />
+    </>
+  );
 }
 
 export const router = createBrowserRouter([
@@ -95,15 +102,27 @@ export const router = createBrowserRouter([
       },
       {
         path: 'documents',
-        element: <Documents />,
+        element: (
+          <FeatureTabGuard tab="documents">
+            <Documents />
+          </FeatureTabGuard>
+        ),
       },
       {
-        path: 'chat',
-        element: <Chat />,
+        path: 'chat/:channelId?',
+        element: (
+          <FeatureTabGuard tab="chat">
+            <Chat />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'calendar',
-        element: <Calendar />,
+        element: (
+          <FeatureTabGuard tab="calendar">
+            <Calendar />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'conferences',
@@ -115,11 +134,19 @@ export const router = createBrowserRouter([
       },
       {
         path: 'knowledge/:articleId',
-        element: <Knowledge />,
+        element: (
+          <FeatureTabGuard tab="knowledge">
+            <Knowledge />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'knowledge',
-        element: <Knowledge />,
+        element: (
+          <FeatureTabGuard tab="knowledge">
+            <Knowledge />
+          </FeatureTabGuard>
+        ),
       },
       {
         path: 'workspaces',

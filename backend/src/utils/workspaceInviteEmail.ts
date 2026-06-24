@@ -2,12 +2,12 @@ import crypto from 'crypto';
 import type { PrismaClient } from '@prisma/client';
 import { getFrontendUrl } from './registration';
 import { isConsoleEmailMode, isEmailConfigured, sendEmail } from './email';
+import { parseEnvFlag } from './envFlags';
 
 export const WORKSPACE_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function isWorkspaceInviteEmailEnabled(): boolean {
-  const v = process.env.WORKSPACE_INVITE_EMAIL?.trim().toLowerCase();
-  return v === 'true' || v === '1' || v === 'yes';
+  return parseEnvFlag('WORKSPACE_INVITE_EMAIL', false);
 }
 
 export function createWorkspaceInviteToken(): string {

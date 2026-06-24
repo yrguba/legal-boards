@@ -2,8 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from 'react';
 import type { Notification } from '../types';
 import { notificationsApi } from '../services/api';
+import { shouldUseBrowserNotifications } from '../utils/browserNotifications';
 import { useApp } from './AppContext';
-import { getWsUrl } from '../utils/wsUrl';
+import { useRealtime } from './RealtimeContext';
 
 type Toast = { id: string; title: string; message: string };
 
@@ -21,6 +22,7 @@ const NotificationsContext = createContext<NotificationsContextType | undefined>
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, currentUser } = useApp();
+  const { subscribe } = useRealtime();
   const [items, setItems] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -62,41 +64,34 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!isAuthenticated || !currentUser?.id) return;
+    if (!currentUser?.id) return;
 
-    const wsUrl = getWsUrl();
+    return subscribe((data) => {
+      if (data.type !== 'notification' || data.userId !== currentUser.id || !data.notification) return;
 
-    const ws = new WebSocket(wsUrl);
-    ws.onerror = () => {
-      // keep silent in UI, but useful for debugging
-      console.warn('WebSocket error (notifications)', wsUrl);
-    };
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        if (data?.type !== 'notification' || data?.userId !== currentUser.id || !data?.notification) return;
-        const n = data.notification as Notification;
+      const n = data.notification as Notification;
 
-        setItems((prev) => {
-          if (prev.some((x) => x.id === n.id)) return prev;
-          return [n, ...prev].slice(0, 50);
-        });
-        setUnreadCount((c) => c + 1);
+      setItems((prev) => {
+        if (prev.some((x) => x.id === n.id)) return prev;
+        return [n, ...prev].slice(0, 50);
+      });
+      setUnreadCount((c) => c + 1);
 
-        setToast({ id: n.id, title: n.title, message: n.message });
-        if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = window.setTimeout(() => setToast(null), 3500);
-      } catch {
-        // ignore
-      }
-    };
+      const useBrowser = shouldUseBrowserNotifications() && document.hidden;
+      if (useBrowser) return;
 
-    return () => {
-      ws.close();
+      setToast({ id: n.id, title: n.title, message: n.message });
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = null;
-    };
-  }, [currentUser?.id, isAuthenticated]);
+      toastTimerRef.current = window.setTimeout(() => setToast(null), 3500);
+    });
+  }, [currentUser?.id, subscribe]);
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
 
   const value = useMemo(
     () => ({
@@ -108,7 +103,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       markAsRead,
       markAllAsRead,
     }),
-    [items, unreadCount, isLoading, toast, refresh, markAsRead, markAllAsRead]
+    [items, unreadCount, isLoading, toast, refresh, markAsRead, markAllAsRead],
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
@@ -119,4 +114,3 @@ export function useNotifications() {
   if (!ctx) throw new Error('useNotifications must be used within NotificationsProvider');
   return ctx;
 }
-

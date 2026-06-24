@@ -1,4 +1,6 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5004/api';
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:5004/api' : '/api');
 
 export class ApiError extends Error {
   constructor(
@@ -203,10 +205,19 @@ export const usersApi = {
     });
   },
 
-  async resetPassword(id: string) {
-    return fetchApi<{ message: string; inviteSent: boolean }>(`/users/${id}/reset-password`, {
-      method: 'POST',
-    });
+  async resetPassword(id: string, workspaceId: string) {
+    return fetchApi<{
+      message: string;
+      inviteSent: boolean;
+      loginEmail?: string;
+      initialPassword?: string;
+    }>(
+      `/users/${id}/reset-password`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ workspaceId }),
+      },
+    );
   },
 
   async delete(id: string) {
@@ -226,11 +237,27 @@ export const usersApi = {
     );
   },
 
-  async updateProfile(userId: string, profileFields: Record<string, unknown>) {
+  async updateProfile(
+    userId: string,
+    workspaceId: string,
+    profileFields: Record<string, unknown>,
+  ) {
     return fetchApi<any>(`/users/${userId}/profile`, {
       method: 'PUT',
-      body: JSON.stringify({ profileFields }),
+      body: JSON.stringify({ workspaceId, profileFields }),
     });
+  },
+
+  async lookupInWorkspace(workspaceId: string, email: string) {
+    const q = new URLSearchParams({ email });
+    return fetchApi<{
+      exists: boolean;
+      userId?: string;
+      name?: string;
+      email?: string;
+      alreadyMember?: boolean;
+      pendingInviteId?: string | null;
+    }>(`/workspaces/${workspaceId}/users/lookup?${q}`);
   },
 };
 
@@ -271,6 +298,30 @@ export const workspacesApi = {
 
   async getEmployeeProfileFields(workspaceId: string) {
     return fetchApi<any[]>(`/workspaces/${workspaceId}/employee-profile-fields`);
+  },
+
+  async listInvites(workspaceId: string, status = 'pending') {
+    const q = new URLSearchParams({ status });
+    return fetchApi<any[]>(`/workspaces/${workspaceId}/invites?${q}`);
+  },
+
+  async createInvite(
+    workspaceId: string,
+    data: { email: string; role?: string; departmentId?: string; groupIds?: string[] },
+  ) {
+    return fetchApi<{ id: string; status: string; emailSent: boolean; user?: { name: string; email: string } }>(
+      `/workspaces/${workspaceId}/invites`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  },
+
+  async cancelInvite(workspaceId: string, inviteId: string) {
+    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/invites/${inviteId}`, {
+      method: 'DELETE',
+    });
   },
 };
 
@@ -925,6 +976,79 @@ export const knowledgeApi = {
   },
 };
 
+export type AppPublicConfig = {
+  documents: boolean;
+  knowledge: boolean;
+  chat: boolean;
+  calendar: boolean;
+  workspaceInviteEmail: boolean;
+};
+
+export const configApi = {
+  async getFeatureTabs() {
+    return fetchApi<AppPublicConfig>('/config/tabs');
+  },
+};
+
+export type NotificationSettingGroup = { id: string; label: string };
+
+export type NotificationSettingItem = {
+  key: string;
+  label: string;
+  description: string;
+  group: string;
+  defaultEnabled: boolean;
+  enabled: boolean;
+};
+
+export type NotificationSettingsResponse = {
+  groups: NotificationSettingGroup[];
+  settings: NotificationSettingItem[];
+};
+
+// Invites API
+export const invitesApi = {
+  async getMine(status = 'pending') {
+    const q = new URLSearchParams({ status });
+    return fetchApi<
+      Array<{
+        id: string;
+        workspaceId: string;
+        role: string;
+        departmentId?: string | null;
+        groupIds: string[];
+        status: string;
+        expiresAt: string;
+        workspace?: { id: string; name: string };
+        invitedBy?: { id: string; name: string; email: string };
+      }>
+    >(`/invites/mine?${q}`);
+  },
+
+  async getByToken(token: string) {
+    const q = new URLSearchParams({ token });
+    return fetchApi<{
+      id: string;
+      workspaceId: string;
+      role: string;
+      status: string;
+      workspace?: { id: string; name: string };
+      invitedBy?: { id: string; name: string; email: string };
+    }>(`/invites/by-token?${q}`);
+  },
+
+  async accept(id: string) {
+    return fetchApi<{ workspaceId: string; workspaceName: string; alreadyMember?: boolean }>(
+      `/invites/${id}/accept`,
+      { method: 'POST' },
+    );
+  },
+
+  async decline(id: string) {
+    return fetchApi<{ message: string }>(`/invites/${id}/decline`, { method: 'POST' });
+  },
+};
+
 // Notifications API
 export const notificationsApi = {
   async getAll() {
@@ -933,6 +1057,17 @@ export const notificationsApi = {
 
   async getUnreadCount() {
     return fetchApi<{ count: number }>('/notifications/unread');
+  },
+
+  async getSettings() {
+    return fetchApi<NotificationSettingsResponse>('/notifications/settings');
+  },
+
+  async updateSettings(settings: Record<string, boolean>) {
+    return fetchApi<NotificationSettingsResponse>('/notifications/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ settings }),
+    });
   },
 
   async markAsRead(id: string) {

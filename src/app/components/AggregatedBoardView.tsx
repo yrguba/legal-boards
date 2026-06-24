@@ -49,6 +49,7 @@ import { ColumnActionTransitionModal } from './ColumnActionTransitionModal';
 import { CreateAggregatedBoardModal } from './CreateAggregatedBoardModal';
 import { TransferTaskModal } from './TransferTaskModal';
 import { useApp } from '../store/AppContext';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -395,8 +396,8 @@ export function AggregatedBoardView({
 }: Props) {
   const navigate = useNavigate();
   const { currentWorkspace, currentUser } = useApp();
-  const canManage =
-    currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const { canManageWorkspace } = useWorkspacePermissions();
+  const canManage = canManageWorkspace;
 
   const sources = useMemo(
     () => [...(board.sources || [])].sort((a, b) => a.position - b.position),

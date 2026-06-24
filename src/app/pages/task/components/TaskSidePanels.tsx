@@ -1,4 +1,5 @@
 import { Bot, Loader2, MessageSquare, Send } from 'lucide-react';
+import { MarkdownBlockNote, MarkdownEditorRoot } from '../../../components/markdown';
 import type { TaskSidePanelsProps, TaskPanelType } from '../types';
 import { formatDateTime } from '../utils/format';
 import { TaskDocumentsPanel } from './TaskDocumentsPanel';
@@ -6,6 +7,8 @@ import { TaskActivityPanel } from './TaskActivityPanel';
 
 function ChatFooter(p: {
   activePanel: TaskPanelType;
+  taskId: string;
+  commentComposeKey: number;
   commentText: string;
   assistantMessage: string;
   assistantChatError: string | null;
@@ -24,19 +27,16 @@ function ChatFooter(p: {
           {p.assistantChatError}
         </div>
       ) : null}
-      <div className="flex gap-2">
+      <div className="flex gap-2 items-end">
         {p.activePanel === 'comments' ? (
-          <input
-            type="text"
-            value={p.commentText}
-            onChange={(e) => p.onCommentText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return;
-              void p.onPostComment();
-            }}
-            placeholder="Написать комментарий…"
-            className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
-          />
+          <div className="min-w-0 flex-1 rounded border border-slate-300 bg-white">
+            <MarkdownBlockNote
+              instanceKey={`comment-compose-${p.taskId}-${p.commentComposeKey}`}
+              markdown={p.commentText}
+              onMarkdownChange={p.onCommentText}
+              compact
+            />
+          </div>
         ) : (
           <textarea
             value={p.assistantMessage}
@@ -74,8 +74,9 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
   const { activePanel, task } = p;
 
   return (
-    <>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+    <MarkdownEditorRoot>
+      <>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {activePanel === 'activity' ? (
           <TaskActivityPanel
             items={p.activityItems}
@@ -113,7 +114,11 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
                       </div>
                     </div>
                   </div>
-                  <div className="text-sm text-slate-700 whitespace-pre-wrap">{c.content}</div>
+                  <MarkdownBlockNote
+                    instanceKey={`comment-view-${c.id}`}
+                    markdown={String(c.content || '')}
+                    compact
+                  />
                 </div>
               ))
             )}
@@ -185,6 +190,8 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
 
       <ChatFooter
         activePanel={activePanel}
+        taskId={task.id}
+        commentComposeKey={p.commentComposeKey}
         commentText={p.commentText}
         assistantMessage={p.assistantMessage}
         assistantChatError={p.assistantChatError}
@@ -195,6 +202,7 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
         onPostComment={p.onPostComment}
         onPostAssistant={p.onPostAssistant}
       />
-    </>
+      </>
+    </MarkdownEditorRoot>
   );
 }

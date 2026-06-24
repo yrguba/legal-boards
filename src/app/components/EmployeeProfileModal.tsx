@@ -4,6 +4,7 @@ import type { EmployeeProfileField, User } from '../types';
 import { usersApi, workspacesApi } from '../services/api';
 import { buildProfileFormState, renderProfileFieldInput } from '../utils/employeeProfileForm';
 import { useApp } from '../store/AppContext';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import { useEmployees } from '../store/EmployeesContext';
 
 type Props = {
@@ -36,6 +37,7 @@ export function EmployeeProfileModal({
   onSaved,
 }: Props) {
   const { currentUser } = useApp();
+  const { isWorkspaceAdmin } = useWorkspacePermissions();
   const { groups } = useEmployees();
   const [schema, setSchema] = useState<EmployeeProfileField[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -46,10 +48,10 @@ export function EmployeeProfileModal({
   const canViewConfidential = useMemo(() => {
     if (!currentUser || !employee) return false;
     if (currentUser.id === employee.id) return true;
-    if (currentUser.role === 'admin') return true;
+    if (isWorkspaceAdmin) return true;
     const empGroups = employee.groupIds ?? [];
     return groups.some((g) => g.leaderId === currentUser.id && empGroups.includes(g.id));
-  }, [currentUser, employee, groups]);
+  }, [currentUser, employee, groups, isWorkspaceAdmin]);
 
   useEffect(() => {
     if (!isOpen || !employee || !workspaceId) return;
@@ -124,7 +126,7 @@ export function EmployeeProfileModal({
       const payload = Object.fromEntries(
         Object.entries(values).filter(([, v]) => v.trim() !== ''),
       );
-      await usersApi.updateProfile(employee.id, payload);
+      await usersApi.updateProfile(employee.id, workspaceId, payload);
       onSaved();
       onClose();
     } catch (err: unknown) {

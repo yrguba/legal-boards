@@ -5,6 +5,7 @@ import { Plus, UserPlus, Edit, Settings, Trash2, X, KeyRound } from 'lucide-reac
 import { CreateDepartmentModal } from '../components/CreateDepartmentModal';
 import { CreateGroupModal } from '../components/CreateGroupModal';
 import { CreateEmployeeModal } from '../components/CreateEmployeeModal';
+import { PendingWorkspaceInvites } from '../components/PendingWorkspaceInvites';
 import { EditEmployeeModal } from '../components/EditEmployeeModal';
 import { EmployeeCatalogPanel } from '../components/EmployeeCatalogPanel';
 import { EmployeeProfileModal } from '../components/EmployeeProfileModal';
@@ -12,6 +13,7 @@ import { ResetPasswordModal } from '../components/ResetPasswordModal';
 import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMembersModal';
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
 import type { User, UserRole, Department, Group } from '../types';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 
 type ViewMode = 'all' | 'catalog' | 'departments' | 'groups';
 
@@ -41,6 +43,7 @@ function MemberRow({ user, onRemove }: { user: User; onRemove?: () => void }) {
 
 export function Employees() {
   const { currentWorkspace, currentUser } = useApp();
+  const { canManageWorkspace, isWorkspaceAdmin } = useWorkspacePermissions();
   const {
     users,
     departments,
@@ -56,8 +59,8 @@ export function Employees() {
     updateGroupMembers,
     refreshData,
   } = useEmployees();
-  const canManageOrg = currentUser?.role === 'admin' || currentUser?.role === 'manager';
-  const isAdmin = currentUser?.role === 'admin';
+  const canManageOrg = canManageWorkspace;
+  const isAdmin = isWorkspaceAdmin;
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [profileEmployee, setProfileEmployee] = useState<User | null>(null);
   const [createGroupDeptId, setCreateGroupDeptId] = useState<string>('');
@@ -74,6 +77,7 @@ export function Employees() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [activeDeptId, setActiveDeptId] = useState<string>('');
   const [resetPasswordEmployee, setResetPasswordEmployee] = useState<User | null>(null);
+  const [invitesReload, setInvitesReload] = useState(0);
 
   const handleSaveDepartment = async (data: { name: string; description: string }) => {
     if (!currentWorkspace) return;
@@ -277,6 +281,10 @@ export function Employees() {
           </button>
         ) : null}
       </div>
+
+      {canManageOrg && currentWorkspace ? (
+        <PendingWorkspaceInvites workspaceId={currentWorkspace.id} reloadToken={invitesReload} />
+      ) : null}
 
       <div className="flex gap-2 mb-6">
         <button
@@ -776,6 +784,7 @@ export function Employees() {
         <CreateEmployeeModal
           isOpen={isCreateEmployeeModalOpen}
           onClose={() => setIsCreateEmployeeModalOpen(false)}
+          onSuccess={() => setInvitesReload((n) => n + 1)}
         />
       ) : null}
 

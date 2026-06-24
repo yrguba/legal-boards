@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { Board, TaskField, TaskType, User } from '../types';
+import { useState } from 'react';
+import type { Board, User } from '../types';
 import { useApp } from '../store/AppContext';
-import { DEFAULT_TASK_PRIORITY, TASK_PRIORITY_KEYS, TASK_PRIORITY_LABELS } from '../utils/taskPriority';
-import { withoutLegacyPriorityFields } from '../utils/taskFieldFilters';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { richEditorDialogHandlers } from './markdown';
+import {
+  TaskCreateFormFields,
+  useTaskCreateForm,
+  type TaskCreatePayload,
+} from './TaskCreateFormFields';
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -11,94 +15,26 @@ interface CreateTaskModalProps {
   board: Board;
   columnId: string;
   users: User[];
-  onSubmit: (data: {
-    title: string;
-    description?: string;
-    typeId: string;
-    assigneeId?: string;
-    customFields: Record<string, any>;
-    priority: string;
-  }) => Promise<void> | void;
-}
-
-function isEmptyValue(v: unknown) {
-  if (v === null || v === undefined) return true;
-  if (typeof v === 'string') return v.trim() === '';
-  if (Array.isArray(v)) return v.length === 0;
-  return false;
-}
-
-function fieldLabel(field: TaskField) {
-  return `${field.name}${field.required ? ' *' : ''}`;
+  onSubmit: (data: TaskCreatePayload, pendingFiles: File[]) => Promise<void> | void;
 }
 
 export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSubmit }: CreateTaskModalProps) {
   const { currentUser } = useApp();
-  const [typeId, setTypeId] = useState<string>(() => board.taskTypes?.[0]?.id || '');
-  const [assigneeId, setAssigneeId] = useState('');
-  const [priority, setPriority] = useState(DEFAULT_TASK_PRIORITY);
-  const [customFields, setCustomFields] = useState<Record<string, any>>({});
+  const form = useTaskCreateForm(board);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const taskTypes: TaskType[] = useMemo(() => board.taskTypes || [], [board.taskTypes]);
-  const taskFields: TaskField[] = useMemo(
-    () => withoutLegacyPriorityFields([...(board.taskFields || [])]).sort((a, b) => a.position - b.position),
-    [board.taskFields]
-  );
-
-  const titleField = useMemo(() => {
-    const byName = taskFields.find((f) => f.type === 'text' && f.name.trim().toLowerCase() === 'название');
-    if (byName) return byName;
-    const requiredText = taskFields.find((f) => f.type === 'text' && f.required);
-    if (requiredText) return requiredText;
-    return taskFields.find((f) => f.type === 'text') || null;
-  }, [taskFields]);
-
-  const descriptionField = useMemo(() => {
-    const byName = taskFields.find(
-      (f) => (f.type === 'textarea' || f.type === 'text') && f.name.trim().toLowerCase() === 'описание'
-    );
-    return byName || null;
-  }, [taskFields]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    setAssigneeId('');
-    setPriority(DEFAULT_TASK_PRIORITY);
-    setTypeId(board.taskTypes?.[0]?.id || '');
-  }, [isOpen, columnId, board.taskTypes]);
-
   if (!isOpen) return null;
 
-  const reset = () => {
-    setTypeId(board.taskTypes?.[0]?.id || '');
-    setAssigneeId('');
-    setPriority(DEFAULT_TASK_PRIORITY);
-    setCustomFields({});
-    setError(null);
-  };
-
   const handleClose = () => {
-    reset();
+    form.reset();
+    setError(null);
     onClose();
-  };
-
-  const validate = () => {
-    if (!typeId) return 'Выберите тип задачи';
-    if (!titleField) return 'В настройках доски нет текстового поля для названия задачи';
-
-    for (const f of taskFields) {
-      if (!f.required) continue;
-      if (isEmptyValue(customFields[f.id])) return `Заполните поле: ${f.name}`;
-    }
-
-    return null;
   };
 
   const submit = async () => {
     setError(null);
-    const validationError = validate();
+    const validationError = form.validate();
     if (validationError) {
       setError(validationError);
       return;
@@ -106,29 +42,10 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
 
     setIsSubmitting(true);
     try {
-      const rawTitle = customFields[titleField!.id];
-      const title = typeof rawTitle === 'string' ? rawTitle.trim() : String(rawTitle ?? '').trim();
-      if (!title) throw new Error('Заполните поле: ' + titleField!.name);
-
-      const rawDescription = descriptionField ? customFields[descriptionField.id] : undefined;
-      const description =
-        typeof rawDescription === 'string' ? rawDescription.trim() : rawDescription !== undefined ? String(rawDescription) : '';
-
-      const { [titleField!.id]: _t, ...restAfterTitle } = customFields;
-      const { [descriptionField?.id || '']: _d, ...restAfterDescription } = restAfterTitle;
-      const restCustomFields = restAfterDescription;
-
-      await onSubmit({
-        title,
-        description: description || undefined,
-        typeId,
-        assigneeId: assigneeId || undefined,
-        priority,
-        customFields: restCustomFields,
-      });
+      await onSubmit(form.buildPayload(), form.pendingFiles);
       handleClose();
-    } catch (e: any) {
-      setError(e?.message || 'Не удалось создать задачу');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Не удалось создать задачу');
     } finally {
       setIsSubmitting(false);
     }
@@ -136,146 +53,44 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col gap-4 overflow-hidden sm:max-w-2xl">
+      <DialogContent
+        className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col gap-4 overflow-hidden sm:max-w-2xl"
+        {...richEditorDialogHandlers}
+      >
         <DialogHeader className="shrink-0">
           <DialogTitle>Создать задачу</DialogTitle>
         </DialogHeader>
 
-        {error && (
+        {error ? (
           <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
-        )}
+        ) : null}
 
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto overscroll-contain px-2 py-2 pb-4 [-webkit-overflow-scrolling:touch]">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Тип *</label>
-            <select
-              value={typeId}
-              onChange={(e) => setTypeId(e.target.value)}
-              className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-            >
-              <option value="" disabled>
-                Выберите тип
-              </option>
-              {taskTypes.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Автор</label>
-            <input
-              readOnly
-              value={currentUser?.name ?? '—'}
-              className="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 cursor-default focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Исполнитель</label>
-            <select
-              value={assigneeId}
-              onChange={(e) => setAssigneeId(e.target.value)}
-              className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-            >
-              <option value="">Не назначено</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Приоритет</label>
-            <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-              className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-            >
-              {TASK_PRIORITY_KEYS.map((p) => (
-                <option key={p} value={p}>
-                  {TASK_PRIORITY_LABELS[p]}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {taskFields.length > 0 && (
-            <div className="w-full">
-              <div className="flex w-full flex-col gap-4">
-                {taskFields.map((f) => (
-                  <div key={f.id} className="w-full space-y-1">
-                    <label className="block text-sm font-medium text-slate-700">
-                      {fieldLabel(f)}
-                    </label>
-
-                    {f.type === 'text' && (
-                      <input
-                        value={customFields[f.id] ?? ''}
-                        onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
-                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-                      />
-                    )}
-
-                    {f.type === 'textarea' && (
-                      <textarea
-                        rows={3}
-                        value={customFields[f.id] ?? ''}
-                        onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
-                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-                      />
-                    )}
-
-                    {f.type === 'select' && (
-                      <select
-                        value={customFields[f.id] ?? ''}
-                        onChange={(e) => {
-                          setCustomFields((p) => ({ ...p, [f.id]: e.target.value }));
-                        }}
-                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-                      >
-                        {(f.options || []).map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-
-                    {f.type === 'date' && (
-                      <input
-                        type="date"
-                        value={customFields[f.id] ?? ''}
-                        onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
-                        className="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-                      />
-                    )}
-
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <TaskCreateFormFields
+            form={form}
+            users={users}
+            authorName={currentUser?.name}
+            board={board}
+            key={`${board.id}-${columnId}`}
+          />
         </div>
 
         <DialogFooter className="shrink-0 gap-2 border-t border-slate-100 pt-4 sm:gap-0">
           <button
+            type="button"
             onClick={handleClose}
-            className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded transition-colors"
+            className="rounded px-4 py-2 text-slate-700 transition-colors hover:bg-slate-100"
             disabled={isSubmitting}
           >
             Отмена
           </button>
           <button
-            onClick={submit}
-            className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isSubmitting}
+            type="button"
+            onClick={() => void submit()}
+            className="rounded bg-brand px-4 py-2 text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isSubmitting || !form.canSubmit}
           >
             Создать
           </button>
@@ -284,4 +99,3 @@ export function CreateTaskModal({ isOpen, onClose, board, columnId, users, onSub
     </Dialog>
   );
 }
-

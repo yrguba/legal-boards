@@ -17,6 +17,8 @@ import {
   createPasswordResetToken,
   PASSWORD_RESET_TTL_MS,
 } from '../utils/passwordReset';
+import { normalizeEmail } from '../utils/workspaceRole';
+import { verifyPassword } from '../utils/passwordAuth';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -456,23 +458,35 @@ router.post('/reset-password', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email : '';
+    const rawPassword = typeof req.body?.password === 'string' ? req.body.password : '';
+    const email = normalizeEmail(rawEmail);
+    const password = rawPassword.trim();
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
+    if (!email || !password) {
       return res.status(401).json({ error: 'Неверные учетные данные' });
     }
 
-    const isValidPassword = await bcrypt.compare(password, user.password);
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
+    if (!user) {
+      const lexClient = await prisma.lexClientUser.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (lexClient) {
+        return res.status(401).json({
+          error: 'Этот email зарегистрирован как клиент LEXPRO. Используйте вход для клиентов.',
+          code: 'CLIENT_USE_LEXPRO',
+        });
+      }
+      return res.status(401).json({ error: 'Неверные учетные данные' });
+    }
+
+    const isValidPassword = await verifyPassword(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Неверные учетные данные' });
-    }
-
-    if (user.mustChangePassword && user.passwordInviteToken) {
-      return res.status(403).json({
-        error: 'Активируйте аккаунт по ссылке из письма-приглашения, затем задайте свой пароль',
-        code: 'PASSWORD_INVITE_REQUIRED',
-      });
     }
 
     if (isRegistrationEnabled() && !user.emailVerified) {

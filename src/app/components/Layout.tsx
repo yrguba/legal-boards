@@ -1,5 +1,6 @@
-import { Link, Outlet, NavLink, useNavigate } from 'react-router';
+import { Link, Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import { useApp } from '../store/AppContext';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import {
   LayoutDashboard,
   Users,
@@ -18,20 +19,34 @@ import {
   Handshake,
   BarChart3,
   Video,
+  Plus,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
+import { BrowserNotificationPermissionBanner } from './BrowserNotificationPermissionBanner';
+import { QuickCreateTaskModal, type QuickCreateSuccess } from './QuickCreateTaskModal';
 import { useNotifications } from '../store/NotificationsContext';
 import { useConferencesConfig } from '../features/conferences/useConferencesConfig';
 import { useLexClientsConfig } from '../features/lexClients/useLexClientsConfig';
+import { useFeatureTabsConfig } from '../features/featureTabs/useFeatureTabsConfig';
 
 export function Layout() {
   const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace } = useApp();
+  const { canManageWorkspace, workspaceRole } = useWorkspacePermissions();
   const navigate = useNavigate();
+  const location = useLocation();
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [quickCreateToast, setQuickCreateToast] = useState<QuickCreateSuccess | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { unreadCount, toast } = useNotifications();
+
+  useEffect(() => {
+    if (!quickCreateToast) return;
+    const timer = window.setTimeout(() => setQuickCreateToast(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [quickCreateToast]);
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_collapsed');
@@ -54,46 +69,47 @@ export function Layout() {
   };
 
   const handleSwitchWorkspace = (workspaceId: string) => {
+    const isSameWorkspace = workspaceId === currentWorkspace?.id;
     switchWorkspace(workspaceId);
     setShowWorkspaceMenu(false);
+    if (!isSameWorkspace && location.pathname.startsWith('/board/')) {
+      navigate('/');
+    }
   };
 
-  const canManageLexClients =
-    !!currentWorkspace &&
-    (currentWorkspace.isOwner ||
-      currentUser?.role === 'admin' ||
-      currentUser?.role === 'manager');
-
+  const canManageLexClients = canManageWorkspace;
   const canViewAnalytics = canManageLexClients;
   const { enabled: conferencesEnabled } = useConferencesConfig();
   const { enabled: lexClientsEnabled } = useLexClientsConfig();
+  const { documents, knowledge, chat, calendar } = useFeatureTabsConfig();
 
   const navItems = useMemo(() => {
     const items: { to: string; end?: boolean; label: string; icon: typeof LayoutDashboard }[] = [
       { to: '/', end: true, label: 'Доски', icon: LayoutDashboard },
       { to: '/employees', label: 'Сотрудники', icon: Users },
-      { to: '/documents', label: 'Документы', icon: FileText },
-      { to: '/knowledge', label: 'База знаний', icon: BookOpen },
-      { to: '/chat', label: 'Чат', icon: MessageCircle },
-      { to: '/calendar', label: 'Календарь', icon: Calendar },
-      ...(conferencesEnabled
-        ? [{ to: '/conferences', label: 'Конференции', icon: Video }]
-        : []),
-      { to: '/workspaces', label: 'Пространства', icon: Layers },
-      { to: '/settings', label: 'Настройки', icon: Settings },
     ];
+    if (documents) items.push({ to: '/documents', label: 'Документы', icon: FileText });
+    if (knowledge) items.push({ to: '/knowledge', label: 'База знаний', icon: BookOpen });
+    if (chat) items.push({ to: '/chat', label: 'Чат', icon: MessageCircle });
+    if (calendar) items.push({ to: '/calendar', label: 'Календарь', icon: Calendar });
+    if (conferencesEnabled) {
+      items.push({ to: '/conferences', label: 'Конференции', icon: Video });
+    }
+    items.push({ to: '/workspaces', label: 'Пространства', icon: Layers });
+    items.push({ to: '/settings', label: 'Настройки', icon: Settings });
     if (canViewAnalytics) {
       items.splice(1, 0, { to: '/analytics', label: 'Аналитика', icon: BarChart3 });
     }
     if (canManageLexClients && lexClientsEnabled) {
-      items.splice(canViewAnalytics ? 7 : 6, 0, {
+      const workspacesIdx = items.findIndex((item) => item.to === '/workspaces');
+      items.splice(workspacesIdx >= 0 ? workspacesIdx : items.length, 0, {
         to: '/lex-clients',
         label: 'Клиенты LEXPRO',
         icon: Handshake,
       });
     }
     return items;
-  }, [canManageLexClients, canViewAnalytics, conferencesEnabled, lexClientsEnabled]);
+  }, [canManageLexClients, canViewAnalytics, conferencesEnabled, lexClientsEnabled, documents, knowledge, chat, calendar]);
 
   return (
     <div className="flex h-screen bg-slate-50">
@@ -143,7 +159,7 @@ export function Layout() {
             {!isSidebarCollapsed && (
               <div className="min-w-0 ml-2">
                 <div className="text-sm text-slate-900 truncate">{currentUser?.name}</div>
-                <div className="text-xs text-slate-500 truncate">{currentUser?.role}</div>
+                <div className="text-xs text-slate-500 truncate">{workspaceRole ?? currentUser?.role}</div>
               </div>
             )}
           </div>
@@ -161,6 +177,7 @@ export function Layout() {
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden">
+        <BrowserNotificationPermissionBanner />
         <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-white">
           <div className="flex items-center gap-3">
             <button
@@ -209,20 +226,34 @@ export function Layout() {
                 </div>
               )}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setQuickCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-hover"
+              aria-label="Создать задачу"
+              title="Создать задачу"
+            >
+              <Plus className="size-4 shrink-0" />
+              <span>Создать задачу</span>
+            </button>
           </div>
 
-          <button
-            onClick={() => setShowNotifications(true)}
-            className="relative p-2 text-slate-600 hover:text-slate-900 rounded transition-colors"
-          >
-            <Bell className="w-5 h-5" />
-            {unreadCount > 0 && (
-              <span
-                className="absolute top-1 right-1 w-2 h-2 rounded-full"
-                style={{ backgroundColor: 'var(--brand-primary)' }}
-              />
-            )}
-          </button>
+          <div className="flex items-center">
+            <button
+              onClick={() => setShowNotifications(true)}
+              className="relative p-2 text-slate-600 hover:text-slate-900 rounded transition-colors"
+              aria-label="Уведомления"
+            >
+              <Bell className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <span
+                  className="absolute top-1 right-1 w-2 h-2 rounded-full"
+                  style={{ backgroundColor: 'var(--brand-primary)' }}
+                />
+              )}
+            </button>
+          </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Outlet />
@@ -244,6 +275,24 @@ export function Layout() {
           </div>
         </div>
       ) : null}
+
+      {quickCreateToast ? (
+        <div className="fixed bottom-4 right-4 z-50 w-full max-w-sm">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 shadow-lg p-4">
+            <div className="text-sm font-medium text-emerald-900">Задача создана</div>
+            <div className="mt-1 text-sm text-emerald-800">
+              {quickCreateToast.title}
+              {quickCreateToast.key ? ` (${quickCreateToast.key})` : ''}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <QuickCreateTaskModal
+        open={quickCreateOpen}
+        onOpenChange={setQuickCreateOpen}
+        onSuccess={(task) => setQuickCreateToast(task)}
+      />
     </div>
   );
 }

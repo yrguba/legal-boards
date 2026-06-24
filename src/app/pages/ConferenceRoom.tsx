@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useNavigate, useParams } from 'react-router';
 import { useApp } from '../store/AppContext';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import { conferencesApi } from '../services/api';
 import { ConferenceJoinFlow } from '../features/conferences/ConferenceJoinFlow';
 import type { Conference, ConferencePublicInfo } from '../types';
@@ -11,6 +12,7 @@ export function ConferenceRoom() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { currentUser } = useApp();
+  const { isWorkspaceAdmin } = useWorkspacePermissions();
   const [conference, setConference] = useState<Conference | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,7 +57,7 @@ export function ConferenceRoom() {
     status: conference.status,
   };
 
-  const canEnd = currentUser?.id === conference.createdById || currentUser?.role === 'admin';
+  const canEnd = currentUser?.id === conference.createdById || isWorkspaceAdmin;
 
   if (conference.canJoin === false) {
     return (

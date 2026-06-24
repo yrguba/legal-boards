@@ -51,3 +51,43 @@ export async function sendPasswordInviteEmail(opts: {
     console.log(`[password-invite] ${opts.kind} link for ${opts.to}:`, opts.inviteUrl);
   }
 }
+
+/** Письмо с временным паролем (сброс / создание без invite-ссылки). */
+export async function sendAdminTempPasswordEmail(opts: {
+  to: string;
+  name: string;
+  tempPassword: string;
+  kind: 'welcome' | 'reset';
+}): Promise<void> {
+  const subject =
+    opts.kind === 'reset'
+      ? 'Сброс пароля — Legal Boards'
+      : 'Приглашение в Legal Boards';
+  const loginUrl = `${getFrontendUrl()}/login`;
+
+  await sendEmail({
+    to: opts.to,
+    subject,
+    html: `
+    <div style="font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+      <h2 style="color: #0f172a; margin: 0 0 16px;">${subject}</h2>
+      <p style="color: #334155; line-height: 1.5;">Здравствуйте, ${opts.name}!</p>
+      <p style="color: #334155; line-height: 1.5;">
+        Вам назначен временный пароль: <strong style="font-family: monospace;">${opts.tempPassword}</strong>
+      </p>
+      <p style="color: #334155; line-height: 1.5;">
+        Войдите в систему и задайте новый пароль при первом входе.
+      </p>
+      <p style="margin: 24px 0;">
+        <a href="${loginUrl}" style="display: inline-block; background: #2563eb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">
+          Войти
+        </a>
+      </p>
+    </div>
+  `,
+  });
+
+  if (isConsoleEmailMode()) {
+    console.log(`[temp-password] ${opts.kind} for ${opts.to}:`, opts.tempPassword);
+  }
+}

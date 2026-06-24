@@ -231,3 +231,33 @@
     --tw-ring-color: var(--brand-primary);
   }
 }
+
+.bn-markdown-compact .bn-editor {
+  min-height: 5rem;
+}
+
+.bn-markdown-compact .bn-block-group {
+  padding-left: 0;
+}
+
+.bn-markdown-scope .bn-container {
+  border: 0;
+  box-shadow: none;
+}
+
+.bn-markdown-scope {
+  position: relative;
+  overflow: visible;
+}
+
+.bn-markdown-scope .bn-portal-host {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.bn-markdown-scope .bn-portal-host > .bn-root {
+  pointer-events: auto;
+}

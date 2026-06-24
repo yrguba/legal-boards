@@ -1,6 +1,6 @@
-import { MantineProvider } from '@mantine/core';
 import { Save, Trash2 } from 'lucide-react';
 import { useCallback, useLayoutEffect, useState } from 'react';
+import { MarkdownEditorRoot } from '../../../components/markdown';
 import { knowledgeApi } from '../../../services/api';
 import type { KnowledgeArticle } from '../types';
 import { KnowledgeBlockNote } from './KnowledgeBlockNote';
@@ -115,9 +115,9 @@ export function KnowledgeEditor({ article, loadingList, onSaved, onDeleted }: Kn
           {saveError}
         </div>
       ) : null}
-      <MantineProvider>
+      <MarkdownEditorRoot>
         <KnowledgeBlockNote articleId={article.id} markdown={body} onMarkdownChange={setBody} />
-      </MantineProvider>
+      </MarkdownEditorRoot>
       <div className="shrink-0 border-t border-slate-100 px-8 py-2 text-xs text-slate-400">
         Последнее обновление:{' '}
         {article.updatedAt ? new Date(article.updatedAt).toLocaleString('ru-RU') : '—'}

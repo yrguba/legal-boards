@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { Briefcase } from 'lucide-react';
 import { ApiError, authApi } from '../services/api';
 import { useApp } from '../store/AppContext';
+import { PasswordInput } from '../components/PasswordInput';
 
 export function Register() {
   const [name, setName] = useState('');
@@ -138,17 +139,23 @@ export function Register() {
               </Link>
             </div>
           ) : (
-            <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+            <form
+              onSubmit={(e) => void handleSubmit(e)}
+              className="space-y-4"
+              autoComplete="on"
+            >
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-slate-700 mb-1">
                   Имя
                 </label>
                 <input
                   id="name"
+                  name="name"
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
+                  autoComplete="name"
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                 />
               </div>
@@ -159,10 +166,12 @@ export function Register() {
                 </label>
                 <input
                   id="email"
+                  name="email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                  autoComplete="email"
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                 />
               </div>
@@ -171,14 +180,14 @@ export function Register() {
                 <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
                   Пароль
                 </label>
-                <input
+                <PasswordInput
                   id="password"
-                  type="password"
+                  name="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   minLength={6}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                  autoComplete="new-password"
                 />
               </div>
 
@@ -186,14 +195,14 @@ export function Register() {
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-1">
                   Подтверждение пароля
                 </label>
-                <input
+                <PasswordInput
                   id="confirmPassword"
-                  type="password"
+                  name="confirmPassword"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   minLength={6}
                   required
-                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                  autoComplete="new-password"
                 />
               </div>
 
