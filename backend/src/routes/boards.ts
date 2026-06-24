@@ -819,6 +819,7 @@ router.post(
         typeMapping,
         defaultTargetTypeId,
         force,
+        mode,
       } = req.body as {
         targetBoardId?: string;
         targetColumnId?: string;
@@ -826,6 +827,7 @@ router.post(
         typeMapping?: Record<string, string>;
         defaultTargetTypeId?: string;
         force?: boolean;
+        mode?: 'move' | 'mirror';
       };
 
       if (!targetBoardId) {
@@ -856,6 +858,7 @@ router.post(
         typeMapping,
         defaultTargetTypeId,
         force: Boolean(force),
+        mode: mode === 'mirror' ? 'mirror' : 'move',
         actorUserId: req.userId!,
       });
 

@@ -222,6 +222,47 @@ export interface Task {
   sourceColumnId?: string;
   sourceColumnName?: string;
   type?: TaskType;
+  /** Основная доска (ключ задачи) */
+  isPrimaryPlacement?: boolean;
+  /** Число досок, на которых есть задача */
+  boardPlacementsCount?: number;
+}
+
+export interface TaskBoardPlacement {
+  id: string;
+  taskId: string;
+  boardId: string;
+  boardCode: string;
+  boardName: string;
+  columnId: string;
+  columnName: string;
+  typeId: string;
+  type: TaskType;
+  position: number;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskBoardTransition {
+  id: string;
+  taskId: string;
+  workspaceId: string;
+  eventKind: string;
+  boardId: string;
+  columnId: string | null;
+  fromColumnId: string | null;
+  toColumnId: string | null;
+  targetBoardId: string | null;
+  targetColumnId: string | null;
+  ruleId: string | null;
+  ruleName: string | null;
+  actorUserId: string | null;
+  source: string;
+  payload: Record<string, unknown>;
+  occurredAt: string;
+  summary?: string;
+  actor?: { id: string; name: string; email?: string } | null;
 }
 
 export interface Comment {

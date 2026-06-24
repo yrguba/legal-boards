@@ -28,6 +28,10 @@ import {
   type TaskColumnActionCompletionRow,
 } from '../../utils/boardColumnActions';
 import { ColumnActionTransitionModal } from '../../components/ColumnActionTransitionModal';
+import {
+  ForwardToBoardOfferDialog,
+  prepareForwardToBoardOffer,
+} from '../../components/ForwardToBoardOfferDialog';
 import { TransferTaskModal } from '../../components/TransferTaskModal';
 import type { TaskActivityItem } from '../../utils/activityLog';
 import { useApp } from '../../store/AppContext';
@@ -116,6 +120,9 @@ export function TaskPage() {
   const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
   const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [forwardOffer, setForwardOffer] = useState<
+    import('../../components/ForwardToBoardOfferDialog').ForwardToBoardOffer | null
+  >(null);
 
   const canTransfer = canManageWorkspace;
   const [activityItems, setActivityItems] = useState<TaskActivityItem[]>([]);
@@ -281,6 +288,12 @@ export function TaskPage() {
       setTask,
       setColumnTransition,
       loadActivity,
+      onAfterColumnMove: (fromColumnId, toColumnId) => {
+        if (!task?.id || !board) return;
+        void prepareForwardToBoardOffer(board, task.id, fromColumnId, toColumnId).then((offer) => {
+          if (offer) setForwardOffer(offer);
+        });
+      },
     });
 
   useEffect(() => {
@@ -705,6 +718,9 @@ export function TaskPage() {
     onPreviewDoc: setPreviewDoc,
     renderFieldValue: renderCustomFieldValue,
     formatDate: formatTaskDate,
+    onPlacementsChange: (placements) => {
+      setTask((prev) => (prev ? { ...prev, boardPlacements: placements } : prev));
+    },
   };
 
   return (
@@ -894,6 +910,7 @@ export function TaskPage() {
             await finishColumnTransition(
               columnTransition.toColumnId,
               columnTransition.pendingUpdate,
+              columnTransition.fromColumnId,
             );
             setColumnTransitionError(null);
           } catch (e: unknown) {
@@ -907,6 +924,15 @@ export function TaskPage() {
         }}
       />
 
+      <ForwardToBoardOfferDialog
+        offer={forwardOffer}
+        onClose={() => setForwardOffer(null)}
+        onAdded={() => {
+          if (!task?.id) return;
+          void tasksApi.getById(task.id).then((fresh) => setTask(fresh as TaskRecord));
+        }}
+      />
+
       {board && task && canTransfer ? (
         <TransferTaskModal
           open={transferOpen}
@@ -914,12 +940,18 @@ export function TaskPage() {
           taskIds={[task.id]}
           onClose={() => setTransferOpen(false)}
           onSuccess={(result) => {
+            if (result.mode === 'mirror') {
+              void tasksApi.getById(task.id).then((fresh) => setTask(fresh as TaskRecord));
+              setTransferOpen(false);
+              return;
+            }
             const moved = result.moved[0];
-            if (moved?.newKey) {
-              navigate(`/task/${moved.newKey}`, { replace: true });
+            if (moved?.newKey && moved.newKey !== moved.oldKey) {
+              navigate(taskPath({ key: moved.newKey, id: task.id }), { replace: true });
             } else if (result.skipped[0]) {
               setError(result.skipped[0].reason);
             }
+            setTransferOpen(false);
           }}
         />
       ) : null}

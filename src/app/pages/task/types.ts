@@ -25,6 +25,7 @@ export type TaskRecord = Record<string, any> & {
   chatMessages?: unknown[];
   clientInteractions?: unknown[];
   columnApprovals?: import('../../utils/boardApprovals').TaskColumnApprovalRow[];
+  boardPlacements?: import('../../types').TaskBoardPlacement[];
   lexClientProfile?: {
     id: string;
     name?: string;
@@ -87,6 +88,7 @@ export type TaskMainColumnProps = {
   onPreviewDoc: (doc: DocumentPreviewState) => void;
   renderFieldValue: (value: unknown) => string;
   formatDate: (value: unknown) => string;
+  onPlacementsChange?: (placements: import('../../types').TaskBoardPlacement[]) => void;
 };
 
 export type TaskClientPanelProps = {

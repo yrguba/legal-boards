@@ -37,7 +37,13 @@ import { CreateTaskModal } from '../components/CreateTaskModal';
 import { uploadPendingTaskAttachments } from '../components/TaskCreateFormFields';
 import { AggregatedBoardView } from '../components/AggregatedBoardView';
 import { TransferTaskModal } from '../components/TransferTaskModal';
+import { TaskBoardCountBadge } from '../components/TaskBoardCountBadge';
 import { ColumnActionTransitionModal } from '../components/ColumnActionTransitionModal';
+import {
+  ForwardToBoardOfferDialog,
+  prepareForwardToBoardOffer,
+  type ForwardToBoardOffer,
+} from '../components/ForwardToBoardOfferDialog';
 import { BoardSettingsModal } from '../features/board-settings/BoardSettingsModal';
 import {
   buildColumnTransitionPlan,
@@ -214,16 +220,20 @@ function TaskCard({
       {...listeners}
       className="bg-white rounded-lg p-4 border border-slate-200 hover:border-brand hover:shadow-md transition-all group cursor-grab active:cursor-grabbing touch-none min-w-0 max-w-full overflow-hidden"
     >
-      <div className="flex items-start justify-between mb-2">
+      <div className="flex items-start justify-between mb-2 gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <Link
             to={taskPath(task)}
-            className="text-sm font-medium text-slate-900 group-hover:text-brand transition-colors flex-1"
+            className="text-sm font-medium text-slate-900 group-hover:text-brand transition-colors flex-1 min-w-0 line-clamp-2"
             onClick={(e) => e.stopPropagation()}
           >
+            {task.key ? (
+              <span className="mr-1.5 font-mono text-xs font-normal text-slate-400">{task.key}</span>
+            ) : null}
             {task.title}
           </Link>
         </div>
+        <TaskBoardCountBadge count={task.boardPlacementsCount} compact />
         <button
           type="button"
           className="text-slate-400 hover:text-slate-600 ml-2 shrink-0"
@@ -311,6 +321,7 @@ export function Board() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
+  const [forwardOffer, setForwardOffer] = useState<ForwardToBoardOffer | null>(null);
 
   const canManageBoardSettings = canManageWorkspace;
 
@@ -444,7 +455,10 @@ export function Board() {
     revertSnapshot?: TaskType[] | null,
   ) => {
     try {
-      const payload: { columnId: string; position?: number } = { columnId: targetColumnId };
+      const payload: { columnId: string; position?: number; boardId: string } = {
+        columnId: targetColumnId,
+        boardId: board.id,
+      };
       if (typeof position === 'number') payload.position = position;
       const updated = (await tasksApi.update(taskId, payload)) as Record<string, unknown>;
       setTasks((prevTasks) =>
@@ -452,6 +466,13 @@ export function Board() {
           task.id === taskId ? mergeTaskFromUpdateResponse(task, updated) : task,
         ),
       );
+      const offer = await prepareForwardToBoardOffer(
+        board,
+        taskId,
+        originColumnId,
+        targetColumnId,
+      );
+      if (offer) setForwardOffer(offer);
     } catch (error) {
       console.error('Error updating task column:', error);
       const message =
@@ -747,19 +768,31 @@ export function Board() {
   };
 
   const handleTransferSuccess = (result: {
+    mode: 'move' | 'mirror';
     moved: { taskId: string }[];
+    added: { taskId: string; created: boolean }[];
     skipped: { taskId: string; reason: string }[];
     warnings: { message: string }[];
   }) => {
-    const movedIds = new Set(result.moved.map((m) => m.taskId));
-    setTasks((prev) => prev.filter((t) => !movedIds.has(t.id)));
-    setSelectedTaskIds((prev) => {
-      const next = new Set(prev);
-      for (const id of movedIds) next.delete(id);
-      return next;
-    });
+    if (result.mode === 'move') {
+      const movedIds = new Set(result.moved.map((m) => m.taskId));
+      setTasks((prev) => prev.filter((t) => !movedIds.has(t.id)));
+      setSelectedTaskIds((prev) => {
+        const next = new Set(prev);
+        for (const id of movedIds) next.delete(id);
+        return next;
+      });
+    }
+
     const parts: string[] = [];
-    if (result.moved.length) parts.push(`Перенесено: ${result.moved.length}`);
+    if (result.mode === 'mirror') {
+      const created = result.added.filter((a) => a.created).length;
+      if (created) parts.push(`Добавлено на доску: ${created}`);
+      const already = result.added.filter((a) => !a.created).length;
+      if (already) parts.push(`Уже на доске: ${already}`);
+    } else if (result.moved.length) {
+      parts.push(`Перенесено: ${result.moved.length}`);
+    }
     if (result.skipped.length) parts.push(`Пропущено: ${result.skipped.length}`);
     if (result.warnings.length) parts.push(`Предупреждений: ${result.warnings.length}`);
     setTransferNotice(parts.join(' · ') || 'Готово');
@@ -1286,6 +1319,21 @@ export function Board() {
           } finally {
             setColumnTransitionSubmitting(false);
           }
+        }}
+      />
+
+      <ForwardToBoardOfferDialog
+        offer={forwardOffer}
+        onClose={() => setForwardOffer(null)}
+        onAdded={(taskId, created) => {
+          if (!created) return;
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === taskId
+                ? { ...t, boardPlacementsCount: (t.boardPlacementsCount ?? 1) + 1 }
+                : t,
+            ),
+          );
         }}
       />
 

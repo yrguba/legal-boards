@@ -15,6 +15,9 @@ import {
   normalizeTaskPriority,
 } from '../../../utils/taskPriority';
 import { isLegacyPriorityTaskField } from '../../../utils/taskFieldFilters';
+import { TaskBoardPlacementsPanel } from './TaskBoardPlacementsPanel';
+import { TaskBoardTransitionsPanel } from './TaskBoardTransitionsPanel';
+import type { TaskBoardPlacement } from '../../../types';
 
 function fieldError(
   errors: TaskMainColumnProps['fieldErrors'],
@@ -163,6 +166,7 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
     onPreviewDoc,
     renderFieldValue,
     formatDate,
+    onPlacementsChange,
     boardTimeTrackingEnabled,
     approvalRules,
     columnApprovals,
@@ -373,6 +377,17 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
             />
           ))}
       </div>
+
+      {Array.isArray(task.boardPlacements) && onPlacementsChange ? (
+        <TaskBoardPlacementsPanel
+          taskId={task.id}
+          workspaceId={board.workspaceId}
+          placements={task.boardPlacements as TaskBoardPlacement[]}
+          onPlacementsChange={onPlacementsChange}
+        />
+      ) : null}
+
+      <TaskBoardTransitionsPanel taskId={task.id} />
 
       <MarkdownEditorRoot>
         <InlineEditField

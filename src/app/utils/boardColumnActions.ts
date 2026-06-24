@@ -118,6 +118,75 @@ function runCheckTaskRule(
   return messages;
 }
 
+export type ForwardRuleLabels = {
+  boardName: string;
+  columnName?: string;
+};
+
+export function getForwardToBoardRulesForTransition(
+  board: Board | null | undefined,
+  fromColumnId: string,
+  toColumnId: string,
+): BoardColumnActionRule[] {
+  const rules = getBoardColumnActionRules(board);
+  const seen = new Set<string>();
+  const out: BoardColumnActionRule[] = [];
+
+  for (const rule of rules) {
+    if (rule.actionKind !== 'forward_to_board' || !rule.config.targetBoardId) continue;
+    const matchesEnter = rule.columnId === toColumnId && rule.trigger === 'on_enter';
+    const matchesExit = rule.columnId === fromColumnId && rule.trigger === 'on_exit';
+    if (!matchesEnter && !matchesExit) continue;
+    if (seen.has(rule.id)) continue;
+    seen.add(rule.id);
+    out.push(rule);
+  }
+
+  return out;
+}
+
+export async function resolveForwardRuleLabels(
+  rule: BoardColumnActionRule,
+  fetchBoard: (
+    boardId: string,
+  ) => Promise<{ name: string; columns?: { id: string; name: string }[] } | null>,
+): Promise<ForwardRuleLabels> {
+  let boardName = rule.config.targetBoardName?.trim() ?? '';
+  let columnName = rule.config.targetColumnName?.trim() ?? '';
+
+  if (rule.config.targetBoardId) {
+    const targetBoard = await fetchBoard(rule.config.targetBoardId);
+    if (targetBoard) {
+      if (!boardName) boardName = targetBoard.name;
+      if (!columnName && rule.config.targetColumnId) {
+        columnName =
+          targetBoard.columns?.find((c) => c.id === rule.config.targetColumnId)?.name ?? '';
+      }
+    }
+  }
+
+  return {
+    boardName: boardName || '—',
+    columnName: columnName || undefined,
+  };
+}
+
+export function forwardToBoardConfirmMessage(
+  rule: BoardColumnActionRule,
+  labels?: ForwardRuleLabels,
+): string {
+  const custom = rule.config.message?.trim();
+  if (custom) return custom;
+
+  const boardName =
+    labels?.boardName?.trim() ||
+    rule.config.targetBoardName?.trim() ||
+    '—';
+  const columnName = labels?.columnName?.trim() || rule.config.targetColumnName?.trim();
+  const columnPart = columnName ? ` в колонку «${columnName}»` : '';
+  return `Задача будет также добавлена на доску «${boardName}»${columnPart}. Задача останется на текущей доске.`;
+}
+
 export function buildColumnTransitionPlan(
   board: Board | null | undefined,
   task: TaskForColumnChecks,
@@ -139,7 +208,7 @@ export function buildColumnTransitionPlan(
       if (messages.length) {
         checkErrors.push({ ruleName: rule.name || 'Проверка', messages, phase: 'exit' });
       }
-    } else if (!exitCompleted.has(rule.id)) {
+    } else if (rule.actionKind !== 'forward_to_board' && !exitCompleted.has(rule.id)) {
       interactiveSteps.push({ rule, forColumnId: fromColumnId, phase: 'exit' });
     }
   }
@@ -153,7 +222,7 @@ export function buildColumnTransitionPlan(
       if (messages.length) {
         checkErrors.push({ ruleName: rule.name || 'Проверка', messages, phase: 'enter' });
       }
-    } else if (!enterCompleted.has(rule.id)) {
+    } else if (rule.actionKind !== 'forward_to_board' && !enterCompleted.has(rule.id)) {
       interactiveSteps.push({ rule, forColumnId: toColumnId, phase: 'enter' });
     }
   }

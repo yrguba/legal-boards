@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 export type ColumnActionTrigger = 'on_enter' | 'on_exit';
-export type ColumnActionKind = 'confirm' | 'form' | 'check_task';
+export type ColumnActionKind = 'confirm' | 'form' | 'check_task' | 'forward_to_board';
 
 export type ParsedCheckTaskItem =
   | { type: 'assignee_set' }
@@ -100,7 +100,11 @@ export function parseBoardColumnActionRules(advancedSettings: unknown): ParsedCo
     const blocking = rule.blocking !== false;
     const actionKindRaw = typeof rule.actionKind === 'string' ? rule.actionKind : 'confirm';
     const actionKind: ColumnActionKind =
-      actionKindRaw === 'form' || actionKindRaw === 'check_task' ? actionKindRaw : 'confirm';
+      actionKindRaw === 'form' ||
+      actionKindRaw === 'check_task' ||
+      actionKindRaw === 'forward_to_board'
+        ? actionKindRaw
+        : 'confirm';
     const config =
       rule.config && typeof rule.config === 'object' && !Array.isArray(rule.config)
         ? (rule.config as Record<string, unknown>)
@@ -196,6 +200,21 @@ export async function getActionCompletionRuleIds(
   });
   return new Set(rows.map((r) => r.ruleId));
 }
+
+export function parseForwardToBoardConfig(config: Record<string, unknown>): {
+  targetBoardId: string;
+  targetColumnId: string;
+  skipIfAlreadyOnBoard: boolean;
+} {
+  return {
+    targetBoardId:
+      typeof config.targetBoardId === 'string' ? config.targetBoardId.trim() : '',
+    targetColumnId:
+      typeof config.targetColumnId === 'string' ? config.targetColumnId.trim() : '',
+    skipIfAlreadyOnBoard: config.skipIfAlreadyOnBoard !== false,
+  };
+}
+
 
 function interactiveRules(rules: ParsedColumnActionRule[]): ParsedColumnActionRule[] {
   return rules.filter((r) => r.actionKind === 'confirm' || r.actionKind === 'form');

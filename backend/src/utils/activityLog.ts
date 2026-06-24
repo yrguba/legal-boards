@@ -9,6 +9,8 @@ export const ACTIVITY_EVENT_TYPES = {
   LEGACY_STATUS: 'legacy.status_event',
   TRANSFERRED: 'task_transferred',
   PRIORITY_CHANGED: 'task.priority_changed',
+  BOARD_PLACEMENT_CREATED: 'task.board_placement_created',
+  BOARD_PLACEMENT_REMOVED: 'task.board_placement_removed',
 } as const;
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -110,6 +112,15 @@ function formatActivitySummary(eventType: string, payload: Record<string, unknow
           ? ` (${payload.oldKey} → ${payload.newKey})`
           : '';
       return `Перенос на доску «${to}» из «${from}»${keyPart}`;
+    }
+    case ACTIVITY_EVENT_TYPES.BOARD_PLACEMENT_CREATED: {
+      const board = String(payload.boardName ?? payload.boardId ?? '—');
+      const col = payload.columnName ? `, колонка «${payload.columnName}»` : '';
+      return `Добавлена на доску «${board}»${col}`;
+    }
+    case ACTIVITY_EVENT_TYPES.BOARD_PLACEMENT_REMOVED: {
+      const board = String(payload.boardName ?? payload.boardId ?? '—');
+      return `Снята с доски «${board}»`;
     }
     default:
       return eventType;

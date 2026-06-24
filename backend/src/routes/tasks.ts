@@ -22,13 +22,25 @@ import {
   findApprovalRuleById,
   parseBoardApprovalRules,
 } from '../utils/boardApprovals';
+import { TaskPositionError } from '../utils/taskPosition';
 import {
-  appendTaskToColumn,
-  applyTaskOrderInColumn,
-  moveTaskToColumnAtPosition,
-  reserveTopPositionInColumn,
-  TaskPositionError,
-} from '../utils/taskPosition';
+  addTaskToBoard,
+  applyPlacementOrderInColumn,
+  applyPlacementToTaskRow,
+  createPrimaryPlacement,
+  getPlacementForBoard,
+  getTaskPlacements,
+  movePlacementInColumn,
+  removeTaskFromBoard,
+  reserveTopPlacementInColumn,
+  taskIncludeForBoardList,
+} from '../utils/taskPlacements';
+import {
+  mapTaskBoardTransition,
+  TASK_BOARD_TRANSITION_KIND,
+  transitionSummary,
+  writeTaskBoardTransition,
+} from '../utils/taskBoardTransitions';
 import {
   assertColumnEnterActionsComplete,
   assertColumnExitActionsComplete,
@@ -281,35 +293,45 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
         }
       }
 
-      const tasks = await prisma.task.findMany({
+      const tasks = await prisma.taskBoardPlacement.findMany({
         where: { boardId: { in: sourceIds } },
         include: {
-          board: { select: { id: true, code: true, name: true } },
           type: true,
-          assignee: {
-            select: { id: true, name: true, email: true, avatar: true },
-          },
-          creator: {
-            select: { id: true, name: true, email: true },
-          },
-          lexCreator: LEX_CREATOR_FOR_TASK,
-          _count: {
-            select: { comments: true, chatMessages: true },
+          task: {
+            include: taskIncludeForBoardList,
           },
         },
         orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
       });
 
-      const payload = tasks.map((t) => {
-        const source = sourceById.get(t.boardId);
+      const payload = tasks.map((p) => {
+        const t = p.task;
+        const source = sourceById.get(p.boardId);
         const unified = unifyTaskRow(t as Record<string, unknown>);
+        const shaped = applyPlacementToTaskRow(
+          enrichTaskWithKey(unified, t.board.code),
+          {
+            boardId: p.boardId,
+            columnId: p.columnId,
+            typeId: p.typeId,
+            position: p.position,
+            isPrimary: p.isPrimary,
+            type: p.type,
+          },
+          {
+            boardCode: t.board.code,
+            primaryBoardCode: t.board.code,
+            taskNumber: t.number,
+            boardPlacementsCount: t._count.boardPlacements,
+          },
+        );
         return {
-          ...unified,
-          sourceBoardId: t.boardId,
+          ...shaped,
+          sourceBoardId: p.boardId,
           sourceBoardCode: t.board.code,
           sourceBoardName: source?.name ?? t.board.name,
-          sourceColumnId: t.columnId,
-          sourceColumnName: columnNameById.get(t.columnId) ?? '—',
+          sourceColumnId: p.columnId,
+          sourceColumnName: columnNameById.get(p.columnId) ?? '—',
         };
       });
 
@@ -317,56 +339,43 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
       return;
     }
 
-    const boardWhere = req.lexClientId
-      ? { boardId: board.id, lexCreatorId: req.lexClientId }
-      : { boardId: board.id };
-
-    const tasks = await prisma.task.findMany({
-      where: boardWhere,
+    const placements = await prisma.taskBoardPlacement.findMany({
+      where: {
+        boardId: board.id,
+        ...(req.lexClientId ? { task: { lexCreatorId: req.lexClientId } } : {}),
+      },
       include: {
         type: true,
-        assignee: {
-          select: { id: true, name: true, email: true, avatar: true },
-        },
-        creator: {
-          select: { id: true, name: true, email: true },
-        },
-        lexCreator: LEX_CREATOR_FOR_TASK,
-        _count: {
-          select: { comments: true, chatMessages: true },
-        },
-        columnApprovals: {
-          orderBy: { createdAt: 'asc' },
-          select: {
-            id: true,
-            ruleId: true,
-            columnId: true,
-            ruleName: true,
-            approvedByUserId: true,
-            status: true,
-            reason: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-        columnActionCompletions: {
-          orderBy: { createdAt: 'asc' },
-          select: {
-            id: true,
-            ruleId: true,
-            columnId: true,
-            ruleName: true,
-            actionKind: true,
-            payload: true,
-            completedByUserId: true,
-            createdAt: true,
-          },
+        task: {
+          include: taskIncludeForBoardList,
         },
       },
       orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
     });
 
-    res.json(tasks.map((t) => enrichTaskWithKey(unifyTaskRow(t as Record<string, unknown>), board.code)));
+    res.json(
+      placements.map((p) => {
+        const taskRow = p.task;
+        const unified = unifyTaskRow(taskRow as Record<string, unknown>);
+        return applyPlacementToTaskRow(
+          enrichTaskWithKey(unified, taskRow.board.code),
+          {
+            boardId: p.boardId,
+            columnId: p.columnId,
+            typeId: p.typeId,
+            position: p.position,
+            isPrimary: p.isPrimary,
+            type: p.type,
+          },
+          {
+            boardCode: board.code,
+            primaryBoardCode: taskRow.board.code,
+            taskNumber: taskRow.number,
+            boardPlacementsCount: taskRow._count.boardPlacements,
+          },
+        );
+      }),
+    );
   } catch (error) {
     console.error('Get tasks error:', error);
     res.status(500).json({ error: 'Ошибка получения задач' });
@@ -520,6 +529,152 @@ router.patch('/:id/conclusion', async (req: AuthRequest, res) => {
   }
 });
 
+/** Размещения задачи на досках */
+router.get('/:id/placements', async (req: AuthRequest, res) => {
+  try {
+    const taskId = taskIdParam(req);
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const placements = await getTaskPlacements(prisma, taskId);
+    res.json({ placements });
+  } catch (error) {
+    console.error('Get task placements error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки размещений' });
+  }
+});
+
+router.post('/:id/placements', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Добавление на доску доступно только сотрудникам Legal Boards' });
+    }
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Требуется авторизация' });
+    }
+
+    const taskId = taskIdParam(req);
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const { boardId, columnId, typeId } = req.body as {
+      boardId?: unknown;
+      columnId?: unknown;
+      typeId?: unknown;
+    };
+    if (typeof boardId !== 'string' || !boardId.trim()) {
+      return res.status(400).json({ error: 'Укажите boardId' });
+    }
+
+    try {
+      const result = await addTaskToBoard(prisma, {
+        taskId,
+        boardId: boardId.trim(),
+        columnId: typeof columnId === 'string' ? columnId : null,
+        typeId: typeof typeId === 'string' ? typeId : null,
+        actorUserId: req.userId,
+      });
+      res.json(result);
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      if (code === 'TASK_NOT_FOUND') return res.status(404).json({ error: 'Задача не найдена' });
+      if (code === 'BOARD_NOT_FOUND') return res.status(404).json({ error: 'Доска не найдена' });
+      if (code === 'AGGREGATED_BOARD') {
+        return res.status(400).json({ error: 'Нельзя добавить задачу на сводную доску' });
+      }
+      if (code === 'WORKSPACE_MISMATCH') {
+        return res.status(400).json({ error: 'Доска из другого пространства' });
+      }
+      if (code === 'TARGET_TYPE_NOT_FOUND' || code === 'TARGET_COLUMN_NOT_FOUND') {
+        return res.status(400).json({ error: 'Не удалось подобрать колонку или тип на целевой доске' });
+      }
+      throw err;
+    }
+  } catch (error) {
+    console.error('Add task placement error:', error);
+    res.status(500).json({ error: 'Ошибка добавления на доску' });
+  }
+});
+
+router.delete('/:id/placements/:boardId', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Снятие с доски доступно только сотрудникам Legal Boards' });
+    }
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Требуется авторизация' });
+    }
+
+    const taskId = taskIdParam(req);
+    const boardId = typeof req.params.boardId === 'string' ? req.params.boardId : '';
+    if (!boardId) {
+      return res.status(400).json({ error: 'Укажите boardId' });
+    }
+
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    try {
+      await removeTaskFromBoard(prisma, {
+        taskId,
+        boardId,
+        actorUserId: req.userId,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      if (code === 'PLACEMENT_NOT_FOUND') {
+        return res.status(404).json({ error: 'Задача не размещена на этой доске' });
+      }
+      if (code === 'CANNOT_REMOVE_PRIMARY') {
+        return res.status(400).json({ error: 'Нельзя снять основную доску задачи' });
+      }
+      if (code === 'LAST_PLACEMENT') {
+        return res.status(400).json({ error: 'У задачи должна остаться хотя бы одна доска' });
+      }
+      throw err;
+    }
+  } catch (error) {
+    console.error('Remove task placement error:', error);
+    res.status(500).json({ error: 'Ошибка снятия с доски' });
+  }
+});
+
+/** История переходов задачи между досками и колонками */
+router.get('/:id/transitions', async (req: AuthRequest, res) => {
+  try {
+    const taskId = taskIdParam(req);
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const rows = await prisma.taskBoardTransition.findMany({
+      where: { taskId },
+      orderBy: { occurredAt: 'desc' },
+      include: {
+        actor: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    res.json({
+      items: rows.map((row) => ({
+        ...mapTaskBoardTransition(row),
+        summary: transitionSummary(row.eventKind, (row.payload ?? {}) as Record<string, unknown>),
+      })),
+    });
+  } catch (error) {
+    console.error('Get task transitions error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки истории переходов' });
+  }
+});
+
 /** Unified activity / audit timeline for a task */
 router.get('/:id/activity', async (req: AuthRequest, res) => {
   try {
@@ -621,22 +776,26 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
-    const chatMessagesRaw = await prisma.chatMessage.findMany({
-      where: { taskId },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        user: {
-          select: { id: true, name: true, avatar: true },
+    const [chatMessagesRaw, boardPlacements] = await Promise.all([
+      prisma.chatMessage.findMany({
+        where: { taskId },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          user: {
+            select: { id: true, name: true, avatar: true },
+          },
+          lexClientUser: {
+            select: { id: true, name: true, email: true },
+          },
         },
-        lexClientUser: {
-          select: { id: true, name: true, email: true },
-        },
-      },
-    });
+      }),
+      getTaskPlacements(prisma, taskId),
+    ]);
 
     const row = unifyTaskRow(task as Record<string, unknown>);
     res.json({
       ...row,
+      boardPlacements,
       chatMessages: chatMessagesRaw.map((m) =>
         unifyChatMessage(m as Record<string, unknown>),
       ),
@@ -691,7 +850,7 @@ router.post('/reorder', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Колонка не найдена на доске' });
     }
 
-    await applyTaskOrderInColumn(prisma, boardId, columnId, taskIds);
+    await applyPlacementOrderInColumn(prisma, boardId, columnId, taskIds);
     res.json({ ok: true });
   } catch (error) {
     if (error instanceof TaskPositionError) {
@@ -743,8 +902,8 @@ router.post('/', async (req: AuthRequest, res) => {
       const lexTaskNumber = await nextTaskNumber(prisma, boardId);
 
       const lexTask = await prisma.$transaction(async (tx) => {
-        const position = await reserveTopPositionInColumn(tx, columnId);
-        return tx.task.create({
+        const position = await reserveTopPlacementInColumn(tx, boardId, columnId);
+        const created = await tx.task.create({
           data: {
             number: lexTaskNumber,
             boardId,
@@ -773,6 +932,15 @@ router.post('/', async (req: AuthRequest, res) => {
             lexCreator: LEX_CREATOR_FOR_TASK,
           },
         });
+        await createPrimaryPlacement(tx, {
+          taskId: created.id,
+          boardId,
+          columnId,
+          typeId,
+          position,
+          actorUserId: null,
+        });
+        return created;
       });
 
       if (finalAssigneeLex) {
@@ -821,8 +989,8 @@ router.post('/', async (req: AuthRequest, res) => {
     const taskNumber = await nextTaskNumber(prisma, boardId);
 
     const task = await prisma.$transaction(async (tx) => {
-      const position = await reserveTopPositionInColumn(tx, columnId);
-      return tx.task.create({
+      const position = await reserveTopPlacementInColumn(tx, boardId, columnId);
+      const created = await tx.task.create({
         data: {
           number: taskNumber,
           boardId,
@@ -851,6 +1019,15 @@ router.post('/', async (req: AuthRequest, res) => {
           lexCreator: LEX_CREATOR_FOR_TASK,
         },
       });
+      await createPrimaryPlacement(tx, {
+        taskId: created.id,
+        boardId,
+        columnId,
+        typeId,
+        position,
+        actorUserId: req.userId,
+      });
+      return created;
     });
 
     if (finalAssigneeId && finalAssigneeId !== req.userId) {
@@ -876,11 +1053,10 @@ router.put('/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Изменение задачи доступно только сотрудникам Legal Boards' });
     }
 
-    const { columnId, typeId, title, description, assigneeId, customFields, priority, position } =
+    const { columnId, typeId, title, description, assigneeId, customFields, priority, position, boardId: bodyBoardId } =
       req.body;
 
     const data: Prisma.TaskUncheckedUpdateInput = {};
-    if (typeId !== undefined) data.typeId = typeId;
     if (title !== undefined) data.title = title;
     if (description !== undefined) data.description = description;
     if (Object.prototype.hasOwnProperty.call(req.body, 'assigneeId')) {
@@ -898,7 +1074,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     const oldTask = await prisma.task.findUnique({
       where: { id: taskIdParam(req) },
       include: {
-        board: { select: { workspaceId: true } },
+        board: { select: { workspaceId: true, code: true } },
         _count: { select: { taskAttachments: true } },
       },
     });
@@ -907,14 +1083,35 @@ router.put('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
+    const contextBoardId =
+      typeof bodyBoardId === 'string' && bodyBoardId.trim() ? bodyBoardId.trim() : oldTask.boardId;
+
+    const contextPlacement = await getPlacementForBoard(prisma, oldTask.id, contextBoardId);
+    if (!contextPlacement) {
+      return res.status(400).json({ error: 'Задача не размещена на указанной доске' });
+    }
+
+    const currentColumnId = contextPlacement.columnId;
+    const currentPosition = contextPlacement.position;
+    const isPrimaryContext = contextPlacement.isPrimary;
+
+    if (typeId !== undefined && isPrimaryContext) {
+      data.typeId = typeId;
+    }
+
     const hasPosition = typeof position === 'number' && Number.isFinite(position);
-    const wantsColumnChange = columnId !== undefined && columnId !== oldTask.columnId;
-    const wantsPositionChange = hasPosition && Math.floor(position) !== oldTask.position;
+    const wantsColumnChange = columnId !== undefined && columnId !== currentColumnId;
+    const wantsPositionChange = hasPosition && Math.floor(position) !== currentPosition;
     const needsReorder = wantsColumnChange || wantsPositionChange;
+    let secondaryTypeId: string | undefined;
+
+    if (typeId !== undefined && !isPrimaryContext && typeId !== contextPlacement.typeId) {
+      secondaryTypeId = typeId;
+    }
 
     if (wantsColumnChange) {
       const boardCfgRow = await prisma.board.findUnique({
-        where: { id: oldTask.boardId },
+        where: { id: contextBoardId },
         select: {
           advancedSettings: true,
           taskFields: {
@@ -937,7 +1134,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       const approvalCheck = await assertColumnApprovalsComplete(
         prisma,
         oldTask.id,
-        oldTask.columnId,
+        currentColumnId,
         advancedSettings,
       );
       if (!approvalCheck.ok) {
@@ -975,14 +1172,14 @@ router.put('/:id', async (req: AuthRequest, res) => {
       }
 
       const ttCfg = parseBoardTimeTrackingCfg(advancedSettings);
-      if (ttCfg) {
+      if (ttCfg && isPrimaryContext) {
         const nextTt = applyTimeTrackingColumnMove(
           {
             trackedTimeSeconds: oldTask.trackedTimeSeconds,
             timeTrackingActiveSince: oldTask.timeTrackingActiveSince,
             timeTrackingCycleOpen: oldTask.timeTrackingCycleOpen,
           },
-          oldTask.columnId,
+          currentColumnId,
           columnId,
           ttCfg,
           new Date(),
@@ -993,7 +1190,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       }
     }
 
-    if (Object.keys(data).length === 0 && !needsReorder) {
+    if (Object.keys(data).length === 0 && !needsReorder && !secondaryTypeId) {
       return res.status(400).json({ error: 'Нет полей для обновления' });
     }
 
@@ -1025,28 +1222,21 @@ router.put('/:id', async (req: AuthRequest, res) => {
     let task;
     try {
       if (needsReorder) {
-        const toColumnId = columnId ?? oldTask.columnId;
-        if (wantsColumnChange) {
-          if (hasPosition) {
-            await moveTaskToColumnAtPosition(
-              prisma,
-              oldTask.id,
-              oldTask.columnId,
-              toColumnId,
-              position,
-            );
-          } else {
-            await appendTaskToColumn(prisma, oldTask.id, oldTask.columnId, toColumnId);
-          }
-        } else if (hasPosition) {
-          await moveTaskToColumnAtPosition(
-            prisma,
-            oldTask.id,
-            oldTask.columnId,
-            oldTask.columnId,
-            position,
-          );
-        }
+        const toColumnId = columnId ?? currentColumnId;
+        await movePlacementInColumn(prisma, {
+          taskId: oldTask.id,
+          boardId: contextBoardId,
+          fromColumnId: currentColumnId,
+          toColumnId,
+          targetPosition: hasPosition ? position : undefined,
+        });
+      }
+
+      if (secondaryTypeId) {
+        await prisma.taskBoardPlacement.update({
+          where: { taskId_boardId: { taskId: oldTask.id, boardId: contextBoardId } },
+          data: { typeId: secondaryTypeId },
+        });
       }
 
       task =
@@ -1067,12 +1257,12 @@ router.put('/:id', async (req: AuthRequest, res) => {
       throw error;
     }
 
-    if (columnId !== undefined && oldTask.columnId !== columnId) {
+    if (columnId !== undefined && currentColumnId !== columnId) {
       await prisma.taskColumnApproval.deleteMany({
-        where: { taskId: task.id, columnId: oldTask.columnId },
+        where: { taskId: task.id, columnId: currentColumnId },
       });
       await prisma.taskColumnActionCompletion.deleteMany({
-        where: { taskId: task.id, columnId: oldTask.columnId },
+        where: { taskId: task.id, columnId: currentColumnId },
       });
     }
 
@@ -1084,11 +1274,11 @@ router.put('/:id', async (req: AuthRequest, res) => {
       ),
     );
 
-    if (columnId !== undefined && oldTask.columnId !== columnId) {
+    if (columnId !== undefined && currentColumnId !== columnId) {
       const [fromColumn, toColumn] = await Promise.all([
-        oldTask.columnId
+        currentColumnId
           ? prisma.boardColumn.findUnique({
-              where: { id: oldTask.columnId },
+              where: { id: currentColumnId },
               select: { name: true },
             })
           : Promise.resolve(null),
@@ -1110,12 +1300,12 @@ router.put('/:id', async (req: AuthRequest, res) => {
         try {
           await writeActivityLog(prisma, {
             workspaceId: oldTask.board.workspaceId,
-            boardId: oldTask.boardId,
+            boardId: contextBoardId,
             taskId: task.id,
             eventType: ACTIVITY_EVENT_TYPES.COLUMN_CHANGED,
             actorUserId: req.userId,
             payload: {
-              fromColumnId: oldTask.columnId,
+              fromColumnId: currentColumnId,
               toColumnId: columnId,
               fromColumnName: fromColumn?.name ?? null,
               toColumnName: toColumn.name,
@@ -1125,6 +1315,20 @@ router.put('/:id', async (req: AuthRequest, res) => {
               assigneeId: task.assigneeId,
             },
             source: typeof req.body?.source === 'string' ? req.body.source : 'api',
+          });
+          await writeTaskBoardTransition(prisma, {
+            taskId: task.id,
+            workspaceId: oldTask.board.workspaceId,
+            eventKind: TASK_BOARD_TRANSITION_KIND.COLUMN_CHANGED,
+            boardId: contextBoardId,
+            fromColumnId: currentColumnId,
+            toColumnId: columnId,
+            actorUserId: req.userId,
+            source: typeof req.body?.source === 'string' ? req.body.source : 'api',
+            payload: {
+              fromColumnName: fromColumn?.name ?? null,
+              toColumnName: toColumn.name,
+            },
           });
         } catch (logErr) {
           console.error('Activity log column_changed error:', logErr);
@@ -1152,6 +1356,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
           });
         }
       }
+
     }
 
     if (priority !== undefined && oldTask.priority !== task.priority) {
@@ -1261,15 +1466,45 @@ router.put('/:id', async (req: AuthRequest, res) => {
       }
     }
 
+    const [contextBoard, placementsCount, refreshedPlacement] = await Promise.all([
+      prisma.board.findUnique({
+        where: { id: contextBoardId },
+        select: { code: true },
+      }),
+      prisma.taskBoardPlacement.count({ where: { taskId: task.id } }),
+      getPlacementForBoard(prisma, task.id, contextBoardId),
+    ]);
+
+    const unifiedTask = unifyTaskRow(task as Record<string, unknown>);
+    const shapedTask = refreshedPlacement
+      ? applyPlacementToTaskRow(
+          enrichTaskWithKey(unifiedTask, oldTask.board.code),
+          {
+            boardId: refreshedPlacement.boardId,
+            columnId: refreshedPlacement.columnId,
+            typeId: refreshedPlacement.typeId,
+            position: refreshedPlacement.position,
+            isPrimary: refreshedPlacement.isPrimary,
+            type: refreshedPlacement.type,
+          },
+          {
+            boardCode: contextBoard?.code ?? oldTask.board.code,
+            primaryBoardCode: oldTask.board.code,
+            taskNumber: task.number,
+            boardPlacementsCount: placementsCount,
+          },
+        )
+      : enrichTaskWithKey(unifiedTask, oldTask.board.code);
+
     res.json({
-      ...task,
+      ...shapedTask,
       columnApprovals:
-        columnId !== undefined && oldTask.columnId !== columnId
-          ? task.columnApprovals.filter((a) => a.columnId !== oldTask.columnId)
+        columnId !== undefined && currentColumnId !== columnId
+          ? task.columnApprovals.filter((a) => a.columnId !== currentColumnId)
           : task.columnApprovals,
       columnActionCompletions:
-        columnId !== undefined && oldTask.columnId !== columnId
-          ? task.columnActionCompletions.filter((a) => a.columnId !== oldTask.columnId)
+        columnId !== undefined && currentColumnId !== columnId
+          ? task.columnActionCompletions.filter((a) => a.columnId !== currentColumnId)
           : task.columnActionCompletions,
     });
   } catch (error) {

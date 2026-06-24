@@ -46,8 +46,14 @@ import {
 } from '../utils/boardColumnActions';
 import { boardsApi, tasksApi, ApiError } from '../services/api';
 import { ColumnActionTransitionModal } from './ColumnActionTransitionModal';
+import {
+  ForwardToBoardOfferDialog,
+  prepareForwardToBoardOffer,
+  type ForwardToBoardOffer,
+} from './ForwardToBoardOfferDialog';
 import { CreateAggregatedBoardModal } from './CreateAggregatedBoardModal';
 import { TransferTaskModal } from './TransferTaskModal';
+import { TaskBoardCountBadge } from './TaskBoardCountBadge';
 import { useApp } from '../store/AppContext';
 import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import {
@@ -130,12 +136,16 @@ function AggregatedTaskCard({
             className="text-sm font-medium text-slate-900 hover:text-brand line-clamp-2"
             onClick={(e) => e.stopPropagation()}
           >
+            {task.key ? (
+              <span className="mr-1.5 font-mono text-xs font-normal text-slate-400">{task.key}</span>
+            ) : null}
             {task.title}
           </Link>
-          {task.key ? (
-            <span className="text-xs text-slate-400 font-mono">{task.key}</span>
+          {task.sourceBoardName ? (
+            <span className="block text-[11px] text-slate-500">{task.sourceBoardName}</span>
           ) : null}
         </div>
+        <TaskBoardCountBadge count={task.boardPlacementsCount} compact />
       </div>
 
       <div className="flex items-center gap-1.5 mb-2">
@@ -422,6 +432,7 @@ export function AggregatedBoardView({
   } | null>(null);
   const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
   const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const [forwardOffer, setForwardOffer] = useState<ForwardToBoardOffer | null>(null);
 
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTaskId, setTransferTaskId] = useState<string | null>(null);
@@ -721,10 +732,14 @@ export function AggregatedBoardView({
     originColumnId: string,
     position?: number,
     revertSnapshot?: Task[] | null,
+    boardId?: string,
   ) => {
     try {
-      const payload: { columnId: string; position?: number } = { columnId: targetColumnId };
+      const payload: { columnId: string; position?: number; boardId?: string } = {
+        columnId: targetColumnId,
+      };
       if (typeof position === 'number') payload.position = position;
+      if (boardId) payload.boardId = boardId;
       const updated = (await tasksApi.update(taskId, payload)) as Record<string, unknown>;
       const colName = columnNameById(sources, targetColumnId);
       onTasksChange((prev) =>
@@ -732,6 +747,14 @@ export function AggregatedBoardView({
           task.id === taskId ? mergeTaskFromUpdateResponse(task, updated, colName) : task,
         ),
       );
+      const sourceBoard = boardId ? sourceBoards.get(boardId) : undefined;
+      const offer = await prepareForwardToBoardOffer(
+        sourceBoard,
+        taskId,
+        originColumnId,
+        targetColumnId,
+      );
+      if (offer) setForwardOffer(offer);
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : 'Не удалось изменить статус задачи';
@@ -880,6 +903,7 @@ export function AggregatedBoardView({
         originColumnId,
         targetPosition >= 0 ? targetPosition : undefined,
         snapshot,
+        originBoardId,
       );
     } catch {
       /* сообщение уже показано */
@@ -887,9 +911,23 @@ export function AggregatedBoardView({
   };
 
   const handleTransferSuccess = async (result: {
+    mode: 'move' | 'mirror';
     moved: { taskId: string; newKey: string }[];
+    added: { taskId: string; created: boolean }[];
     skipped: { taskId: string; reason: string }[];
   }) => {
+    if (result.mode === 'mirror') {
+      const created = result.added.filter((a) => a.created).length;
+      setTransferNotice(
+        created
+          ? `Добавлено на доску: ${created}`
+          : result.skipped.length
+            ? `Пропущено: ${result.skipped.length}`
+            : 'Задача уже на целевой доске',
+      );
+      return;
+    }
+
     const movedIds = new Set(result.moved.map((m) => m.taskId));
     if (movedIds.size === 0) {
       setTransferNotice(
@@ -1286,6 +1324,9 @@ export function AggregatedBoardView({
               columnTransition.taskId,
               columnTransition.toColumnId,
               columnTransition.fromColumnId,
+              undefined,
+              null,
+              columnTransition.sourceBoardId,
             );
             setColumnTransition(null);
           } catch (e: unknown) {
@@ -1296,6 +1337,21 @@ export function AggregatedBoardView({
           } finally {
             setColumnTransitionSubmitting(false);
           }
+        }}
+      />
+
+      <ForwardToBoardOfferDialog
+        offer={forwardOffer}
+        onClose={() => setForwardOffer(null)}
+        onAdded={(taskId, created) => {
+          if (!created) return;
+          onTasksChange((prev) =>
+            prev.map((t) =>
+              t.id === taskId
+                ? { ...t, boardPlacementsCount: (t.boardPlacementsCount ?? 1) + 1 }
+                : t,
+            ),
+          );
         }}
       />
 

@@ -117,6 +117,7 @@ model User {
   knowledgeArticlesCreated KnowledgeArticle[]
   taskColumnApprovals      TaskColumnApproval[] @relation("TaskColumnApprovalApprover")
   taskColumnActionCompletions TaskColumnActionCompletion[] @relation("TaskColumnActionCompleter")
+  taskBoardTransitions        TaskBoardTransition[]        @relation("TaskBoardTransitionActor")
   activityLogs             ActivityLog[] @relation("ActivityLogActor")
   ledGroups                Group[] @relation("GroupLeader")
   createdConferences       Conference[] @relation("ConferenceCreator")
@@ -416,6 +417,7 @@ model Board {
   taskFields TaskField[]
   taskTypes  TaskType[]
   tasks      Task[]
+  taskPlacements TaskBoardPlacement[]
   codeAliases BoardCodeAlias[]
   aggregatedSources AggregatedBoardSource[] @relation("AggregatedBoard")
   aggregatedIn      AggregatedBoardSource[] @relation("SourceBoard")
@@ -464,6 +466,7 @@ model BoardColumn {
 
   board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
   tasks Task[]
+  taskPlacements TaskBoardPlacement[]
 
   @@index([boardId])
   @@index([position])
@@ -493,6 +496,7 @@ model TaskType {
 
   board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
   tasks Task[]
+  taskPlacements TaskBoardPlacement[]
 
   @@index([boardId])
 }
@@ -541,6 +545,8 @@ model Task {
   columnApprovals      TaskColumnApproval[]
   columnActionCompletions TaskColumnActionCompletion[]
   activityLogs         ActivityLog[]
+  boardPlacements      TaskBoardPlacement[]
+  boardTransitions     TaskBoardTransition[]
 
   @@unique([boardId, number])
   @@index([boardId])
@@ -564,6 +570,59 @@ model TaskStatusEvent {
 
   @@index([taskId])
   @@index([taskId, createdAt])
+}
+
+/// Размещение задачи на доске (свой статус/колонка на каждой доске)
+model TaskBoardPlacement {
+  id        String   @id @default(cuid())
+  taskId    String
+  boardId   String
+  columnId  String
+  typeId    String
+  position  Int      @default(0)
+  isPrimary Boolean  @default(false)
+  linkedFromBoardId  String?
+  linkedFromColumnId String?
+  linkedByRuleId     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task   Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  board  Board       @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  column BoardColumn @relation(fields: [columnId], references: [id])
+  type   TaskType    @relation(fields: [typeId], references: [id])
+
+  @@unique([taskId, boardId])
+  @@index([boardId, columnId])
+  @@index([boardId, columnId, position])
+  @@index([taskId])
+}
+
+/// История перемещений задачи между досками и колонками
+model TaskBoardTransition {
+  id             String   @id @default(cuid())
+  taskId         String
+  workspaceId    String
+  eventKind      String
+  boardId        String
+  columnId       String?
+  fromColumnId   String?
+  toColumnId     String?
+  targetBoardId  String?
+  targetColumnId String?
+  ruleId         String?
+  ruleName       String?
+  actorUserId    String?
+  source         String   @default("api")
+  payload        Json     @default("{}")
+  occurredAt     DateTime @default(now())
+
+  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor User? @relation("TaskBoardTransitionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, occurredAt])
+  @@index([workspaceId, occurredAt])
+  @@index([boardId, occurredAt])
 }
 
 model Comment {

@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
-import type { ColumnTransitionInteractiveStep } from '../../utils/boardColumnActions';
+import type { ColumnTransitionInteractiveStep } from '../utils/boardColumnActions';
 
 type Props = {
   open: boolean;

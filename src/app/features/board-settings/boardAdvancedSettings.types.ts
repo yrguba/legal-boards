@@ -24,7 +24,7 @@ export type BoardApprovalRule = {
 };
 
 export type ColumnActionTrigger = 'on_enter' | 'on_exit';
-export type ColumnActionKind = 'confirm' | 'form' | 'check_task';
+export type ColumnActionKind = 'confirm' | 'form' | 'check_task' | 'forward_to_board';
 
 export type ColumnActionFormField = {
   key: string;
@@ -58,6 +58,12 @@ export type BoardColumnActionRule = {
     checkboxLabel?: string;
     fields?: ColumnActionFormField[];
     checks?: ColumnActionCheckItem[];
+    /** forward_to_board */
+    targetBoardId?: string;
+    targetColumnId?: string;
+    targetBoardName?: string;
+    targetColumnName?: string;
+    skipIfAlreadyOnBoard?: boolean;
   };
 };
 

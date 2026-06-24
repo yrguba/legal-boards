@@ -67,6 +67,7 @@ type Args = {
   setTask: React.Dispatch<React.SetStateAction<TaskRecord | null>>;
   setColumnTransition: React.Dispatch<React.SetStateAction<ColumnTransitionState | null>>;
   loadActivity: () => void;
+  onAfterColumnMove?: (fromColumnId: string, toColumnId: string) => void;
 };
 
 function buildPatchForField(
@@ -122,6 +123,7 @@ export function useTaskFieldUpdate({
   setTask,
   setColumnTransition,
   loadActivity,
+  onAfterColumnMove,
 }: Args) {
   const [savingField, setSavingField] = useState<InlineFieldKey | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<InlineFieldKey, string>>>({});
@@ -200,6 +202,7 @@ export function useTaskFieldUpdate({
       }
 
       await applyUpdate({ columnId: toColumnId });
+      onAfterColumnMove?.(task.columnId, toColumnId);
       return true;
     },
     [
@@ -212,6 +215,7 @@ export function useTaskFieldUpdate({
       taskAttachments,
       applyUpdate,
       setColumnTransition,
+      onAfterColumnMove,
     ],
   );
 
@@ -257,17 +261,20 @@ export function useTaskFieldUpdate({
   );
 
   const finishColumnTransition = useCallback(
-    async (toColumnId: string, pendingUpdate: TaskSnapshot) => {
+    async (toColumnId: string, pendingUpdate: TaskSnapshot, fromColumnId: string) => {
       if (!activeTaskId) return;
       setSavingField('columnId');
       try {
         await applyUpdate({ ...pendingUpdate, columnId: toColumnId });
         setColumnTransition(null);
+        if (fromColumnId !== toColumnId) {
+          onAfterColumnMove?.(fromColumnId, toColumnId);
+        }
       } finally {
         setSavingField(null);
       }
     },
-    [activeTaskId, applyUpdate, setColumnTransition],
+    [activeTaskId, applyUpdate, setColumnTransition, onAfterColumnMove],
   );
 
   return {

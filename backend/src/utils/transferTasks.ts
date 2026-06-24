@@ -1,9 +1,19 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { assertColumnApprovalsComplete } from './boardApprovals';
-import { writeActivityLog } from './activityLog';
+import { ACTIVITY_EVENT_TYPES, writeActivityLog } from './activityLog';
 import { formatTaskKey, nextTaskNumber } from './taskKeys';
+import {
+  addTaskToBoard,
+  getPlacementForBoard,
+  removeTaskFromBoard,
+  reserveTopPlacementInColumn,
+  syncPrimaryTaskFields,
+} from './taskPlacements';
+import { TASK_BOARD_TRANSITION_KIND, writeTaskBoardTransition } from './taskBoardTransitions';
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+export type TransferMode = 'move' | 'mirror';
 
 export type TransferTasksInput = {
   sourceBoardId: string;
@@ -13,6 +23,7 @@ export type TransferTasksInput = {
   typeMapping?: Record<string, string>;
   defaultTargetTypeId?: string;
   force?: boolean;
+  mode?: TransferMode;
   actorUserId: string;
 };
 
@@ -29,6 +40,12 @@ export type TransferTaskMoved = {
   assigneeCleared?: boolean;
 };
 
+export type TransferTaskAdded = {
+  taskId: string;
+  key: string;
+  created: boolean;
+};
+
 export type TransferTaskSkipped = {
   taskId: string;
   reason: string;
@@ -36,7 +53,9 @@ export type TransferTaskSkipped = {
 };
 
 export type TransferTasksResult = {
+  mode: TransferMode;
   moved: TransferTaskMoved[];
+  added: TransferTaskAdded[];
   skipped: TransferTaskSkipped[];
   warnings: TransferTaskWarning[];
 };
@@ -95,6 +114,175 @@ function resolveTargetTypeId(
   return targetTypeIds[0] ?? null;
 }
 
+async function movePrimaryPlacement(
+  prisma: PrismaClient,
+  args: {
+    task: {
+      id: string;
+      number: number;
+      columnId: string;
+      typeId: string;
+      assigneeId: string | null;
+      customFields: unknown;
+      board: { code: string };
+    };
+    sourceBoardId: string;
+    sourceBoardCode: string;
+    sourceColumnId: string;
+    targetBoardId: string;
+    targetBoardCode: string;
+    targetBoardName: string;
+    targetColumnId: string;
+    targetColumnName: string;
+    targetTypeId: string;
+    newAssigneeId: string | null;
+    mappedCustomFields: Record<string, unknown>;
+    actorUserId: string;
+  },
+): Promise<{ oldKey: string; newKey: string }> {
+  const oldKey = formatTaskKey(args.sourceBoardCode, args.task.number);
+
+  return prisma.$transaction(async (tx) => {
+    const sourcePlacement = await tx.taskBoardPlacement.findUnique({
+      where: { taskId_boardId: { taskId: args.task.id, boardId: args.sourceBoardId } },
+    });
+    if (!sourcePlacement) throw new Error('SOURCE_PLACEMENT_NOT_FOUND');
+
+    await tx.taskBoardPlacement.delete({
+      where: { taskId_boardId: { taskId: args.task.id, boardId: args.sourceBoardId } },
+    });
+
+    await tx.taskBoardPlacement.updateMany({
+      where: {
+        boardId: args.sourceBoardId,
+        columnId: sourcePlacement.columnId,
+        position: { gt: sourcePlacement.position },
+      },
+      data: { position: { decrement: 1 } },
+    });
+
+    const newNumber = await nextTaskNumber(tx, args.targetBoardId);
+    const newKey = formatTaskKey(args.targetBoardCode, newNumber);
+    const position = await reserveTopPlacementInColumn(
+      tx,
+      args.targetBoardId,
+      args.targetColumnId,
+    );
+
+    const existingTarget = await tx.taskBoardPlacement.findUnique({
+      where: { taskId_boardId: { taskId: args.task.id, boardId: args.targetBoardId } },
+    });
+
+    if (existingTarget) {
+      await tx.taskBoardPlacement.update({
+        where: { id: existingTarget.id },
+        data: {
+          isPrimary: true,
+          columnId: args.targetColumnId,
+          typeId: args.targetTypeId,
+          position,
+        },
+      });
+    } else {
+      await tx.taskBoardPlacement.create({
+        data: {
+          taskId: args.task.id,
+          boardId: args.targetBoardId,
+          columnId: args.targetColumnId,
+          typeId: args.targetTypeId,
+          position,
+          isPrimary: true,
+        },
+      });
+    }
+
+    await tx.taskBoardPlacement.updateMany({
+      where: { taskId: args.task.id, boardId: { not: args.targetBoardId } },
+      data: { isPrimary: false },
+    });
+
+    await tx.task.update({
+      where: { id: args.task.id },
+      data: {
+        boardId: args.targetBoardId,
+        columnId: args.targetColumnId,
+        typeId: args.targetTypeId,
+        number: newNumber,
+        position,
+        assigneeId: args.newAssigneeId,
+        customFields: args.mappedCustomFields as Prisma.InputJsonValue,
+        trackedTimeSeconds: 0,
+        timeTrackingActiveSince: null,
+        timeTrackingCycleOpen: false,
+      },
+    });
+
+    await syncPrimaryTaskFields(tx, args.task.id, {
+      boardId: args.targetBoardId,
+      columnId: args.targetColumnId,
+      typeId: args.targetTypeId,
+      position,
+    });
+
+    await tx.taskColumnApproval.deleteMany({ where: { taskId: args.task.id } });
+    await tx.taskColumnActionCompletion.deleteMany({ where: { taskId: args.task.id } });
+
+    const sourceBoard = await tx.board.findUnique({
+      where: { id: args.sourceBoardId },
+      select: { workspaceId: true, name: true },
+    });
+
+    await writeTaskBoardTransition(tx, {
+      taskId: args.task.id,
+      workspaceId: sourceBoard?.workspaceId ?? '',
+      eventKind: TASK_BOARD_TRANSITION_KIND.PLACEMENT_REMOVED,
+      boardId: args.sourceBoardId,
+      columnId: sourcePlacement.columnId,
+      actorUserId: args.actorUserId,
+      source: 'transfer',
+      payload: { boardName: sourceBoard?.name, mode: 'move' },
+    });
+
+    await writeTaskBoardTransition(tx, {
+      taskId: args.task.id,
+      workspaceId: sourceBoard?.workspaceId ?? '',
+      eventKind: TASK_BOARD_TRANSITION_KIND.PLACEMENT_CREATED,
+      boardId: args.targetBoardId,
+      columnId: args.targetColumnId,
+      actorUserId: args.actorUserId,
+      source: 'transfer',
+      payload: {
+        boardName: args.targetBoardName,
+        columnName: args.targetColumnName,
+        isPrimary: true,
+        mode: 'move',
+      },
+    });
+
+    await writeActivityLog(tx, {
+      workspaceId: sourceBoard?.workspaceId ?? '',
+      boardId: args.targetBoardId,
+      taskId: args.task.id,
+      eventType: ACTIVITY_EVENT_TYPES.TRANSFERRED,
+      actorUserId: args.actorUserId,
+      payload: {
+        mode: 'move',
+        fromBoardId: args.sourceBoardId,
+        fromBoardCode: args.sourceBoardCode,
+        toBoardId: args.targetBoardId,
+        toBoardCode: args.targetBoardCode,
+        oldKey,
+        newKey,
+        targetColumnId: args.targetColumnId,
+        targetColumnName: args.targetColumnName,
+        isPrimary: true,
+      },
+    });
+
+    return { oldKey, newKey };
+  });
+}
+
 export async function transferTasks(
   prisma: PrismaClient,
   input: TransferTasksInput,
@@ -107,10 +295,17 @@ export async function transferTasks(
     typeMapping,
     defaultTargetTypeId,
     force = false,
+    mode = 'move',
     actorUserId,
   } = input;
 
-  const result: TransferTasksResult = { moved: [], skipped: [], warnings: [] };
+  const result: TransferTasksResult = {
+    mode,
+    moved: [],
+    added: [],
+    skipped: [],
+    warnings: [],
+  };
 
   if (!taskIds.length) {
     return result;
@@ -142,6 +337,7 @@ export async function transferTasks(
 
   if (!sourceBoard) throw new Error('SOURCE_BOARD_NOT_FOUND');
   if (!targetBoard) throw new Error('TARGET_BOARD_NOT_FOUND');
+  if (targetBoard.kind === 'aggregated') throw new Error('AGGREGATED_BOARD');
 
   const resolvedColumnId =
     targetColumnId ?? targetBoard.columns[0]?.id ?? null;
@@ -153,14 +349,22 @@ export async function transferTasks(
   const targetTypeIds = targetBoard.taskTypes.map((t) => t.id);
   if (targetTypeIds.length === 0) throw new Error('TARGET_TYPES_EMPTY');
 
-  const tasks = await prisma.task.findMany({
-    where: { id: { in: uniqueTaskIds }, boardId: sourceBoardId },
+  const placements = await prisma.taskBoardPlacement.findMany({
+    where: {
+      boardId: sourceBoardId,
+      taskId: { in: uniqueTaskIds },
+    },
     include: {
-      assignee: { select: { id: true, name: true } },
+      task: {
+        include: {
+          board: { select: { id: true, code: true } },
+          assignee: { select: { id: true, name: true } },
+        },
+      },
     },
   });
 
-  const foundIds = new Set(tasks.map((t) => t.id));
+  const foundIds = new Set(placements.map((p) => p.taskId));
   for (const id of uniqueTaskIds) {
     if (!foundIds.has(id)) {
       result.skipped.push({
@@ -171,19 +375,12 @@ export async function transferTasks(
     }
   }
 
-  type PendingMove = {
-    task: (typeof tasks)[number];
-    targetTypeId: string;
-    newAssigneeId: string | null;
-    assigneeCleared: boolean;
-    assigneeWarning?: TransferTaskWarning;
-  };
+  for (const placement of placements) {
+    const task = placement.task;
+    const placementTypeId = placement.typeId;
 
-  const pending: PendingMove[] = [];
-
-  for (const task of tasks) {
     const targetTypeId = resolveTargetTypeId(
-      task.typeId,
+      placementTypeId,
       typeMapping,
       defaultTargetTypeId,
       targetTypeIds,
@@ -201,7 +398,7 @@ export async function transferTasks(
       const approvalCheck = await assertColumnApprovalsComplete(
         prisma,
         task.id,
-        task.columnId,
+        placement.columnId,
         sourceBoard.advancedSettings,
       );
       if (!approvalCheck.ok) {
@@ -216,7 +413,6 @@ export async function transferTasks(
 
     let newAssigneeId = task.assigneeId;
     let assigneeCleared = false;
-    let assigneeWarning: TransferTaskWarning | undefined;
 
     if (task.assigneeId) {
       const inWorkspace = await isUserInWorkspace(
@@ -228,94 +424,154 @@ export async function transferTasks(
         newAssigneeId = null;
         assigneeCleared = true;
         const name = task.assignee?.name ?? task.assigneeId;
-        assigneeWarning = {
+        result.warnings.push({
           taskId: task.id,
           code: 'assignee_cleared',
           message: `Исполнитель «${name}» не состоит в целевом пространстве — назначение снято`,
-        };
-        result.warnings.push(assigneeWarning);
+        });
       }
     }
 
-    pending.push({
-      task,
-      targetTypeId,
-      newAssigneeId,
-      assigneeCleared,
-      assigneeWarning,
-    });
-  }
+    const taskKey = formatTaskKey(task.board.code, task.number);
 
-  if (pending.length === 0) {
-    return result;
-  }
+    if (mode === 'mirror') {
+      try {
+        const existing = await getPlacementForBoard(prisma, task.id, targetBoardId);
+        if (existing) {
+          result.added.push({ taskId: task.id, key: taskKey, created: false });
+          continue;
+        }
 
-  await prisma.$transaction(async (tx) => {
-    let nextNum = await nextTaskNumber(tx, targetBoardId);
-    let nextPosition = await tx.task.count({ where: { columnId: resolvedColumnId } });
-
-    for (const item of pending) {
-      const { task, targetTypeId, newAssigneeId, assigneeCleared } = item;
-      const oldKey = formatTaskKey(sourceBoard.code, task.number);
-      const newNumber = nextNum++;
-      const newKey = formatTaskKey(targetBoard.code, newNumber);
-
-      const mappedCustomFields = mapCustomFieldsByName(
-        sourceBoard.taskFields,
-        targetBoard.taskFields,
-        task.customFields,
-      );
-
-      await tx.task.update({
-        where: { id: task.id },
-        data: {
+        const addResult = await addTaskToBoard(prisma, {
+          taskId: task.id,
           boardId: targetBoardId,
           columnId: resolvedColumnId,
           typeId: targetTypeId,
-          number: newNumber,
-          position: nextPosition++,
-          assigneeId: newAssigneeId,
-          customFields: mappedCustomFields as Prisma.InputJsonValue,
-          trackedTimeSeconds: 0,
-          timeTrackingActiveSince: null,
-          timeTrackingCycleOpen: false,
-        },
-      });
+          actorUserId,
+        });
 
-      await tx.taskColumnApproval.deleteMany({ where: { taskId: task.id } });
-      await tx.taskColumnActionCompletion.deleteMany({ where: { taskId: task.id } });
+        result.added.push({
+          taskId: task.id,
+          key: taskKey,
+          created: addResult.created,
+        });
 
-      await writeActivityLog(tx, {
-        workspaceId: targetBoard.workspaceId,
-        boardId: targetBoardId,
-        taskId: task.id,
-        eventType: 'task_transferred',
-        actorUserId,
-        payload: {
-          fromBoardId: sourceBoardId,
-          fromBoardCode: sourceBoard.code,
-          toBoardId: targetBoardId,
-          toBoardCode: targetBoard.code,
-          fromWorkspaceId: sourceBoard.workspaceId,
-          toWorkspaceId: targetBoard.workspaceId,
-          oldKey,
-          newKey,
+        await writeActivityLog(prisma, {
+          workspaceId: targetBoard.workspaceId,
+          boardId: targetBoardId,
+          taskId: task.id,
+          eventType: ACTIVITY_EVENT_TYPES.TRANSFERRED,
+          actorUserId,
+          payload: {
+            mode: 'mirror',
+            fromBoardId: sourceBoardId,
+            fromBoardCode: sourceBoard.code,
+            toBoardId: targetBoardId,
+            toBoardCode: targetBoard.code,
+            key: taskKey,
+            targetColumnId: resolvedColumnId,
+            targetColumnName: targetColumn.name,
+          },
+        });
+      } catch (err) {
+        result.skipped.push({
+          taskId: task.id,
+          reason: err instanceof Error ? err.message : 'Не удалось добавить на доску',
+          code: 'mirror_failed',
+        });
+      }
+      continue;
+    }
+
+    // mode === 'move'
+    try {
+      if (placement.isPrimary) {
+        const mappedCustomFields = mapCustomFieldsByName(
+          sourceBoard.taskFields,
+          targetBoard.taskFields,
+          task.customFields,
+        );
+
+        const keys = await movePrimaryPlacement(prisma, {
+          task: {
+            id: task.id,
+            number: task.number,
+            columnId: placement.columnId,
+            typeId: placementTypeId,
+            assigneeId: task.assigneeId,
+            customFields: task.customFields,
+            board: task.board,
+          },
+          sourceBoardId,
+          sourceBoardCode: sourceBoard.code,
+          sourceColumnId: placement.columnId,
+          targetBoardId,
+          targetBoardCode: targetBoard.code,
+          targetBoardName: targetBoard.name,
           targetColumnId: resolvedColumnId,
           targetColumnName: targetColumn.name,
-          assigneeCleared,
-          fromAssigneeId: task.assigneeId,
-          toAssigneeId: newAssigneeId,
-        },
-      });
+          targetTypeId,
+          newAssigneeId,
+          mappedCustomFields,
+          actorUserId,
+        });
 
-      result.moved.push({
+        result.moved.push({
+          taskId: task.id,
+          oldKey: keys.oldKey,
+          newKey: keys.newKey,
+          ...(assigneeCleared ? { assigneeCleared: true } : {}),
+        });
+      } else {
+        await removeTaskFromBoard(prisma, {
+          taskId: task.id,
+          boardId: sourceBoardId,
+          actorUserId,
+        });
+
+        await addTaskToBoard(prisma, {
+          taskId: task.id,
+          boardId: targetBoardId,
+          columnId: resolvedColumnId,
+          typeId: targetTypeId,
+          actorUserId,
+        });
+
+        await writeActivityLog(prisma, {
+          workspaceId: targetBoard.workspaceId,
+          boardId: targetBoardId,
+          taskId: task.id,
+          eventType: ACTIVITY_EVENT_TYPES.TRANSFERRED,
+          actorUserId,
+          payload: {
+            mode: 'move',
+            fromBoardId: sourceBoardId,
+            fromBoardCode: sourceBoard.code,
+            toBoardId: targetBoardId,
+            toBoardCode: targetBoard.code,
+            oldKey: taskKey,
+            newKey: taskKey,
+            targetColumnId: resolvedColumnId,
+            targetColumnName: targetColumn.name,
+            isPrimary: false,
+          },
+        });
+
+        result.moved.push({
+          taskId: task.id,
+          oldKey: taskKey,
+          newKey: taskKey,
+          ...(assigneeCleared ? { assigneeCleared: true } : {}),
+        });
+      }
+    } catch (err) {
+      result.skipped.push({
         taskId: task.id,
-        oldKey,
-        newKey,
-        ...(assigneeCleared ? { assigneeCleared: true } : {}),
+        reason: err instanceof Error ? err.message : 'Не удалось перенести задачу',
+        code: 'move_failed',
       });
     }
-  });
+  }
 
   return result;
 }

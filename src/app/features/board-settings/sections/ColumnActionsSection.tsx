@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import type { TaskField } from '../../../types';
+import { boardsApi } from '../../../services/api';
 import type {
   BoardAdvancedSettings,
   BoardColumnActionRule,
@@ -32,14 +33,59 @@ export function ColumnActionsSection({
   columnActions,
   columns,
   taskFields,
+  currentBoardId,
+  workspaceId,
   onChange,
 }: {
   columnActions: NonNullable<BoardAdvancedSettings['columnActions']>;
   columns: { id: string; name: string }[];
   taskFields: TaskField[];
+  currentBoardId: string;
+  workspaceId: string;
   onChange: (next: NonNullable<BoardAdvancedSettings['columnActions']>) => void;
 }) {
   const rules = columnActions.rules;
+  const [workspaceBoards, setWorkspaceBoards] = useState<
+    { id: string; name: string; kind?: string; columns?: { id: string; name: string }[] }[]
+  >([]);
+  const [targetColumnsByBoard, setTargetColumnsByBoard] = useState<
+    Record<string, { id: string; name: string }[]>
+  >({});
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    void boardsApi.getByWorkspace(workspaceId).then((rows) => {
+      if (!cancelled) {
+        setWorkspaceBoards(
+          (rows as { id: string; name: string; kind?: string }[]).filter(
+            (b) => b.id !== currentBoardId && b.kind !== 'aggregated',
+          ),
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, currentBoardId]);
+
+  const loadTargetColumns = async (boardId: string) => {
+    if (!boardId || targetColumnsByBoard[boardId]) return;
+    const board = await boardsApi.getById(boardId);
+    const cols = (board.columns ?? []).map((c: { id: string; name: string }) => ({
+      id: c.id,
+      name: c.name,
+    }));
+    setTargetColumnsByBoard((prev) => ({ ...prev, [boardId]: cols }));
+  };
+  useEffect(() => {
+    for (const rule of rules) {
+      if (rule.actionKind === 'forward_to_board' && rule.config.targetBoardId) {
+        void loadTargetColumns(rule.config.targetBoardId);
+      }
+    }
+  }, [rules]);
+
   const sortedTaskFields = useMemo(
     () => [...taskFields].sort((a, b) => a.position - b.position),
     [taskFields],
@@ -96,6 +142,12 @@ export function ColumnActionsSection({
     if (actionKind === 'check_task' && (config.checks?.length ?? 0) === 0) {
       config.checks = [{ type: 'assignee_set' }];
     }
+    if (actionKind === 'forward_to_board') {
+      config.targetBoardId = config.targetBoardId ?? workspaceBoards[0]?.id ?? '';
+      config.targetColumnId = config.targetColumnId ?? '';
+      config.skipIfAlreadyOnBoard = config.skipIfAlreadyOnBoard !== false;
+      if (config.targetBoardId) void loadTargetColumns(config.targetBoardId);
+    }
     updateRule(id, { actionKind, config });
   };
 
@@ -133,8 +185,8 @@ export function ColumnActionsSection({
       <div>
         <h3 className="text-sm font-semibold text-slate-900">Действия при смене статуса</h3>
         <p className="mt-1 text-xs text-slate-500">
-          Обязательные действия при входе в колонку или выходе из неё: подтверждение, форма или
-          автоматическая проверка полей задачи.
+          Обязательные действия при входе в колонку или выходе из неё: подтверждение, форма,
+          проверка полей. Передача на другую доску предлагается после смены статуса и необязательна.
         </p>
       </div>
 
@@ -190,6 +242,7 @@ export function ColumnActionsSection({
                     <option value="confirm">Подтверждение</option>
                     <option value="form">Форма</option>
                     <option value="check_task">Проверка задачи</option>
+                    <option value="forward_to_board">Передать на доску</option>
                   </select>
                 </div>
                 <button
@@ -262,6 +315,75 @@ export function ColumnActionsSection({
                   >
                     + Поле формы
                   </button>
+                </div>
+              ) : null}
+
+              {rule.actionKind === 'forward_to_board' ? (
+                <div className="space-y-2 rounded-lg border border-slate-100 bg-white p-3">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-600">
+                      Целевая доска
+                    </label>
+                    <select
+                      value={rule.config.targetBoardId ?? ''}
+                      onChange={(e) => {
+                        const targetBoardId = e.target.value;
+                        const board = workspaceBoards.find((b) => b.id === targetBoardId);
+                        updateConfig(rule.id, {
+                          targetBoardId,
+                          targetBoardName: board?.name ?? '',
+                          targetColumnId: '',
+                          targetColumnName: '',
+                        });
+                        if (targetBoardId) void loadTargetColumns(targetBoardId);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    >
+                      <option value="">Выберите доску…</option>
+                      {workspaceBoards.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-600">
+                      Колонка на целевой доске
+                    </label>
+                    <select
+                      value={rule.config.targetColumnId ?? ''}
+                      onChange={(e) => {
+                        const targetColumnId = e.target.value;
+                        const col = (targetColumnsByBoard[rule.config.targetBoardId ?? ''] ?? []).find(
+                          (c) => c.id === targetColumnId,
+                        );
+                        updateConfig(rule.id, {
+                          targetColumnId,
+                          targetColumnName: col?.name ?? '',
+                        });
+                      }}
+                      disabled={!rule.config.targetBoardId}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-50"
+                    >
+                      <option value="">Первая колонка (по умолчанию)</option>
+                      {(targetColumnsByBoard[rule.config.targetBoardId ?? ''] ?? []).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={rule.config.skipIfAlreadyOnBoard !== false}
+                      onChange={(e) =>
+                        updateConfig(rule.id, { skipIfAlreadyOnBoard: e.target.checked })
+                      }
+                    />
+                    Не дублировать, если задача уже на целевой доске
+                  </label>
                 </div>
               ) : null}
 

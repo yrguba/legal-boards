@@ -139,7 +139,11 @@ function normalizeColumnActionRules(rawRules: unknown): BoardColumnActionRule[] 
     const blocking = item.blocking !== false;
     const kindRaw = typeof item.actionKind === 'string' ? item.actionKind : 'confirm';
     const actionKind: ColumnActionKind =
-      kindRaw === 'form' || kindRaw === 'check_task' ? kindRaw : 'confirm';
+      kindRaw === 'form' ||
+      kindRaw === 'check_task' ||
+      kindRaw === 'forward_to_board'
+        ? kindRaw
+        : 'confirm';
     const cfgRaw =
       item.config && typeof item.config === 'object' && !Array.isArray(item.config)
         ? (item.config as Record<string, unknown>)
@@ -149,6 +153,11 @@ function normalizeColumnActionRules(rawRules: unknown): BoardColumnActionRule[] 
       message: typeof cfgRaw.message === 'string' ? cfgRaw.message : '',
       requireCheckbox: cfgRaw.requireCheckbox === true,
       checkboxLabel: typeof cfgRaw.checkboxLabel === 'string' ? cfgRaw.checkboxLabel : '',
+      targetBoardId: typeof cfgRaw.targetBoardId === 'string' ? cfgRaw.targetBoardId : '',
+      targetColumnId: typeof cfgRaw.targetColumnId === 'string' ? cfgRaw.targetColumnId : '',
+      targetBoardName: typeof cfgRaw.targetBoardName === 'string' ? cfgRaw.targetBoardName : '',
+      targetColumnName: typeof cfgRaw.targetColumnName === 'string' ? cfgRaw.targetColumnName : '',
+      skipIfAlreadyOnBoard: cfgRaw.skipIfAlreadyOnBoard !== false,
       fields: Array.isArray(cfgRaw.fields)
         ? cfgRaw.fields.map((f: Record<string, unknown>) => ({
             key: typeof f.key === 'string' ? f.key : '',

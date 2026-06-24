@@ -580,10 +580,13 @@ export const boardsApi = {
       typeMapping?: Record<string, string>;
       defaultTargetTypeId?: string;
       force?: boolean;
+      mode?: 'move' | 'mirror';
     },
   ) {
     return fetchApi<{
+      mode: 'move' | 'mirror';
       moved: { taskId: string; oldKey: string; newKey: string; assigneeCleared?: boolean }[];
+      added: { taskId: string; key: string; created: boolean }[];
       skipped: { taskId: string; reason: string; code?: string }[];
       warnings: { taskId: string; code: string; message: string }[];
     }>(`/boards/${sourceBoardId}/transfer-tasks`, {
@@ -615,6 +618,37 @@ export const tasksApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+  },
+
+  async getPlacements(taskId: string) {
+    return fetchApi<{ placements: import('../types').TaskBoardPlacement[] }>(
+      `/tasks/${taskId}/placements`,
+    );
+  },
+
+  async addPlacement(
+    taskId: string,
+    data: { boardId: string; columnId?: string; typeId?: string },
+  ) {
+    return fetchApi<{ placement: import('../types').TaskBoardPlacement; created: boolean }>(
+      `/tasks/${taskId}/placements`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  },
+
+  async removePlacement(taskId: string, boardId: string) {
+    return fetchApi<{ ok: boolean }>(`/tasks/${taskId}/placements/${boardId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getTransitions(taskId: string) {
+    return fetchApi<{ items: import('../types').TaskBoardTransition[] }>(
+      `/tasks/${taskId}/transitions`,
+    );
   },
 
   async reorderInColumn(boardId: string, columnId: string, taskIds: string[]) {

@@ -3,6 +3,7 @@ import { X, ArrowRightLeft } from 'lucide-react';
 import { boardsApi, ApiError } from '../services/api';
 import type { Board, TaskType } from '../types';
 import { useApp } from '../store/AppContext';
+import { ConfirmAddToBoardDialog } from './ConfirmAddToBoardDialog';
 
 type Props = {
   open: boolean;
@@ -10,7 +11,9 @@ type Props = {
   taskIds: string[];
   onClose: () => void;
   onSuccess: (result: {
+    mode: 'move' | 'mirror';
     moved: { taskId: string; oldKey: string; newKey: string; assigneeCleared?: boolean }[];
+    added: { taskId: string; key: string; created: boolean }[];
     skipped: { taskId: string; reason: string; code?: string }[];
     warnings: { taskId: string; code: string; message: string }[];
   }) => void;
@@ -22,6 +25,8 @@ type Props = {
 };
 
 type BoardOption = Board & { workspaceName: string };
+
+type TransferMode = 'move' | 'mirror';
 
 export function TransferTaskModal({
   open,
@@ -40,9 +45,11 @@ export function TransferTaskModal({
   const [targetColumnId, setTargetColumnId] = useState('');
   const [defaultTargetTypeId, setDefaultTargetTypeId] = useState('');
   const [typeMapping, setTypeMapping] = useState<Record<string, string>>({});
+  const [mode, setMode] = useState<TransferMode>('move');
   const [force, setForce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -50,6 +57,7 @@ export function TransferTaskModal({
     setTargetColumnId(presetTargetColumnId ?? '');
     setDefaultTargetTypeId('');
     setTypeMapping({});
+    setMode('move');
     setForce(false);
     setError(null);
 
@@ -129,6 +137,11 @@ export function TransferTaskModal({
       setError('Выберите целевую доску');
       return;
     }
+    setConfirmOpen(true);
+  };
+
+  const executeTransfer = async () => {
+    if (!targetBoardId) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -139,19 +152,28 @@ export function TransferTaskModal({
         typeMapping,
         defaultTargetTypeId: defaultTargetTypeId || undefined,
         force,
+        mode,
       });
       onSuccess(result);
       onClose();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Не удалось перенести задачи');
+      setError(e instanceof ApiError ? e.message : 'Не удалось выполнить операцию');
     } finally {
       setSubmitting(false);
+      setConfirmOpen(false);
     }
   };
 
   const sortedTargetColumns = targetBoard
     ? [...targetBoard.columns].sort((a, b) => a.position - b.position)
     : [];
+  const targetColumnName =
+    sortedTargetColumns.find((c) => c.id === targetColumnId)?.name ?? 'первая колонка';
+
+  const confirmDescription =
+    mode === 'mirror'
+      ? `${taskIds.length === 1 ? 'Задача' : `${taskIds.length} задач`} будет добавлена на доску «${targetBoard?.name ?? '—'}» (колонка «${targetColumnName}»). На доске «${sourceBoard.name}» ${taskIds.length === 1 ? 'она останется' : 'они останутся'}.`
+      : `${taskIds.length === 1 ? 'Задача' : `${taskIds.length} задач`} будет снята с доски «${sourceBoard.name}» и перенесена на «${targetBoard?.name ?? '—'}» (колонка «${targetColumnName}»).${mode === 'move' ? ' Если это основная доска задачи, ключ изменится.' : ''}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -161,7 +183,7 @@ export function TransferTaskModal({
           <div>
             <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
               <ArrowRightLeft className="size-5 text-brand" />
-              Перенос задач
+              {mode === 'mirror' ? 'Добавить на доску' : 'Перенос задач'}
             </h2>
             <p className="text-sm text-slate-600 mt-1">
               {taskIds.length === 1
@@ -180,6 +202,52 @@ export function TransferTaskModal({
         </div>
 
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Режим</label>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label
+                className={`cursor-pointer rounded-lg border px-3 py-2 text-sm ${
+                  mode === 'move'
+                    ? 'border-brand bg-brand-light text-brand'
+                    : 'border-slate-200 text-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="transfer-mode"
+                  value="move"
+                  checked={mode === 'move'}
+                  onChange={() => setMode('move')}
+                  className="sr-only"
+                />
+                <span className="font-medium">Перенести</span>
+                <p className="mt-0.5 text-xs opacity-80">
+                  Снять с текущей доски. У основной задачи — новый ключ.
+                </p>
+              </label>
+              <label
+                className={`cursor-pointer rounded-lg border px-3 py-2 text-sm ${
+                  mode === 'mirror'
+                    ? 'border-brand bg-brand-light text-brand'
+                    : 'border-slate-200 text-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="transfer-mode"
+                  value="mirror"
+                  checked={mode === 'mirror'}
+                  onChange={() => setMode('mirror')}
+                  className="sr-only"
+                />
+                <span className="font-medium">Добавить копию</span>
+                <p className="mt-0.5 text-xs opacity-80">
+                  Оставить на текущей доске и появиться на целевой.
+                </p>
+              </label>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">
               Целевая доска
@@ -296,10 +364,26 @@ export function TransferTaskModal({
             disabled={submitting || !targetBoardId || loadingBoards}
             className="px-4 py-2 text-sm rounded-lg bg-brand text-white hover:bg-brand-hover disabled:opacity-50"
           >
-            {submitting ? 'Перенос…' : 'Перенести'}
+            {submitting
+              ? mode === 'mirror'
+                ? 'Добавление…'
+                : 'Перенос…'
+              : mode === 'mirror'
+                ? 'Добавить на доску'
+                : 'Перенести'}
           </button>
         </div>
       </div>
+
+      <ConfirmAddToBoardDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={mode === 'mirror' ? 'Добавить на другую доску?' : 'Перенести на другую доску?'}
+        description={confirmDescription}
+        confirmLabel={mode === 'mirror' ? 'Добавить' : 'Перенести'}
+        loading={submitting}
+        onConfirm={() => void executeTransfer()}
+      />
     </div>
   );
 }

@@ -192,6 +192,8 @@ export function BoardSettingsModal({
                 columnActions={ca}
                 columns={(board.columns ?? []).map((c) => ({ id: c.id, name: c.name }))}
                 taskFields={board.taskFields ?? []}
+                currentBoardId={board.id}
+                workspaceId={board.workspaceId}
                 onChange={(next) => setDraft((d) => ({ ...d, columnActions: next }))}
               />
             </TabsContent>
