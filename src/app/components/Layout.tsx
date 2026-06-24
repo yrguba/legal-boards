@@ -37,7 +37,7 @@ import { usersApi } from '../services/api';
 import type { UserPresenceInfo } from '../types';
 
 export function Layout() {
-  const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace } = useApp();
+  const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace, refreshWorkspaces, isAuthenticated } = useApp();
   const { canManageWorkspace, workspaceRole } = useWorkspacePermissions();
   const navigate = useNavigate();
   const location = useLocation();
@@ -62,6 +62,17 @@ export function Layout() {
     const timer = window.setTimeout(() => setFeedbackToast(null), 5000);
     return () => window.clearTimeout(timer);
   }, [feedbackToast]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshWorkspaces();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [isAuthenticated, refreshWorkspaces]);
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_collapsed');

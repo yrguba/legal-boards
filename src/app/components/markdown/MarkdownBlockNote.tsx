@@ -93,6 +93,7 @@ export function MarkdownBlockNote({
   const scopeClass = [
     'bn-markdown-scope',
     compact ? 'bn-markdown-compact' : '',
+    !editable ? 'bn-markdown-readonly' : '',
     className,
   ]
     .filter(Boolean)
@@ -100,7 +101,14 @@ export function MarkdownBlockNote({
 
   return (
     <div className={scopeClass}>
-      <BlockNoteView editor={editor} theme="light" editable={editable} />
+      <BlockNoteView
+        editor={editor}
+        theme="light"
+        editable={editable}
+        sideMenu={editable}
+        formattingToolbar={editable}
+        linkToolbar={editable}
+      />
       <div ref={portalHostRef} className="bn-portal-host" aria-hidden />
     </div>
   );

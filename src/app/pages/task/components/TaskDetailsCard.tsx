@@ -391,6 +391,8 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
             <MarkdownBlockNote
               instanceKey={`task-description-view-${task.id}`}
               markdown={String(v)}
+              compact
+              className="bn-markdown-readonly"
             />
           )}
           renderEditor={({ value, onChange, saving }) => (

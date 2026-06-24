@@ -32,6 +32,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { TaskMarkdownPreview } from '../components/markdown';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { uploadPendingTaskAttachments } from '../components/TaskCreateFormFields';
 import { AggregatedBoardView } from '../components/AggregatedBoardView';
@@ -211,7 +212,7 @@ function TaskCard({
       style={style}
       {...attributes}
       {...listeners}
-      className="bg-white rounded-lg p-4 border border-slate-200 hover:border-brand hover:shadow-md transition-all group cursor-grab active:cursor-grabbing touch-none"
+      className="bg-white rounded-lg p-4 border border-slate-200 hover:border-brand hover:shadow-md transition-all group cursor-grab active:cursor-grabbing touch-none min-w-0 max-w-full overflow-hidden"
     >
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -232,11 +233,7 @@ function TaskCard({
         </button>
       </div>
 
-      {task.description && (
-        <p className="text-xs text-slate-600 mb-3 line-clamp-2">
-          {task.description}
-        </p>
-      )}
+      {task.description && <TaskMarkdownPreview markdown={task.description} />}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -1043,9 +1040,9 @@ export function Board() {
                     </div>
                   </div>
                   {activeTask.description && (
-                    <p className="text-xs text-slate-600 mb-3 line-clamp-2 ml-6">
-                      {activeTask.description}
-                    </p>
+                    <div className="ml-6 min-w-0 max-w-full overflow-hidden">
+                      <TaskMarkdownPreview markdown={activeTask.description} />
+                    </div>
                   )}
                 </div>
               ) : null}

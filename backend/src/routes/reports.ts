@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
 import { assertWorkspaceMember } from '../utils/documentAccess';
+import { resolveWorkspaceRole } from '../utils/workspaceRole';
 import { parseBoardApprovalRules } from '../utils/boardApprovals';
 import {
   buildBoardAging,
@@ -31,6 +32,8 @@ async function resolveBoard(boardIdOrCode: string) {
   });
 }
 
+const ANALYTICS_ROLES = new Set(['admin', 'manager']);
+
 async function assertAnalyticsAccess(
   req: AuthRequest,
   boardIdOrCode: string,
@@ -57,13 +60,8 @@ async function assertAnalyticsAccess(
     return { ok: false, status: 403, error: 'Нет доступа к этому пространству' };
   }
 
-  const canView =
-    req.userRole === 'admin' ||
-    req.userRole === 'manager' ||
-    (await prisma.workspace.findFirst({
-      where: { id: board.workspaceId, ownerId: req.userId },
-      select: { id: true },
-    })) != null;
+  const workspaceRole = await resolveWorkspaceRole(prisma, req.userId, board.workspaceId);
+  const canView = workspaceRole !== null && ANALYTICS_ROLES.has(workspaceRole);
 
   if (!canView) {
     return { ok: false, status: 403, error: 'Аналитика доступна руководителям и администраторам' };

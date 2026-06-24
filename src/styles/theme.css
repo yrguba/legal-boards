@@ -240,6 +240,118 @@
   padding-left: 0;
 }
 
+.bn-markdown-readonly .bn-editor {
+  min-height: 0;
+  padding: 0;
+}
+
+.bn-markdown-readonly .bn-block-group {
+  padding-left: 0 !important;
+}
+
+.bn-markdown-readonly .bn-block-outer {
+  margin-left: 0 !important;
+}
+
+.bn-markdown-readonly .ProseMirror {
+  padding: 0;
+}
+
+.bn-markdown-readonly .bn-side-menu,
+.bn-markdown-readonly .bn-drag-handle-menu,
+.bn-markdown-readonly .bn-add-block-button {
+  display: none !important;
+}
+
+.task-markdown-preview {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  margin-bottom: 0.75rem;
+}
+
+.task-card-markdown-html {
+  max-height: 2.5rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: rgb(71 85 105);
+  word-break: break-word;
+}
+
+.task-card-markdown-html :is(p, ul, ol, blockquote, pre, h1, h2, h3, h4, h5, h6) {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: inherit;
+  border: 0;
+  background: transparent;
+}
+
+.task-card-markdown-html strong,
+.task-card-markdown-html b {
+  font-weight: 600;
+  color: rgb(51 65 85);
+}
+
+.task-card-markdown-html li {
+  display: inline;
+}
+
+.task-card-markdown-html li + li::before {
+  content: ' ';
+}
+
+.task-card-markdown-html blockquote::before {
+  content: '«';
+}
+
+.task-card-markdown-html blockquote::after {
+  content: '» ';
+}
+
+.task-card-markdown-html pre,
+.task-card-markdown-html code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  background: rgb(241 245 249);
+  border-radius: 0.25rem;
+}
+
+.task-card-markdown-html pre {
+  display: inline;
+  padding: 0 0.2rem;
+}
+
+.task-card-markdown-html code {
+  padding: 0 0.15rem;
+}
+
+.task-markdown-preview .bn-editor {
+  min-height: 0;
+}
+
+.task-markdown-preview .ProseMirror {
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: rgb(71 85 105);
+}
+
+.task-markdown-preview .ProseMirror h1,
+.task-markdown-preview .ProseMirror h2,
+.task-markdown-preview .ProseMirror h3 {
+  font-size: inherit;
+  font-weight: 600;
+  margin: 0;
+}
+
+.task-markdown-preview .ProseMirror p,
+.task-markdown-preview .ProseMirror ul,
+.task-markdown-preview .ProseMirror ol {
+  margin: 0;
+}
+
 .bn-markdown-scope .bn-container {
   border: 0;
   box-shadow: none;
