@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 export type ColumnActionTrigger = 'on_enter' | 'on_exit';
-export type ColumnActionKind = 'confirm' | 'form' | 'check_task' | 'forward_to_board';
+export type ColumnActionKind = 'confirm' | 'form' | 'check_task' | 'forward_to_board' | 'legal_forms';
 
 export type ParsedCheckTaskItem =
   | { type: 'assignee_set' }
@@ -102,7 +102,8 @@ export function parseBoardColumnActionRules(advancedSettings: unknown): ParsedCo
     const actionKind: ColumnActionKind =
       actionKindRaw === 'form' ||
       actionKindRaw === 'check_task' ||
-      actionKindRaw === 'forward_to_board'
+      actionKindRaw === 'forward_to_board' ||
+      actionKindRaw === 'legal_forms'
         ? actionKindRaw
         : 'confirm';
     const config =
@@ -217,7 +218,9 @@ export function parseForwardToBoardConfig(config: Record<string, unknown>): {
 
 
 function interactiveRules(rules: ParsedColumnActionRule[]): ParsedColumnActionRule[] {
-  return rules.filter((r) => r.actionKind === 'confirm' || r.actionKind === 'form');
+  return rules.filter(
+    (r) => r.actionKind === 'confirm' || r.actionKind === 'form' || r.actionKind === 'legal_forms',
+  );
 }
 
 export async function assertColumnExitActionsComplete(

@@ -41,11 +41,10 @@ import {
   buildColumnTransitionPlan,
   formatColumnTransitionCheckErrors,
   mergeActionCompletion,
-  type ColumnTransitionInteractiveStep,
   type TaskColumnActionCompletionRow,
 } from '../utils/boardColumnActions';
 import { boardsApi, tasksApi, ApiError } from '../services/api';
-import { ColumnActionTransitionModal } from './ColumnActionTransitionModal';
+import { useColumnTransition } from '../store/ColumnTransitionContext';
 import {
   ForwardToBoardOfferDialog,
   prepareForwardToBoardOffer,
@@ -423,15 +422,7 @@ export function AggregatedBoardView({
   const dragOriginBoardRef = useRef<string | null>(null);
   const dragOriginOrderRef = useRef<string[] | null>(null);
 
-  const [columnTransition, setColumnTransition] = useState<{
-    taskId: string;
-    sourceBoardId: string;
-    fromColumnId: string;
-    toColumnId: string;
-    steps: ColumnTransitionInteractiveStep[];
-  } | null>(null);
-  const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
-  const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const { openColumnTransition } = useColumnTransition();
   const [forwardOffer, setForwardOffer] = useState<ForwardToBoardOffer | null>(null);
 
   const [transferOpen, setTransferOpen] = useState(false);
@@ -884,13 +875,44 @@ export function AggregatedBoardView({
 
     if (actionPlan.interactiveSteps.length > 0) {
       revertTaskStatus(activeTaskId, originColumnId);
-      setColumnTransitionError(null);
-      setColumnTransition({
-        taskId: activeTaskId,
-        sourceBoardId: originBoardId,
-        fromColumnId: originColumnId,
-        toColumnId: targetColumnId,
+      const taskId = activeTaskId;
+      const fromColumnId = originColumnId;
+      const toColumnId = targetColumnId;
+      const sourceBoardId = originBoardId;
+      const taskForPlan = {
+        ...draggedTask,
+        columnActionCompletions: taskColumnActionCompletions(draggedTask),
+      };
+      openColumnTransition({
+        task: taskForPlan,
+        taskFields: sourceBoards.get(sourceBoardId)?.taskFields ?? [],
+        targetColumnName: columnNameById(sources, toColumnId),
         steps: actionPlan.interactiveSteps,
+        onSubmitStep: async (step, payload) => {
+          const row = (await tasksApi.completeColumnAction(
+            taskId,
+            step.rule.id,
+            payload,
+            step.forColumnId,
+          )) as TaskColumnActionCompletionRow;
+          onTasksChange((prev) =>
+            prev.map((t) => {
+              if (t.id !== taskId) return t;
+              const list = taskColumnActionCompletions(t);
+              return { ...t, columnActionCompletions: mergeActionCompletion(list, row) };
+            }),
+          );
+        },
+        onAllComplete: async () => {
+          await finishColumnMove(
+            taskId,
+            toColumnId,
+            fromColumnId,
+            undefined,
+            null,
+            sourceBoardId,
+          );
+        },
       });
       return;
     }
@@ -1273,72 +1295,6 @@ export function AggregatedBoardView({
           }}
         />
       ) : null}
-
-      <ColumnActionTransitionModal
-        open={!!columnTransition}
-        steps={columnTransition?.steps ?? []}
-        targetColumnName={
-          columnTransition
-            ? columnNameById(sources, columnTransition.toColumnId)
-            : undefined
-        }
-        submitting={columnTransitionSubmitting}
-        error={columnTransitionError}
-        onClose={() => {
-          if (columnTransitionSubmitting) return;
-          setColumnTransition(null);
-          setColumnTransitionError(null);
-        }}
-        onSubmitStep={async (step, payload) => {
-          if (!columnTransition) return;
-          setColumnTransitionSubmitting(true);
-          setColumnTransitionError(null);
-          try {
-            const row = (await tasksApi.completeColumnAction(
-              columnTransition.taskId,
-              step.rule.id,
-              payload,
-              step.forColumnId,
-            )) as TaskColumnActionCompletionRow;
-            onTasksChange((prev) =>
-              prev.map((t) => {
-                if (t.id !== columnTransition.taskId) return t;
-                const list = taskColumnActionCompletions(t);
-                return { ...t, columnActionCompletions: mergeActionCompletion(list, row) };
-              }),
-            );
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Не удалось выполнить действие';
-            setColumnTransitionError(msg);
-            throw e;
-          } finally {
-            setColumnTransitionSubmitting(false);
-          }
-        }}
-        onAllComplete={async () => {
-          if (!columnTransition) return;
-          setColumnTransitionSubmitting(true);
-          setColumnTransitionError(null);
-          try {
-            await finishColumnMove(
-              columnTransition.taskId,
-              columnTransition.toColumnId,
-              columnTransition.fromColumnId,
-              undefined,
-              null,
-              columnTransition.sourceBoardId,
-            );
-            setColumnTransition(null);
-          } catch (e: unknown) {
-            setColumnTransitionError(
-              e instanceof Error ? e.message : 'Не удалось перевести задачу',
-            );
-            throw e;
-          } finally {
-            setColumnTransitionSubmitting(false);
-          }
-        }}
-      />
 
       <ForwardToBoardOfferDialog
         offer={forwardOffer}

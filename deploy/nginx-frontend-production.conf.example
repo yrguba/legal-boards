@@ -1,0 +1,54 @@
+# Legal Boards — production frontend (НЕ vite dev)
+#
+# Ошибки «GET /src/.../*.ts 500» и «WebSocket localhost:5173» означают,
+# что на домен отдаётся vite dev или исходники без сборки.
+#
+# Правильный деплой:
+#   npm ci && npm run build
+#   rsync/copy dist/ → /var/www/legal-boards/
+#
+# nginx отдаёт только dist/, без proxy на :5173.
+
+server {
+    listen 443 ssl http2;
+    server_name legal-boards.ru;
+
+    root /var/www/legal-boards/dist;
+    index index.html;
+
+    # Статика Vite (хеши в именах)
+    location /assets/ {
+        try_files $uri =404;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Legal Boards API → backend
+    location /api/ {
+        # LF API — см. nginx-legal-forms-proxy.conf.example (ВЫШЕ этого блока или include)
+        proxy_pass http://127.0.0.1:5004;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws {
+        proxy_pass http://127.0.0.1:5004;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+
+    # SPA: /, /login, /board/…, /forms/…
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Запретить доступ к исходникам, если случайно залили repo
+    location ~ ^/src/ {
+        return 404;
+    }
+}

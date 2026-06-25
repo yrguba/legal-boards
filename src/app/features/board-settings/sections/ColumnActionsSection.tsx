@@ -10,6 +10,8 @@ import type {
   ColumnActionTrigger,
 } from '../boardAdvancedSettings.types';
 import { newLocalId } from '../boardAdvancedSettings.defaults';
+import { FORMS_DEFAULT_EMBEDDED_PATH } from '../../../qiankun/formsMicroAppPaths';
+import { FORMS_MICROAPP_ENABLED } from '../../../qiankun/formsMicroAppFeature';
 
 const SYSTEM_CHECK_OPTIONS: { value: ColumnActionCheckItem['type']; label: string }[] = [
   { value: 'assignee_set', label: 'Назначен исполнитель' },
@@ -148,6 +150,12 @@ export function ColumnActionsSection({
       config.skipIfAlreadyOnBoard = config.skipIfAlreadyOnBoard !== false;
       if (config.targetBoardId) void loadTargetColumns(config.targetBoardId);
     }
+    if (actionKind === 'legal_forms') {
+      config.formsPath =
+        config.formsPath?.trim() ||
+        `https://legal-forms.ru/expertises/v/436/expertise/18fb19e8-d0ce-4e6d-8e45-0a9d716b8998/flows/82KDS2T9/${encodeURIComponent('АМ')}/1907`;
+      config.formsAccessTokenFieldId = config.formsAccessTokenFieldId ?? '';
+    }
     updateRule(id, { actionKind, config });
   };
 
@@ -243,6 +251,9 @@ export function ColumnActionsSection({
                     <option value="form">Форма</option>
                     <option value="check_task">Проверка задачи</option>
                     <option value="forward_to_board">Передать на доску</option>
+                    {FORMS_MICROAPP_ENABLED ? (
+                      <option value="legal_forms">Legal Forms (qiankun)</option>
+                    ) : null}
                   </select>
                 </div>
                 <button
@@ -384,6 +395,65 @@ export function ColumnActionsSection({
                     />
                     Не дублировать, если задача уже на целевой доске
                   </label>
+                </div>
+              ) : null}
+
+              {rule.actionKind === 'legal_forms' ? (
+                <div className="space-y-2 rounded-lg border border-slate-100 bg-white p-3">
+                  <p className="text-[11px] text-slate-500">
+                    Полный путь к форме LF — URL с legal-forms.ru или встроенный /forms/….
+                    Хост для qiankun entry берётся из URL автоматически. Статично или {'{field:ID}'}.
+                  </p>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-600">
+                      Полный путь
+                    </label>
+                    <textarea
+                      value={rule.config.formsPath ?? ''}
+                      onChange={(e) => updateConfig(rule.id, { formsPath: e.target.value })}
+                      placeholder={`https://legal-forms.ru/expertises/v/436/expertise/…/flows/…/АМ/1907\nили ${FORMS_DEFAULT_EMBEDDED_PATH}`}
+                      rows={3}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-600">
+                      LF access_token — поле задачи (опционально)
+                    </label>
+                    <select
+                      value={rule.config.formsAccessTokenFieldId ?? ''}
+                      onChange={(e) =>
+                        updateConfig(rule.id, { formsAccessTokenFieldId: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    >
+                      <option value="">Из localStorage / URL (?access_token=)</option>
+                      {sortedTaskFields.map((field) => (
+                        <option key={field.id} value={field.id}>
+                          {field.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[11px] font-medium text-slate-600">Вставить поле задачи</p>
+                    <div className="flex flex-wrap gap-1">
+                      {sortedTaskFields.map((field) => (
+                        <button
+                          key={field.id}
+                          type="button"
+                          onClick={() =>
+                            updateConfig(rule.id, {
+                              formsPath: `{field:${field.id}}`,
+                            })
+                          }
+                          className="rounded border border-slate-200 px-2 py-0.5 text-xs hover:bg-slate-50"
+                        >
+                          путь ← {field.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : null}
 

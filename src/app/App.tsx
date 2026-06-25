@@ -1,5 +1,6 @@
 import { RouterProvider } from 'react-router';
 import { AppProvider } from './store/AppContext';
+import { ColumnTransitionProvider } from './store/ColumnTransitionContext';
 import { EmployeesProvider } from './store/EmployeesContext';
 import { NotificationPreferencesProvider } from './store/NotificationPreferencesContext';
 import { RealtimeProvider } from './store/RealtimeContext';
@@ -17,7 +18,9 @@ export default function App() {
             <BrowserNotificationsListener />
             <NotificationsProvider>
               <EmployeesProvider>
-                <RouterProvider router={router} />
+                <ColumnTransitionProvider>
+                  <RouterProvider router={router} />
+                </ColumnTransitionProvider>
               </EmployeesProvider>
             </NotificationsProvider>
           </RealtimeProvider>

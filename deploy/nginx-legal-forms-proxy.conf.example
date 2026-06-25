@@ -1,0 +1,60 @@
+# Legal Forms (LF) — reverse proxy для встроенного qiankun на legal-boards.ru
+#
+# Запросы микрофронта идут на тот же origin (legal-boards.ru/api/…),
+# как в dev через Vite (см. src/app/qiankun/formsMicroApp.viteProxy.ts).
+#
+# ВАЖНО:
+# 1. Вставить этот блок ВЫШЕ общего `location /api/` → backend Legal Boards.
+# 2. Префиксы синхронизировать с src/app/qiankun/formsMicroApp.constants.ts
+# 3. `/forms/*` — SPA Legal Boards (try_files / index.html), не проксировать на LF.
+# 4. entry qiankun (`https://legal-forms.ru/headless-forms-app/`) грузится с LF напрямую — CORS на LF.
+
+# --- maps (в http { }, один раз на server) ---------------------------------
+
+# LF Flask session: ?access_token=.eJx… — не пробрасывать JWT Legal Boards (как в vite proxy)
+map $args $lf_proxy_authorization {
+    default $http_authorization;
+    "~*access_token=\." "";
+}
+
+map $lf_proxy_authorization $lf_proxy_authorization_final {
+    default $lf_proxy_authorization;
+    "~*^Bearer\s+\." "";
+}
+
+# --- locations (в server { } для legal-boards.ru) ---------------------------
+
+# LF API → https://legal-forms.ru (те же пути, что на standalone LF)
+location ~ ^/api/(flow(?:_items)?|dictionaries|legal-expertise|v2/legal-expertise|initialize|forms|project_items|projects|glossary_items|compile|functions|postgrest|chat-service|egr-service|users/whoami|users/change_password|auth/token|auth/logout|reports/render)(/|$) {
+    proxy_http_version 1.1;
+    proxy_ssl_server_name on;
+    proxy_ssl_name legal-forms.ru;
+
+    proxy_pass https://legal-forms.ru;
+
+    proxy_set_header Host legal-forms.ru;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Authorization $lf_proxy_authorization_final;
+
+    # Большие ответы / экспорт (при необходимости увеличить)
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+
+    # Не кэшировать API форм
+    add_header Cache-Control "no-store" always;
+}
+
+# --- пример порядка location (фрагмент) ------------------------------------
+#
+#   include snippets/legal-forms-proxy.conf;   # maps + location выше
+#
+#   location /api/ {
+#       proxy_pass http://127.0.0.1:5004;      # Legal Boards backend
+#       ...
+#   }
+#
+#   location / {
+#       try_files $uri $uri/ /index.html;        # SPA, в т.ч. /forms/*
+#   }

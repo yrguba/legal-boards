@@ -38,7 +38,7 @@ import { uploadPendingTaskAttachments } from '../components/TaskCreateFormFields
 import { AggregatedBoardView } from '../components/AggregatedBoardView';
 import { TransferTaskModal } from '../components/TransferTaskModal';
 import { TaskBoardCountBadge } from '../components/TaskBoardCountBadge';
-import { ColumnActionTransitionModal } from '../components/ColumnActionTransitionModal';
+import { useColumnTransition } from '../store/ColumnTransitionContext';
 import {
   ForwardToBoardOfferDialog,
   prepareForwardToBoardOffer,
@@ -49,7 +49,6 @@ import {
   buildColumnTransitionPlan,
   formatColumnTransitionCheckErrors,
   mergeActionCompletion,
-  type ColumnTransitionInteractiveStep,
   type TaskColumnActionCompletionRow,
 } from '../utils/boardColumnActions';
 import { TaskElapsedTimeDisplay } from '../components/TaskElapsedTimeDisplay';
@@ -310,14 +309,7 @@ export function Board() {
   const [isDeletingBoard, setIsDeletingBoard] = useState(false);
   const [deleteBoardError, setDeleteBoardError] = useState<string | null>(null);
   const [dragMoveError, setDragMoveError] = useState<string | null>(null);
-  const [columnTransition, setColumnTransition] = useState<{
-    taskId: string;
-    fromColumnId: string;
-    toColumnId: string;
-    steps: ColumnTransitionInteractiveStep[];
-  } | null>(null);
-  const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
-  const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const { openColumnTransition } = useColumnTransition();
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
@@ -719,12 +711,32 @@ export function Board() {
 
     if (actionPlan.interactiveSteps.length > 0) {
       revertTaskColumn(activeTaskId, originColumnId);
-      setColumnTransitionError(null);
-      setColumnTransition({
-        taskId: activeTaskId,
-        fromColumnId: originColumnId,
-        toColumnId: targetColumnId,
+      const taskId = activeTaskId;
+      const fromColumnId = originColumnId;
+      const toColumnId = targetColumnId;
+      openColumnTransition({
+        task: taskForPlan,
+        taskFields: board?.taskFields ?? [],
+        targetColumnName: columns.find((c) => c.id === toColumnId)?.name,
         steps: actionPlan.interactiveSteps,
+        onSubmitStep: async (step, payload) => {
+          const row = (await tasksApi.completeColumnAction(
+            taskId,
+            step.rule.id,
+            payload,
+            step.forColumnId,
+          )) as TaskColumnActionCompletionRow;
+          setTasks((prev) =>
+            prev.map((t) => {
+              if (t.id !== taskId) return t;
+              const list = taskColumnActionCompletions(t);
+              return { ...t, columnActionCompletions: mergeActionCompletion(list, row) };
+            }),
+          );
+        },
+        onAllComplete: async () => {
+          await finishColumnMove(taskId, toColumnId, fromColumnId);
+        },
       });
       return;
     }
@@ -1258,69 +1270,6 @@ export function Board() {
           onSuccess={handleTransferSuccess}
         />
       ) : null}
-
-      <ColumnActionTransitionModal
-        open={!!columnTransition}
-        steps={columnTransition?.steps ?? []}
-        targetColumnName={
-          columnTransition
-            ? columns.find((c) => c.id === columnTransition.toColumnId)?.name
-            : undefined
-        }
-        submitting={columnTransitionSubmitting}
-        error={columnTransitionError}
-        onClose={() => {
-          if (columnTransitionSubmitting) return;
-          setColumnTransition(null);
-          setColumnTransitionError(null);
-        }}
-        onSubmitStep={async (step, payload) => {
-          if (!columnTransition) return;
-          setColumnTransitionSubmitting(true);
-          setColumnTransitionError(null);
-          try {
-            const row = (await tasksApi.completeColumnAction(
-              columnTransition.taskId,
-              step.rule.id,
-              payload,
-              step.forColumnId,
-            )) as TaskColumnActionCompletionRow;
-            setTasks((prev) =>
-              prev.map((t) => {
-                if (t.id !== columnTransition.taskId) return t;
-                const list = taskColumnActionCompletions(t);
-                return { ...t, columnActionCompletions: mergeActionCompletion(list, row) };
-              }),
-            );
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Не удалось выполнить действие';
-            setColumnTransitionError(msg);
-            throw e;
-          } finally {
-            setColumnTransitionSubmitting(false);
-          }
-        }}
-        onAllComplete={async () => {
-          if (!columnTransition) return;
-          setColumnTransitionSubmitting(true);
-          setColumnTransitionError(null);
-          try {
-            await finishColumnMove(
-              columnTransition.taskId,
-              columnTransition.toColumnId,
-              columnTransition.fromColumnId,
-            );
-            setColumnTransition(null);
-          } catch (e: unknown) {
-            setColumnTransitionError(
-              e instanceof Error ? e.message : 'Не удалось перевести задачу',
-            );
-            throw e;
-          } finally {
-            setColumnTransitionSubmitting(false);
-          }
-        }}
-      />
 
       <ForwardToBoardOfferDialog
         offer={forwardOffer}

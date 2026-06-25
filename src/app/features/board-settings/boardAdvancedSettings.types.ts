@@ -24,7 +24,7 @@ export type BoardApprovalRule = {
 };
 
 export type ColumnActionTrigger = 'on_enter' | 'on_exit';
-export type ColumnActionKind = 'confirm' | 'form' | 'check_task' | 'forward_to_board';
+export type ColumnActionKind = 'confirm' | 'form' | 'check_task' | 'forward_to_board' | 'legal_forms';
 
 export type ColumnActionFormField = {
   key: string;
@@ -64,6 +64,9 @@ export type BoardColumnActionRule = {
     targetBoardName?: string;
     targetColumnName?: string;
     skipIfAlreadyOnBoard?: boolean;
+    /** legal_forms — полный путь LF (URL или /forms/…, статично или {field:customFieldId}) */
+    formsPath?: string;
+    formsAccessTokenFieldId?: string;
   };
 };
 

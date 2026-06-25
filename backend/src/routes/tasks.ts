@@ -1697,6 +1697,13 @@ router.post('/:id/column-actions', async (req: AuthRequest, res) => {
       const v = validateFormPayload(rule, payload);
       if (!v.ok) return res.status(400).json({ error: v.message });
       storedPayload = v.data;
+    } else if (rule.actionKind === 'legal_forms') {
+      storedPayload = {
+        completed: true,
+        ...(payload && typeof payload === 'object'
+          ? (payload as Record<string, unknown>)
+          : {}),
+      };
     }
 
     const completion = await prisma.taskColumnActionCompletion.upsert({

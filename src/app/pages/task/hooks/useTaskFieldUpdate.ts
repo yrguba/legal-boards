@@ -7,9 +7,10 @@ import {
 import {
   buildColumnTransitionPlan,
   formatColumnTransitionCheckErrors,
-  type ColumnTransitionInteractiveStep,
+  mergeActionCompletion,
   type TaskColumnActionCompletionRow,
 } from '../../../utils/boardColumnActions';
+import type { ColumnTransitionOpenParams } from '../../../store/ColumnTransitionContext';
 import type { Board, TaskField } from '../../../types';
 import type { TaskRecord } from '../types';
 import type { InlineFieldKey } from '../utils/validateField';
@@ -46,13 +47,6 @@ export function getTaskSnapshot(task: TaskRecord): TaskSnapshot {
   };
 }
 
-type ColumnTransitionState = {
-  fromColumnId: string;
-  toColumnId: string;
-  steps: ColumnTransitionInteractiveStep[];
-  pendingUpdate: TaskSnapshot;
-};
-
 type Args = {
   task: TaskRecord | null;
   board: Board | null;
@@ -65,7 +59,7 @@ type Args = {
   columnApprovals: TaskColumnApprovalRow[];
   activeTaskId: string | undefined;
   setTask: React.Dispatch<React.SetStateAction<TaskRecord | null>>;
-  setColumnTransition: React.Dispatch<React.SetStateAction<ColumnTransitionState | null>>;
+  openColumnTransition: (params: ColumnTransitionOpenParams) => void;
   loadActivity: () => void;
   onAfterColumnMove?: (fromColumnId: string, toColumnId: string) => void;
 };
@@ -121,7 +115,7 @@ export function useTaskFieldUpdate({
   columnApprovals,
   activeTaskId,
   setTask,
-  setColumnTransition,
+  openColumnTransition,
   loadActivity,
   onAfterColumnMove,
 }: Args) {
@@ -192,11 +186,56 @@ export function useTaskFieldUpdate({
       }
 
       if (actionPlan.interactiveSteps.length > 0) {
-        setColumnTransition({
-          fromColumnId: task.columnId,
-          toColumnId,
+        const fromColumnId = task.columnId;
+        const pendingUpdate = { ...snapshot, columnId: toColumnId };
+        const taskId = activeTaskId;
+        openColumnTransition({
+          task: {
+            title: snapshot.title,
+            assigneeId: snapshot.assigneeId,
+            description: snapshot.description,
+            conclusionText: conclusionDraft,
+            customFields: snapshot.customFields,
+            taskAttachments,
+            columnActionCompletions: rawCompletions,
+          },
+          taskFields,
+          targetColumnName: board.columns?.find((c) => c.id === toColumnId)?.name,
           steps: actionPlan.interactiveSteps,
-          pendingUpdate: { ...snapshot, columnId: toColumnId },
+          onSubmitStep: async (step, payload) => {
+            const row = (await tasksApi.completeColumnAction(
+              taskId,
+              step.rule.id,
+              payload,
+              step.forColumnId,
+            )) as TaskColumnActionCompletionRow;
+            setTask((prev) => {
+              if (!prev) return prev;
+              const list = Array.isArray(
+                (prev as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
+                  .columnActionCompletions,
+              )
+                ? (prev as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
+                    .columnActionCompletions!
+                : [];
+              return {
+                ...prev,
+                columnActionCompletions: mergeActionCompletion(list, row),
+              };
+            });
+            void loadActivity();
+          },
+          onAllComplete: async () => {
+            setSavingField('columnId');
+            try {
+              await applyUpdate({ ...pendingUpdate, columnId: toColumnId });
+              if (fromColumnId !== toColumnId) {
+                onAfterColumnMove?.(fromColumnId, toColumnId);
+              }
+            } finally {
+              setSavingField(null);
+            }
+          },
         });
         return false;
       }
@@ -214,8 +253,10 @@ export function useTaskFieldUpdate({
       conclusionDraft,
       taskAttachments,
       applyUpdate,
-      setColumnTransition,
+      openColumnTransition,
       onAfterColumnMove,
+      loadActivity,
+      taskFields,
     ],
   );
 
@@ -260,29 +301,11 @@ export function useTaskFieldUpdate({
     ],
   );
 
-  const finishColumnTransition = useCallback(
-    async (toColumnId: string, pendingUpdate: TaskSnapshot, fromColumnId: string) => {
-      if (!activeTaskId) return;
-      setSavingField('columnId');
-      try {
-        await applyUpdate({ ...pendingUpdate, columnId: toColumnId });
-        setColumnTransition(null);
-        if (fromColumnId !== toColumnId) {
-          onAfterColumnMove?.(fromColumnId, toColumnId);
-        }
-      } finally {
-        setSavingField(null);
-      }
-    },
-    [activeTaskId, applyUpdate, setColumnTransition, onAfterColumnMove],
-  );
-
   return {
     savingField,
     fieldErrors,
     saveField,
     isFieldLocked,
     clearFieldError,
-    finishColumnTransition,
   };
 }

@@ -21,6 +21,7 @@ import {
   Video,
   Plus,
   MessageSquarePlus,
+  ClipboardList,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationsPanel } from './NotificationsPanel';
@@ -35,6 +36,8 @@ import { resolveUserAvatarUrl } from '../utils/userAvatar';
 import { UserPresenceBadge } from './UserPresenceBadge';
 import { usersApi } from '../services/api';
 import type { UserPresenceInfo } from '../types';
+import { FORMS_ACTIVE_RULE } from '../qiankun/formsMicroApp.config';
+import { FORMS_MICROAPP_ENABLED } from '../qiankun/formsMicroAppFeature';
 
 export function Layout() {
   const { currentUser, currentWorkspace, workspaces, logout, switchWorkspace, refreshWorkspaces, isAuthenticated } = useApp();
@@ -133,6 +136,9 @@ export function Layout() {
       { to: '/employees', label: 'Сотрудники', icon: Users },
     ];
     if (documents) items.push({ to: '/documents', label: 'Документы', icon: FileText });
+    if (FORMS_MICROAPP_ENABLED) {
+      items.push({ to: `${FORMS_ACTIVE_RULE}/`, label: 'Формы', icon: ClipboardList });
+    }
     if (knowledge) items.push({ to: '/knowledge', label: 'База знаний', icon: BookOpen });
     if (chat) items.push({ to: '/chat', label: 'Чат', icon: MessageCircle });
     if (calendar) items.push({ to: '/calendar', label: 'Календарь', icon: Calendar });
@@ -331,7 +337,15 @@ export function Layout() {
             </button>
           </div>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div
+          className={`flex min-h-0 flex-1 flex-col ${
+            FORMS_MICROAPP_ENABLED &&
+            (location.pathname.startsWith(`${FORMS_ACTIVE_RULE}/`) ||
+              location.pathname === FORMS_ACTIVE_RULE)
+              ? 'overflow-hidden'
+              : 'overflow-y-auto'
+          }`}
+        >
           <Outlet />
         </div>
       </main>

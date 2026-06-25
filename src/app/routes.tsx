@@ -1,4 +1,7 @@
+import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate, useLocation } from 'react-router';
+import { FORMS_MICROAPP_ENABLED } from './qiankun/formsMicroAppFeature';
+import { FormsDisabledRoute } from './pages/FormsDisabledRoute';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
@@ -23,6 +26,12 @@ import { Invite } from './pages/Invite';
 import { FeatureTabGuard } from './components/FeatureTabGuard';
 import { useApp } from './store/AppContext';
 import { BrowserNotificationNavigation } from './store/BrowserNotificationNavigation';
+
+const FormsMicroAppRoute = FORMS_MICROAPP_ENABLED
+  ? lazy(() =>
+      import('./pages/FormsMicroAppRoute').then((m) => ({ default: m.FormsMicroAppRoute })),
+    )
+  : null;
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useApp();
@@ -95,6 +104,22 @@ export const router = createBrowserRouter([
       {
         path: 'task/:taskKey',
         element: <TaskRoute />,
+      },
+      {
+        path: 'forms/*',
+        element: FORMS_MICROAPP_ENABLED && FormsMicroAppRoute ? (
+          <Suspense
+            fallback={
+              <div className="flex flex-1 items-center justify-center p-8 text-sm text-slate-600">
+                Загрузка модуля форм…
+              </div>
+            }
+          >
+            <FormsMicroAppRoute />
+          </Suspense>
+        ) : (
+          <FormsDisabledRoute />
+        ),
       },
       {
         path: 'employees',

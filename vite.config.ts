@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import { buildFormsApiViteProxy } from './src/app/qiankun/formsMicroApp.viteProxy'
 
 export default defineConfig({
   plugins: [
@@ -12,6 +13,7 @@ export default defineConfig({
   ],
   server: {
     proxy: {
+      ...buildFormsApiViteProxy(),
       '/api': {
         target: 'http://localhost:5004',
         changeOrigin: true,

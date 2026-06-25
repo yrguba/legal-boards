@@ -1,0 +1,36 @@
+# Пример: production frontend (legal-boards.ru)
+#
+# Внешний nginx на хосте:
+#   /        → frontend:80
+#   /api/    → backend (кроме LF-путей — см. nginx-legal-forms-proxy.conf.example)
+#   /ws      → backend
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        VITE_API_URL: /api
+        # Legal Forms (qiankun): false по умолчанию; включить когда готов nginx LF API
+        VITE_FORMS_MICROAPP_ENABLED: "false"
+        # VITE_WS_URL не нужен: prod использует wss://legal-boards.ru/ws через same origin
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    restart: unless-stopped
+
+# --- Локальная разработка (отдельный файл docker-compose.dev.yml) ---
+#
+# services:
+#   frontend:
+#     build:
+#       context: .
+#       dockerfile: deploy/Dockerfile.frontend.dev
+#     ports:
+#       - "${FRONTEND_PORT:-5173}:5173"
+#     command: pnpm dev --host 0.0.0.0
+#     volumes:
+#       - .:/app
+#       - /app/node_modules
+#     environment:
+#       VITE_API_URL: http://backend:5004/api

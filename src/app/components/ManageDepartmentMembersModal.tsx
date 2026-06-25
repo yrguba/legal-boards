@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { Department } from '../types';
 import { useEmployees } from '../store/EmployeesContext';
+import { UserAvatar } from './UserAvatar';
 
 interface ManageDepartmentMembersModalProps {
   isOpen: boolean;
@@ -69,9 +70,7 @@ export function ManageDepartmentMembersModal({
                   onChange={() => toggleMember(user.id)}
                   className="w-4 h-4 text-brand"
                 />
-                <div className="w-8 h-8 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
-                  <span className="text-sm font-medium text-brand">{user.name.charAt(0)}</span>
-                </div>
+                <UserAvatar name={user.name} avatar={user.avatar} size="md" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-slate-900">{user.name}</div>
                   <div className="text-xs text-slate-500">{user.email}</div>

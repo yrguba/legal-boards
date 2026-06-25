@@ -14,17 +14,15 @@ import { ManageDepartmentMembersModal } from '../components/ManageDepartmentMemb
 import { ManageGroupMembersModal } from '../components/ManageGroupMembersModal';
 import type { User, UserRole, Department, Group } from '../types';
 import { useWorkspacePermissions } from '../utils/workspacePermissions';
-import { resolveUserAvatarUrl } from '../utils/userAvatar';
 import { UserPresenceBadge } from '../components/UserPresenceBadge';
+import { UserAvatar } from '../components/UserAvatar';
 
 type ViewMode = 'all' | 'catalog' | 'departments' | 'groups';
 
 function MemberRow({ user, onRemove }: { user: User; onRemove?: () => void }) {
   return (
     <div className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50">
-      <div className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
-        <span className="text-xs font-medium text-brand">{user.name.charAt(0)}</span>
-      </div>
+      <UserAvatar name={user.name} avatar={user.avatar} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="text-sm text-slate-900 truncate">{user.name}</div>
         <div className="text-xs text-slate-500 truncate">{user.email}</div>
@@ -372,24 +370,14 @@ export function Employees() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => {
-                const avatarUrl = resolveUserAvatarUrl(user.avatar);
-                return (
+              {users.map((user) => (
                 <tr
                   key={user.id}
                   className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0 overflow-hidden">
-                        {avatarUrl ? (
-                          <img src={avatarUrl} alt="" className="size-full object-cover" />
-                        ) : (
-                          <span className="text-sm font-medium text-brand">
-                            {user.name.charAt(0)}
-                          </span>
-                        )}
-                      </div>
+                      <UserAvatar name={user.name} avatar={user.avatar} size="lg" />
                       <span className="text-sm font-medium text-slate-900">{user.name}</span>
                     </div>
                   </td>
@@ -441,8 +429,7 @@ export function Employees() {
                     </td>
                   ) : null}
                 </tr>
-                );
-              })}
+              ))}
             </tbody>
           </table>
         </div>

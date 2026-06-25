@@ -129,6 +129,28 @@ function normalizeApprovalRules(rawRules: unknown): BoardApprovalRule[] {
   });
 }
 
+function composeLegacyFormsPath(cfgRaw: Record<string, unknown>): string {
+  if (typeof cfgRaw.formsPath === 'string' && cfgRaw.formsPath.trim()) {
+    return cfgRaw.formsPath.trim();
+  }
+
+  const version =
+    typeof cfgRaw.formsProjectVersion === 'string' ? cfgRaw.formsProjectVersion.trim() : '';
+  const session = typeof cfgRaw.formsSessionId === 'string' ? cfgRaw.formsSessionId.trim() : '';
+  const flowId = typeof cfgRaw.formsFlowId === 'string' ? cfgRaw.formsFlowId.trim() : '';
+  const flowKey = typeof cfgRaw.formsFlowKey === 'string' ? cfgRaw.formsFlowKey.trim() : '';
+  const suffix = typeof cfgRaw.formsFlowSuffix === 'string' ? cfgRaw.formsFlowSuffix.trim() : '';
+  if (!version || !session || !flowId || !flowKey) return '';
+
+  const hostRaw = typeof cfgRaw.formsHost === 'string' ? cfgRaw.formsHost.trim() : '';
+  const tail = suffix ? `/${encodeURIComponent(suffix)}` : '';
+  const path = `/forms/${version}/expertise/${session}/flows/${flowId}/${encodeURIComponent(flowKey)}${tail}`;
+
+  if (!hostRaw) return path;
+  const host = /^https?:\/\//i.test(hostRaw) ? hostRaw.replace(/\/+$/, '') : `https://${hostRaw.replace(/\/+$/, '')}`;
+  return `${host}${path}`;
+}
+
 function normalizeColumnActionRules(rawRules: unknown): BoardColumnActionRule[] {
   const list = Array.isArray(rawRules) ? rawRules : [];
   return list.map((item: Record<string, unknown>) => {
@@ -141,7 +163,8 @@ function normalizeColumnActionRules(rawRules: unknown): BoardColumnActionRule[] 
     const actionKind: ColumnActionKind =
       kindRaw === 'form' ||
       kindRaw === 'check_task' ||
-      kindRaw === 'forward_to_board'
+      kindRaw === 'forward_to_board' ||
+      kindRaw === 'legal_forms'
         ? kindRaw
         : 'confirm';
     const cfgRaw =
@@ -158,6 +181,9 @@ function normalizeColumnActionRules(rawRules: unknown): BoardColumnActionRule[] 
       targetBoardName: typeof cfgRaw.targetBoardName === 'string' ? cfgRaw.targetBoardName : '',
       targetColumnName: typeof cfgRaw.targetColumnName === 'string' ? cfgRaw.targetColumnName : '',
       skipIfAlreadyOnBoard: cfgRaw.skipIfAlreadyOnBoard !== false,
+      formsPath: composeLegacyFormsPath(cfgRaw),
+      formsAccessTokenFieldId:
+        typeof cfgRaw.formsAccessTokenFieldId === 'string' ? cfgRaw.formsAccessTokenFieldId : '',
       fields: Array.isArray(cfgRaw.fields)
         ? cfgRaw.fields.map((f: Record<string, unknown>) => ({
             key: typeof f.key === 'string' ? f.key : '',

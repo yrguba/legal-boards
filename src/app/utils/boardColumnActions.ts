@@ -4,6 +4,7 @@ import type {
   ColumnActionTrigger,
 } from '../features/board-settings/boardAdvancedSettings.types';
 import type { Board, TaskField } from '../types';
+import { isFormsMicroAppEnabled } from '../qiankun/formsMicroAppFeature';
 import { getDescriptionFieldId, getTitleFieldId } from '../pages/task/utils/taskFieldIds';
 import { isEmptyValue } from '../pages/task/utils/customFieldValue';
 
@@ -75,6 +76,24 @@ function getCheckFieldValue(
   if (titleFieldId && fieldId === titleFieldId) return task.title;
   if (descriptionFieldId && fieldId === descriptionFieldId) return task.description;
   return task.customFields?.[fieldId];
+}
+
+function pushInteractiveStepOrLegalFormsDisabled(
+  rule: BoardColumnActionRule,
+  forColumnId: string,
+  phase: 'exit' | 'enter',
+  checkErrors: ColumnTransitionCheckError[],
+  interactiveSteps: ColumnTransitionInteractiveStep[],
+) {
+  if (rule.actionKind === 'legal_forms' && !isFormsMicroAppEnabled()) {
+    checkErrors.push({
+      ruleName: rule.name || 'Legal Forms',
+      messages: ['Модуль Legal Forms временно отключён на сервере.'],
+      phase,
+    });
+    return;
+  }
+  interactiveSteps.push({ rule, forColumnId, phase });
 }
 
 function runCheckTaskRule(
@@ -209,7 +228,7 @@ export function buildColumnTransitionPlan(
         checkErrors.push({ ruleName: rule.name || 'Проверка', messages, phase: 'exit' });
       }
     } else if (rule.actionKind !== 'forward_to_board' && !exitCompleted.has(rule.id)) {
-      interactiveSteps.push({ rule, forColumnId: fromColumnId, phase: 'exit' });
+      pushInteractiveStepOrLegalFormsDisabled(rule, fromColumnId, 'exit', checkErrors, interactiveSteps);
     }
   }
 
@@ -223,7 +242,7 @@ export function buildColumnTransitionPlan(
         checkErrors.push({ ruleName: rule.name || 'Проверка', messages, phase: 'enter' });
       }
     } else if (rule.actionKind !== 'forward_to_board' && !enterCompleted.has(rule.id)) {
-      interactiveSteps.push({ rule, forColumnId: toColumnId, phase: 'enter' });
+      pushInteractiveStepOrLegalFormsDisabled(rule, toColumnId, 'enter', checkErrors, interactiveSteps);
     }
   }
 

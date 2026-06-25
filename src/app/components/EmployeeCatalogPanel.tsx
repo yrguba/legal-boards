@@ -3,6 +3,7 @@ import { Filter, FileText } from 'lucide-react';
 import type { Department, Group, User } from '../types';
 import { usersApi } from '../services/api';
 import { profileValue } from '../utils/employeeProfileForm';
+import { UserAvatar } from './UserAvatar';
 
 type CatalogFilters = {
   q: string;
@@ -206,10 +207,15 @@ export function EmployeeCatalogPanel({
                 </td>
               </tr>
             ) : (
-              rows.map((user) => (
+              rows.map((user) => {
+                const displayName = profileValue(user.profileFields, 'fullName') || user.name;
+                return (
                 <tr key={user.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                    {profileValue(user.profileFields, 'fullName') || user.name}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <UserAvatar name={displayName} avatar={user.avatar} size="md" />
+                      <span className="font-medium text-slate-900">{displayName}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {profileValue(user.profileFields, 'contractNumber') || '—'}
@@ -236,7 +242,8 @@ export function EmployeeCatalogPanel({
                     </button>
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

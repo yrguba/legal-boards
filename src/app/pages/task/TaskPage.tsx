@@ -22,12 +22,7 @@ import { TaskIconRail } from './components/TaskIconRail';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { getBoardIframeServices, parseIframePanelId, taskIframePanelId } from './utils/boardIframeServices';
 import { getBoardApprovalRules, mergeApprovalDecision, normalizeApprovalRow, type TaskColumnApprovalRow } from '../../utils/boardApprovals';
-import {
-  mergeActionCompletion,
-  type ColumnTransitionInteractiveStep,
-  type TaskColumnActionCompletionRow,
-} from '../../utils/boardColumnActions';
-import { ColumnActionTransitionModal } from '../../components/ColumnActionTransitionModal';
+import { useColumnTransition } from '../../store/ColumnTransitionContext';
 import {
   ForwardToBoardOfferDialog,
   prepareForwardToBoardOffer,
@@ -111,14 +106,7 @@ export function TaskPage() {
   const [conclusionUploadError, setConclusionUploadError] = useState<string | null>(null);
   const [approvingRuleId, setApprovingRuleId] = useState<string | null>(null);
   const [approvalError, setApprovalError] = useState<string | null>(null);
-  const [columnTransition, setColumnTransition] = useState<{
-    fromColumnId: string;
-    toColumnId: string;
-    steps: ColumnTransitionInteractiveStep[];
-    pendingUpdate: import('./hooks/useTaskFieldUpdate').TaskSnapshot;
-  } | null>(null);
-  const [columnTransitionError, setColumnTransitionError] = useState<string | null>(null);
-  const [columnTransitionSubmitting, setColumnTransitionSubmitting] = useState(false);
+  const { openColumnTransition } = useColumnTransition();
   const [transferOpen, setTransferOpen] = useState(false);
   const [forwardOffer, setForwardOffer] = useState<
     import('../../components/ForwardToBoardOfferDialog').ForwardToBoardOffer | null
@@ -273,7 +261,7 @@ export function TaskPage() {
     }
   }, [activeTaskId]);
 
-  const { savingField, fieldErrors, saveField, isFieldLocked, finishColumnTransition } =
+  const { savingField, fieldErrors, saveField, isFieldLocked } =
     useTaskFieldUpdate({
       task,
       board,
@@ -286,7 +274,7 @@ export function TaskPage() {
       columnApprovals,
       activeTaskId: task?.id ?? taskKey,
       setTask,
-      setColumnTransition,
+      openColumnTransition,
       loadActivity,
       onAfterColumnMove: (fromColumnId, toColumnId) => {
         if (!task?.id || !board) return;
@@ -852,77 +840,6 @@ export function TaskPage() {
       </ResizablePanelGroup>
 
       <DocumentPreviewModal preview={previewDoc} onClose={() => setPreviewDoc(null)} />
-
-      <ColumnActionTransitionModal
-        open={!!columnTransition}
-        steps={columnTransition?.steps ?? []}
-        targetColumnName={
-          columnTransition
-            ? board.columns?.find((c) => c.id === columnTransition.toColumnId)?.name
-            : undefined
-        }
-        submitting={columnTransitionSubmitting}
-        error={columnTransitionError}
-        onClose={() => {
-          if (columnTransitionSubmitting) return;
-          setColumnTransition(null);
-          setColumnTransitionError(null);
-        }}
-        onSubmitStep={async (step, payload) => {
-          if (!activeTaskId || !columnTransition) return;
-          setColumnTransitionSubmitting(true);
-          setColumnTransitionError(null);
-          try {
-            const row = (await tasksApi.completeColumnAction(
-              activeTaskId,
-              step.rule.id,
-              payload,
-              step.forColumnId,
-            )) as TaskColumnActionCompletionRow;
-            setTask((prev) => {
-              if (!prev) return prev;
-              const list = Array.isArray(
-                (prev as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
-                  .columnActionCompletions,
-              )
-                ? (prev as TaskRecord & { columnActionCompletions?: TaskColumnActionCompletionRow[] })
-                    .columnActionCompletions!
-                : [];
-              return {
-                ...prev,
-                columnActionCompletions: mergeActionCompletion(list, row),
-              };
-            });
-            void loadActivity();
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Не удалось выполнить действие';
-            setColumnTransitionError(msg);
-            throw e;
-          } finally {
-            setColumnTransitionSubmitting(false);
-          }
-        }}
-        onAllComplete={async () => {
-          if (!columnTransition) return;
-          setColumnTransitionSubmitting(true);
-          setColumnTransitionError(null);
-          try {
-            await finishColumnTransition(
-              columnTransition.toColumnId,
-              columnTransition.pendingUpdate,
-              columnTransition.fromColumnId,
-            );
-            setColumnTransitionError(null);
-          } catch (e: unknown) {
-            setColumnTransitionError(
-              e instanceof Error ? e.message : 'Не удалось сохранить изменения',
-            );
-            throw e;
-          } finally {
-            setColumnTransitionSubmitting(false);
-          }
-        }}
-      />
 
       <ForwardToBoardOfferDialog
         offer={forwardOffer}
