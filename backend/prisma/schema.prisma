@@ -269,8 +269,28 @@ model Workspace {
   userPresences     UserPresence[]
   userAbsences      UserAbsence[]
   feedbackTickets   FeedbackTicket[]
+  quickCreateTaskPresets QuickCreateTaskPreset[]
 
   @@index([ownerId])
+}
+
+model QuickCreateTaskPreset {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  boardId     String
+  columnId    String
+  position    Int      @default(0)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  board     Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, position])
+  @@index([boardId])
 }
 
 model WorkspaceUser {
@@ -421,6 +441,7 @@ model Board {
   codeAliases BoardCodeAlias[]
   aggregatedSources AggregatedBoardSource[] @relation("AggregatedBoard")
   aggregatedIn      AggregatedBoardSource[] @relation("SourceBoard")
+  quickCreatePresets QuickCreateTaskPreset[]
 
   @@index([workspaceId])
   @@index([kind])

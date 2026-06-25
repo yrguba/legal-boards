@@ -1017,25 +1017,26 @@ export function Board() {
         </div>
       </div>
 
-      {dragMoveError ? (
-        <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-          {dragMoveError}
-        </div>
-      ) : null}
-      {transferNotice ? (
-        <div className="mx-6 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 flex justify-between gap-2">
-          <span>{transferNotice}</span>
-          <button
-            type="button"
-            className="text-emerald-700 hover:text-emerald-900 shrink-0"
-            onClick={() => setTransferNotice(null)}
-          >
-            ✕
-          </button>
-        </div>
-      ) : null}
+      <div className="flex min-h-0 flex-1 flex-col px-3">
+        {dragMoveError ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+            {dragMoveError}
+          </div>
+        ) : null}
+        {transferNotice ? (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 flex justify-between gap-2">
+            <span>{transferNotice}</span>
+            <button
+              type="button"
+              className="text-emerald-700 hover:text-emerald-900 shrink-0"
+              onClick={() => setTransferNotice(null)}
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
 
-      <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 overflow-auto min-h-0">
         {filtersHideAllTasks ? (
           <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-2">
             <span>Нет задач по выбранным фильтрам.</span>
@@ -1238,6 +1239,7 @@ export function Board() {
             </table>
           </div>
         )}
+        </div>
       </div>
 
       {board && (

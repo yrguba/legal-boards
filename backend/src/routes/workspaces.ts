@@ -16,6 +16,11 @@ import {
   handleListWorkspaceInvites,
   handleWorkspaceMemberLookup,
 } from '../utils/workspaceInviteAdmin';
+import {
+  assertWorkspaceMember,
+  listQuickCreatePresets,
+  replaceQuickCreatePresets,
+} from '../utils/quickCreatePresets';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -307,6 +312,43 @@ router.put(
     }
   },
 );
+
+router.get('/:workspaceId/quick-create-presets', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    const workspace = await assertWorkspaceMember(prisma, workspaceId, req.userId);
+    if (!workspace) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
+
+    const enabledOnly = req.query.enabledOnly === '1' || req.query.enabledOnly === 'true';
+    const presets = await listQuickCreatePresets(prisma, workspaceId, { enabledOnly });
+    res.json(presets);
+  } catch (error) {
+    console.error('Get quick create presets error:', error);
+    res.status(500).json({ error: 'Ошибка получения пресетов быстрого создания' });
+  }
+});
+
+router.put('/:workspaceId/quick-create-presets', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+
+    await assertCanManageWorkspace(prisma, req.userId, workspaceId);
+
+    const incoming = req.body?.presets;
+    const presets = await replaceQuickCreatePresets(prisma, workspaceId, incoming);
+    res.json(presets);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Ошибка сохранения пресетов';
+    if (message.includes('должен быть массивом') || message.includes('Пресет')) {
+      return res.status(400).json({ error: message });
+    }
+    console.error('Update quick create presets error:', error);
+    res.status(500).json({ error: 'Ошибка сохранения пресетов быстрого создания' });
+  }
+});
 
 router.get('/:id', async (req: AuthRequest, res) => {
   try {

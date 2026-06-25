@@ -98,6 +98,18 @@ export interface Workspace {
   createdAt: string;
 }
 
+export interface QuickCreateTaskPreset {
+  id: string;
+  workspaceId: string;
+  name: string;
+  boardId: string;
+  boardName: string;
+  columnId: string;
+  columnName: string;
+  position: number;
+  enabled: boolean;
+}
+
 export interface Document {
   id: string;
   name: string;

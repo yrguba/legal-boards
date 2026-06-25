@@ -97,7 +97,6 @@ function AggregatedTaskCard({
 }) {
   const typeName = task.type?.name ?? '—';
   const typeColor = task.type?.color ?? '#6b7280';
-  const statusName = task.sourceColumnName ?? '—';
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -115,9 +114,9 @@ function AggregatedTaskCard({
       style={style}
       {...attributes}
       {...listeners}
-      className="bg-white rounded-lg p-3 border border-slate-200 hover:border-brand hover:shadow-md transition-all cursor-grab active:cursor-grabbing touch-none"
+      className="bg-white rounded-md p-2 border border-slate-200 hover:border-brand hover:shadow-sm transition-all cursor-grab active:cursor-grabbing touch-none flex flex-col gap-2"
     >
-      <div className="flex items-start gap-2 mb-2">
+      <div className="flex items-start gap-1.5">
         {canSelect ? (
           <input
             type="checkbox"
@@ -125,7 +124,7 @@ function AggregatedTaskCard({
             onChange={() => onToggleSelect?.(task.id)}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
-            className="mt-1 rounded border-slate-300 shrink-0"
+            className="mt-0.5 rounded border-slate-300 shrink-0"
             aria-label={`Выбрать ${task.title}`}
           />
         ) : null}
@@ -140,16 +139,8 @@ function AggregatedTaskCard({
             ) : null}
             {task.title}
           </Link>
-          {task.sourceBoardName ? (
-            <span className="block text-[11px] text-slate-500">{task.sourceBoardName}</span>
-          ) : null}
         </div>
         <TaskBoardCountBadge count={task.boardPlacementsCount} compact />
-      </div>
-
-      <div className="flex items-center gap-1.5 mb-2">
-        <span className={`inline-block size-2 rounded-full shrink-0 ${statusDotClass(statusName)}`} />
-        <span className="text-xs text-slate-600">{statusName}</span>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -199,7 +190,7 @@ function StatusDropZone({
   return (
     <div
       ref={setNodeRef}
-      className={`rounded-lg p-2 transition-colors border-2 ${
+      className={`rounded-md p-1 transition-colors border-2 ${
         isOver
           ? 'bg-brand-light/60 border-dashed border-brand'
           : 'border-transparent'
@@ -208,7 +199,7 @@ function StatusDropZone({
       <button
         type="button"
         onClick={onToggleCollapse}
-        className="flex items-center gap-1.5 mb-2 sticky top-0 bg-slate-50 py-1 z-[1] w-full text-left rounded hover:bg-slate-100/80 transition-colors"
+        className="flex items-center gap-1 mb-1 sticky top-0 bg-slate-50 py-0.5 z-[1] w-full text-left rounded hover:bg-slate-100/80 transition-colors"
         aria-expanded={!isCollapsed}
       >
         {isCollapsed ? (
@@ -224,7 +215,7 @@ function StatusDropZone({
         <div className="min-h-[2rem]" aria-hidden />
       ) : (
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          <div className="space-y-2 min-h-[2rem]">
+          <div className="space-y-1 min-h-[1.5rem]">
             {tasks.map((task) => (
               <AggregatedTaskCard
                 key={task.id}
@@ -260,11 +251,11 @@ function UnknownStatusGroup({
   onToggleSelect?: (taskId: string) => void;
 }) {
   return (
-    <div className="rounded-lg p-2 border-2 border-transparent">
+    <div className="rounded-md p-1 border-2 border-transparent">
       <button
         type="button"
         onClick={onToggleCollapse}
-        className="flex items-center gap-1.5 mb-2 w-full text-left rounded hover:bg-slate-100/80 transition-colors py-1"
+        className="flex items-center gap-1 mb-1 w-full text-left rounded hover:bg-slate-100/80 transition-colors py-0.5"
         aria-expanded={!isCollapsed}
       >
         {isCollapsed ? (
@@ -276,10 +267,10 @@ function UnknownStatusGroup({
         <span className="text-xs text-slate-400">({tasks.length})</span>
       </button>
       {isCollapsed ? (
-        <div className="min-h-[2rem]" aria-hidden />
+        <div className="min-h-[1.5rem]" aria-hidden />
       ) : (
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          <div className="space-y-2">
+          <div className="space-y-1">
             {tasks.map((task) => (
               <AggregatedTaskCard
                 key={task.id}
@@ -341,18 +332,18 @@ function SourceBoardColumn({
   const unknownKey = statusGroupKey(source.id, '__unknown__');
 
   return (
-    <div className="flex-shrink-0 w-80 rounded-lg bg-slate-50 p-4 flex flex-col max-h-[calc(100vh-12rem)]">
-      <div className="flex items-center justify-between mb-4">
+    <div className="flex-shrink-0 w-72 rounded-lg bg-slate-50 p-2.5 flex flex-col max-h-[calc(100vh-12rem)]">
+      <div className="flex items-center justify-between mb-2">
         <Link
           to={`/board/${source.code}`}
-          className="font-medium text-slate-900 hover:text-brand transition-colors"
+          className="font-medium text-slate-900 hover:text-brand transition-colors truncate pr-2"
         >
           {source.name}
         </Link>
-        <span className="text-sm text-slate-500">{totalCount}</span>
+        <span className="text-sm text-slate-500 shrink-0">{totalCount}</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 min-h-[200px] px-0.5">
+      <div className="aggregated-board-scroll flex-1 overflow-y-auto space-y-2 min-h-[200px]">
         {columnOrder.map((col) => {
           const colTasks = tasksByColumn.map.get(col.id) ?? [];
           if (colTasks.length === 0) return null;
@@ -1193,78 +1184,82 @@ export function AggregatedBoardView({
         </div>
       </div>
 
-      {dragMoveError ? (
-        <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-          {dragMoveError}
-        </div>
-      ) : null}
-      {transferNotice ? (
-        <div className="mx-6 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 flex justify-between gap-2">
-          <span>{transferNotice}</span>
-          <button
-            type="button"
-            className="text-emerald-700 hover:text-emerald-900 shrink-0"
-            onClick={() => setTransferNotice(null)}
-          >
-            ✕
-          </button>
-        </div>
-      ) : null}
-
-      {isLoading ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-slate-500">
-          Загрузка задач…
-        </div>
-      ) : sources.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-slate-500">
-          В сводной доске не выбраны исходные доски
-        </div>
-      ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={(e) => void handleDragEnd(e)}
-        >
-          {filtersHideAllTasks ? (
-            <div className="mx-6 mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-2">
-              <span>Нет задач по выбранным фильтрам.</span>
-              <button
-                type="button"
-                onClick={clearAllFilters}
-                className="text-brand hover:underline text-sm font-medium"
-              >
-                Сбросить фильтры
-              </button>
-            </div>
-          ) : null}
-          <div className="flex-1 overflow-x-auto p-6">
-            <div className="flex gap-4 min-h-full">
-              {visibleSources.map((source) => (
-                <SourceBoardColumn
-                  key={source.id}
-                  source={source}
-                  tasks={tasksBySource.get(source.id) ?? []}
-                  getAssigneeName={getAssigneeName}
-                  collapsedGroups={collapsedGroups}
-                  onToggleStatusGroup={toggleStatusGroup}
-                  canSelect={canManage}
-                  selectedTaskIds={selectedTaskIds}
-                  onToggleSelect={toggleTaskSelection}
-                />
-              ))}
-            </div>
+      <div className="flex min-h-0 flex-1 flex-col px-3">
+        {dragMoveError ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+            {dragMoveError}
           </div>
-          <DragOverlay>
-            {activeTask ? (
-              <div className="bg-white rounded-lg p-3 border-2 border-brand shadow-lg w-72 opacity-95">
-                <p className="text-sm font-medium text-slate-900">{activeTask.title}</p>
+        ) : null}
+        {transferNotice ? (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 flex justify-between gap-2">
+            <span>{transferNotice}</span>
+            <button
+              type="button"
+              className="text-emerald-700 hover:text-emerald-900 shrink-0"
+              onClick={() => setTransferNotice(null)}
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
+
+        {isLoading ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
+            Загрузка задач…
+          </div>
+        ) : sources.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
+            В сводной доске не выбраны исходные доски
+          </div>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={(e) => void handleDragEnd(e)}
+          >
+            <div className="flex min-h-0 flex-1 flex-col">
+              {filtersHideAllTasks ? (
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-2">
+                  <span>Нет задач по выбранным фильтрам.</span>
+                  <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    className="text-brand hover:underline text-sm font-medium"
+                  >
+                    Сбросить фильтры
+                  </button>
+                </div>
+              ) : null}
+              <div className="aggregated-board-scroll min-h-0 flex-1 overflow-x-auto">
+                <div className="flex min-h-full gap-3">
+                  {visibleSources.map((source) => (
+                    <SourceBoardColumn
+                      key={source.id}
+                      source={source}
+                      tasks={tasksBySource.get(source.id) ?? []}
+                      getAssigneeName={getAssigneeName}
+                      collapsedGroups={collapsedGroups}
+                      onToggleStatusGroup={toggleStatusGroup}
+                      canSelect={canManage}
+                      selectedTaskIds={selectedTaskIds}
+                      onToggleSelect={toggleTaskSelection}
+                    />
+                  ))}
+                </div>
               </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      )}
+            </div>
+            <DragOverlay>
+              {activeTask ? (
+                <div className="bg-white rounded-md p-2 border-2 border-brand shadow-lg w-64 opacity-95">
+                  <p className="text-sm font-medium text-slate-900">{activeTask.title}</p>
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
+      </div>
 
       {transferOpen && transferTaskId && !resolvedTransferSource ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 text-sm text-slate-600">

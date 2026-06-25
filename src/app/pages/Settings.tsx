@@ -5,13 +5,23 @@ import { useFeatureTabsConfig } from '../features/featureTabs/useFeatureTabsConf
 import { NotificationSettingsPanel } from '../components/NotificationSettingsPanel';
 import { MyProfileSettingsPanel } from '../components/MyProfileSettingsPanel';
 import { MyFeedbackPanel } from '../components/MyFeedbackPanel';
-import { Building2, Users, Shield, Bell, UserCircle, MessageSquarePlus } from 'lucide-react';
+import { QuickCreatePresetsPanel } from '../components/QuickCreatePresetsPanel';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
+import { Building2, Users, Shield, Bell, UserCircle, MessageSquarePlus, Zap } from 'lucide-react';
 
-type SettingsTab = 'profile' | 'feedback' | 'workspace' | 'users' | 'permissions' | 'notifications';
+type SettingsTab =
+  | 'profile'
+  | 'feedback'
+  | 'workspace'
+  | 'quickCreate'
+  | 'users'
+  | 'permissions'
+  | 'notifications';
 
 export function Settings() {
   const { currentWorkspace } = useApp();
   const { feedbackEnabled } = useFeatureTabsConfig();
+  const { canManageWorkspace } = useWorkspacePermissions();
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
 
   return (
@@ -61,6 +71,19 @@ export function Settings() {
               <Building2 className="w-5 h-5" />
               <span>Рабочее пространство</span>
             </button>
+            {canManageWorkspace ? (
+              <button
+                onClick={() => setActiveTab('quickCreate')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
+                  activeTab === 'quickCreate'
+                    ? 'bg-brand-light text-brand'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Zap className="w-5 h-5" />
+                <span>Быстрое создание</span>
+              </button>
+            ) : null}
             <button
               onClick={() => setActiveTab('users')}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
@@ -123,6 +146,8 @@ export function Settings() {
               </Link>
             </div>
           )}
+
+          {activeTab === 'quickCreate' && canManageWorkspace ? <QuickCreatePresetsPanel /> : null}
 
           {activeTab === 'users' && (
             <div className="bg-white rounded-lg border border-slate-200 p-6">

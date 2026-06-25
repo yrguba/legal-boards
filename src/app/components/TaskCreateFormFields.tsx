@@ -29,7 +29,8 @@ function fieldLabel(field: TaskField) {
 const inputClassName =
   'w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset';
 
-export function useTaskCreateForm(board: Board | null) {
+export function useTaskCreateForm(board: Board | null, options?: { defaultTypeId?: string }) {
+  const defaultTypeId = options?.defaultTypeId;
   const [typeId, setTypeId] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
   const [priority, setPriority] = useState(DEFAULT_TASK_PRIORITY);
@@ -63,13 +64,18 @@ export function useTaskCreateForm(board: Board | null) {
   }, [taskFields]);
 
   const reset = useCallback(() => {
-    setTypeId(board?.taskTypes?.[0]?.id || '');
+    const types = board?.taskTypes ?? [];
+    const preferredTypeId =
+      defaultTypeId && types.some((t) => t.id === defaultTypeId)
+        ? defaultTypeId
+        : types[0]?.id || '';
+    setTypeId(preferredTypeId);
     setAssigneeId('');
     setPriority(DEFAULT_TASK_PRIORITY);
     setCustomFields({});
     setEditorResetKey((k) => k + 1);
     setPendingFiles([]);
-  }, [board?.taskTypes]);
+  }, [board?.taskTypes, defaultTypeId]);
 
   const addPendingFiles = useCallback((fileList: FileList | File[] | null | undefined) => {
     if (!fileList?.length) return;
@@ -82,7 +88,7 @@ export function useTaskCreateForm(board: Board | null) {
 
   useEffect(() => {
     reset();
-  }, [board?.id, reset]);
+  }, [board?.id, defaultTypeId, reset]);
 
   const validate = useCallback((): string | null => {
     if (!board) return 'Выберите доску';
@@ -166,11 +172,15 @@ export function TaskCreateFormFields({
   users,
   authorName,
   board,
+  hideAuthor = false,
+  hideAssignee = false,
 }: {
   form: TaskCreateFormState;
   users: User[];
   authorName?: string;
   board: Board | null;
+  hideAuthor?: boolean;
+  hideAssignee?: boolean;
 }) {
   const {
     typeId,
@@ -209,26 +219,30 @@ export function TaskCreateFormFields({
         </select>
       </div>
 
-      <div>
-        <label className="mb-1 block text-sm font-medium text-slate-700">Автор</label>
-        <input
-          readOnly
-          value={authorName ?? '—'}
-          className="w-full cursor-default rounded border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
-        />
-      </div>
+      {!hideAuthor ? (
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Автор</label>
+          <input
+            readOnly
+            value={authorName ?? '—'}
+            className="w-full cursor-default rounded border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
+          />
+        </div>
+      ) : null}
 
-      <div>
-        <label className="mb-1 block text-sm font-medium text-slate-700">Исполнитель</label>
-        <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputClassName}>
-          <option value="">Не назначено</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {!hideAssignee ? (
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Исполнитель</label>
+          <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputClassName}>
+            <option value="">Не назначено</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">Приоритет</label>

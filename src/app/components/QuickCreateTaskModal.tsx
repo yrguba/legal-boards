@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import type { Board, User } from '../types';
+import { Loader2 } from 'lucide-react';
+import type { Board, QuickCreateTaskPreset } from '../types';
 import { useApp } from '../store/AppContext';
-import { boardsApi, tasksApi, usersApi } from '../services/api';
+import { boardsApi, tasksApi, workspacesApi } from '../services/api';
+import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { richEditorDialogHandlers } from './markdown';
 import { TaskCreateFormFields, useTaskCreateForm, uploadPendingTaskAttachments } from './TaskCreateFormFields';
 
 const selectClassName =
   'w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset';
-
-function sortColumns(board: Board | null) {
-  return [...(board?.columns || [])].sort((a, b) => a.position - b.position);
-}
 
 export type QuickCreateSuccess = {
   key?: string;
@@ -26,89 +24,66 @@ interface QuickCreateTaskModalProps {
 }
 
 export function QuickCreateTaskModal({ open, onOpenChange, onSuccess }: QuickCreateTaskModalProps) {
-  const { currentUser, currentWorkspace, workspaces } = useApp();
-  const [workspaceId, setWorkspaceId] = useState('');
-  const [boards, setBoards] = useState<Board[]>([]);
-  const [boardId, setBoardId] = useState('');
-  const [columnId, setColumnId] = useState('');
-  const [users, setUsers] = useState<User[]>([]);
-  const [loadingBoards, setLoadingBoards] = useState(false);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  const { currentWorkspace } = useApp();
+  const { canManageWorkspace } = useWorkspacePermissions();
+  const workspaceId = currentWorkspace?.id ?? '';
+
+  const [presets, setPresets] = useState<QuickCreateTaskPreset[]>([]);
+  const [presetId, setPresetId] = useState('');
+  const [board, setBoard] = useState<Board | null>(null);
+  const [loadingPresets, setLoadingPresets] = useState(false);
+  const [loadingBoard, setLoadingBoard] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdTask, setCreatedTask] = useState<QuickCreateSuccess | null>(null);
 
-  const selectedBoard = useMemo(
-    () => boards.find((b) => b.id === boardId) ?? null,
-    [boards, boardId],
-  );
-  const sortedColumns = useMemo(() => sortColumns(selectedBoard), [selectedBoard]);
-  const form = useTaskCreateForm(selectedBoard);
-
-  const creatableBoards = useMemo(
-    () => boards.filter((b) => b.kind !== 'aggregated'),
-    [boards],
+  const selectedPreset = useMemo(
+    () => presets.find((p) => p.id === presetId) ?? null,
+    [presets, presetId],
   );
 
-  const resetFormState = () => {
-    setBoardId('');
-    setColumnId('');
-    setBoards([]);
-    setUsers([]);
+  const form = useTaskCreateForm(board);
+
+  const resetState = () => {
+    setPresetId('');
+    setBoard(null);
+    setPresets([]);
     setLoadError(null);
     setError(null);
     setCreatedTask(null);
   };
 
   const handleClose = () => {
-    resetFormState();
+    resetState();
     onOpenChange(false);
   };
-
-  useEffect(() => {
-    if (!open) return;
-    setWorkspaceId(currentWorkspace?.id || workspaces[0]?.id || '');
-    resetFormState();
-  }, [open, currentWorkspace?.id, workspaces]);
 
   useEffect(() => {
     if (!open || !workspaceId) return;
 
     let cancelled = false;
-    setLoadingBoards(true);
-    setLoadingUsers(true);
+    setLoadingPresets(true);
     setLoadError(null);
-    setBoardId('');
-    setColumnId('');
-    setBoards([]);
-    setUsers([]);
+    resetState();
 
-    Promise.all([boardsApi.getByWorkspace(workspaceId), usersApi.getByWorkspace(workspaceId)])
-      .then(([boardList, userList]) => {
+    workspacesApi
+      .getQuickCreatePresets(workspaceId, true)
+      .then((list) => {
         if (cancelled) return;
-        const list = (Array.isArray(boardList) ? boardList : []) as Board[];
-        const standardBoards = list.filter((b) => b.kind !== 'aggregated');
-        setBoards(list);
-        setUsers(Array.isArray(userList) ? userList : []);
-
-        if (standardBoards.length === 1) {
-          const only = standardBoards[0];
-          setBoardId(only.id);
-          const cols = sortColumns(only);
-          setColumnId(cols[0]?.id || '');
+        const items = Array.isArray(list) ? (list as QuickCreateTaskPreset[]) : [];
+        setPresets(items);
+        if (items.length === 1) {
+          setPresetId(items[0].id);
         }
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          setLoadError(e instanceof Error ? e.message : 'Не удалось загрузить данные пространства');
+          setLoadError(e instanceof Error ? e.message : 'Не удалось загрузить пресеты');
         }
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoadingBoards(false);
-          setLoadingUsers(false);
-        }
+        if (!cancelled) setLoadingPresets(false);
       });
 
     return () => {
@@ -117,24 +92,45 @@ export function QuickCreateTaskModal({ open, onOpenChange, onSuccess }: QuickCre
   }, [open, workspaceId]);
 
   useEffect(() => {
-    if (!boardId) {
-      setColumnId('');
+    if (!open || !selectedPreset) {
+      setBoard(null);
       return;
     }
-    const board = boards.find((b) => b.id === boardId);
-    const cols = sortColumns(board ?? null);
-    setColumnId((prev) => (prev && cols.some((c) => c.id === prev) ? prev : cols[0]?.id || ''));
-  }, [boardId, boards]);
+
+    let cancelled = false;
+    setLoadingBoard(true);
+    setLoadError(null);
+
+    boardsApi
+      .getById(selectedPreset.boardId)
+      .then((b) => {
+        if (!cancelled) setBoard(b as Board);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setLoadError(e instanceof Error ? e.message : 'Не удалось загрузить доску');
+          setBoard(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBoard(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedPreset?.id, selectedPreset?.boardId]);
 
   const boardReady = Boolean(
-    selectedBoard &&
-      (selectedBoard.taskTypes?.length ?? 0) > 0 &&
-      sortedColumns.length > 0 &&
-      columnId,
+    selectedPreset &&
+      board &&
+      (board.taskTypes?.length ?? 0) > 0 &&
+      selectedPreset.columnId &&
+      form.typeId,
   );
 
   const submit = async () => {
-    if (!selectedBoard || !columnId) return;
+    if (!selectedPreset || !board) return;
 
     setError(null);
     const validationError = form.validate();
@@ -147,8 +143,8 @@ export function QuickCreateTaskModal({ open, onOpenChange, onSuccess }: QuickCre
     try {
       const payload = form.buildPayload();
       const created = await tasksApi.create({
-        boardId: selectedBoard.id,
-        columnId,
+        boardId: board.id,
+        columnId: selectedPreset.columnId,
         ...payload,
       });
 
@@ -221,89 +217,70 @@ export function QuickCreateTaskModal({ open, onOpenChange, onSuccess }: QuickCre
             )}
 
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto overscroll-contain px-2 py-2 pb-4 [-webkit-overflow-scrolling:touch]">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Пространство *</label>
-                <select
-                  value={workspaceId}
-                  onChange={(e) => setWorkspaceId(e.target.value)}
-                  className={selectClassName}
-                  disabled={loadingBoards}
-                >
-                  <option value="" disabled>
-                    Выберите пространство
-                  </option>
-                  {workspaces.map((ws) => (
-                    <option key={ws.id} value={ws.id}>
-                      {ws.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Доска *</label>
-                <select
-                  value={boardId}
-                  onChange={(e) => setBoardId(e.target.value)}
-                  className={selectClassName}
-                  disabled={loadingBoards || !workspaceId || creatableBoards.length === 0}
-                >
-                  <option value="" disabled>
-                    {loadingBoards
-                      ? 'Загрузка…'
-                      : creatableBoards.length === 0
-                        ? 'Нет доступных досок'
-                        : 'Выберите доску'}
-                  </option>
-                  {creatableBoards.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-                {!loadingBoards && workspaceId && creatableBoards.length === 0 ? (
-                  <p className="mt-1 text-xs text-slate-500">
-                    В этом пространстве нет досок для создания задач.
-                  </p>
-                ) : null}
-              </div>
-
-              {selectedBoard ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Колонка *</label>
-                  <select
-                    value={columnId}
-                    onChange={(e) => setColumnId(e.target.value)}
-                    className={selectClassName}
-                    disabled={sortedColumns.length === 0}
-                  >
-                    <option value="" disabled>
-                      {sortedColumns.length === 0 ? 'Нет колонок' : 'Выберите колонку'}
-                    </option>
-                    {sortedColumns.map((col) => (
-                      <option key={col.id} value={col.id}>
-                        {col.name}
-                      </option>
-                    ))}
-                  </select>
+              {!workspaceId ? (
+                <p className="text-sm text-slate-600">Выберите рабочее пространство.</p>
+              ) : loadingPresets ? (
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <Loader2 className="size-4 animate-spin" />
+                  Загрузка пресетов…
                 </div>
-              ) : null}
+              ) : presets.length === 0 ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <p>Быстрое создание не настроено для этого пространства.</p>
+                  {canManageWorkspace ? (
+                    <Link to="/settings" onClick={handleClose} className="mt-2 inline-block text-brand hover:underline">
+                      Настроить в параметрах →
+                    </Link>
+                  ) : null}
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Категория *</label>
+                    <select
+                      value={presetId}
+                      onChange={(e) => setPresetId(e.target.value)}
+                      className={selectClassName}
+                    >
+                      <option value="" disabled>
+                        Выберите категорию
+                      </option>
+                      {presets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedPreset ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Доска: {selectedPreset.boardName} · колонка: {selectedPreset.columnName}
+                      </p>
+                    ) : null}
+                  </div>
 
-              {selectedBoard && (selectedBoard.taskTypes?.length ?? 0) === 0 ? (
-                <p className="text-sm text-amber-700">
-                  На доске нет типов задач — создание недоступно.
-                </p>
-              ) : null}
+                  {loadingBoard ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <Loader2 className="size-4 animate-spin" />
+                      Загрузка полей доски…
+                    </div>
+                  ) : null}
 
-              {boardReady ? (
-                <TaskCreateFormFields
-                  form={form}
-                  users={users}
-                  authorName={currentUser?.name}
-                  board={selectedBoard}
-                  key={`${selectedBoard!.id}-${columnId}`}
-                />
-              ) : null}
+                  {board && (board.taskTypes?.length ?? 0) === 0 ? (
+                    <p className="text-sm text-amber-700">На доске нет типов задач.</p>
+                  ) : null}
+
+                  {boardReady && board ? (
+                    <TaskCreateFormFields
+                      form={form}
+                      users={[]}
+                      board={board}
+                      hideAuthor
+                      hideAssignee
+                      key={`${board.id}-${selectedPreset!.id}`}
+                    />
+                  ) : null}
+                </>
+              )}
             </div>
 
             <DialogFooter className="shrink-0 gap-2 border-t border-slate-100 pt-4 sm:gap-0">
@@ -319,7 +296,14 @@ export function QuickCreateTaskModal({ open, onOpenChange, onSuccess }: QuickCre
                 type="button"
                 onClick={() => void submit()}
                 className="rounded bg-brand px-4 py-2 text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isSubmitting || !boardReady || !form.canSubmit || loadingUsers}
+                disabled={
+                  isSubmitting ||
+                  !boardReady ||
+                  !form.canSubmit ||
+                  loadingPresets ||
+                  loadingBoard ||
+                  presets.length === 0
+                }
               >
                 {isSubmitting ? 'Создание…' : 'Создать'}
               </button>

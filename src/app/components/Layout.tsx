@@ -338,7 +338,7 @@ export function Layout() {
           </div>
         </div>
         <div
-          className={`flex min-h-0 flex-1 flex-col ${
+          className={`app-main-scroll flex min-h-0 flex-1 flex-col ${
             FORMS_MICROAPP_ENABLED &&
             (location.pathname.startsWith(`${FORMS_ACTIVE_RULE}/`) ||
               location.pathname === FORMS_ACTIVE_RULE)

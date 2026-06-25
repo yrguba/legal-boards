@@ -385,6 +385,32 @@ export const workspacesApi = {
     return fetchApi<any[]>(`/workspaces/${workspaceId}/employee-profile-fields`);
   },
 
+  async getQuickCreatePresets(workspaceId: string, enabledOnly = false) {
+    const q = enabledOnly ? '?enabledOnly=1' : '';
+    return fetchApi<import('../types').QuickCreateTaskPreset[]>(
+      `/workspaces/${workspaceId}/quick-create-presets${q}`,
+    );
+  },
+
+  async saveQuickCreatePresets(
+    workspaceId: string,
+    presets: Array<{
+      name: string;
+      boardId: string;
+      columnId: string;
+      position?: number;
+      enabled?: boolean;
+    }>,
+  ) {
+    return fetchApi<import('../types').QuickCreateTaskPreset[]>(
+      `/workspaces/${workspaceId}/quick-create-presets`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ presets }),
+      },
+    );
+  },
+
   async listInvites(workspaceId: string, status = 'pending') {
     const q = new URLSearchParams({ status });
     return fetchApi<any[]>(`/workspaces/${workspaceId}/invites?${q}`);
