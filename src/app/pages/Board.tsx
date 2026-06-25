@@ -68,6 +68,7 @@ import {
 } from '../components/ui/alert-dialog';
 import { buttonVariants } from '../components/ui/button';
 import { cn } from '../components/ui/utils';
+import { ScrollArea, ScrollBar } from '../components/ui/scroll-area';
 import { taskPath } from '../utils/taskUrls';
 import {
   applyDragReorder,
@@ -135,7 +136,7 @@ function DroppableColumn({
     >
       <div
         ref={setNodeRef}
-        className={`flex-shrink-0 w-80 rounded-lg p-4 flex flex-col transition-colors border-2 ${
+        className={`flex-shrink-0 w-80 rounded-lg p-4 flex flex-col min-h-0 max-h-[calc(100vh-12rem)] transition-colors border-2 ${
           isOver
             ? 'bg-brand-light border-dashed border-brand'
             : 'bg-slate-50 border-transparent'
@@ -151,7 +152,8 @@ function DroppableColumn({
           <span className="text-sm text-slate-500">{columnTasks.length}</span>
         </div>
 
-        <div className="space-y-3 flex-1 overflow-y-auto min-h-[200px]">
+        <ScrollArea type="always" className="min-h-[200px] flex-1">
+          <div className="space-y-3 pr-1">
           {columnTasks.map((task) => (
             <TaskCard
               key={task.id}
@@ -167,7 +169,9 @@ function DroppableColumn({
               Перетащите задачу сюда
             </div>
           )}
-        </div>
+          </div>
+          <ScrollBar />
+        </ScrollArea>
 
         <button
           onClick={() => onCreateTask(column.id)}
@@ -1036,7 +1040,7 @@ export function Board() {
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-auto min-h-0">
+        <ScrollArea type="always" className="flex-1 min-h-0">
         {filtersHideAllTasks ? (
           <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-2">
             <span>Нет задач по выбранным фильтрам.</span>
@@ -1057,7 +1061,7 @@ export function Board() {
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-4 h-full">
+            <div className="flex h-full min-w-max gap-4 pb-1 pr-1">
               {columns.map((column) => {
                 const columnTasks = getTasksByColumn(column.id);
                 return (
@@ -1239,7 +1243,9 @@ export function Board() {
             </table>
           </div>
         )}
-        </div>
+        <ScrollBar />
+        <ScrollBar orientation="horizontal" />
+        </ScrollArea>
       </div>
 
       {board && (

@@ -12,6 +12,7 @@ import {
   PendingAttachmentPreview,
   usePendingAttachmentPreviews,
 } from '../components/ChatAttachments';
+import { UserAvatar } from '../components/UserAvatar';
 import {
   Dialog,
   DialogContent,
@@ -552,7 +553,18 @@ export function Chat() {
               {messages.map((m) => {
                 const mine = m.user.id === currentUser?.id;
                 return (
-                  <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    key={m.id}
+                    className={`flex w-full items-end gap-2 ${
+                      mine ? 'flex-row-reverse justify-end' : 'flex-row'
+                    }`}
+                  >
+                    <UserAvatar
+                      name={m.user.name}
+                      avatar={m.user.avatar}
+                      size="sm"
+                      className="mb-0.5"
+                    />
                     <div
                       className={`max-w-[min(100%,32rem)] rounded-2xl px-3 py-2 shadow-sm ${
                         mine

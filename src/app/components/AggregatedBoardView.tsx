@@ -53,6 +53,7 @@ import {
 import { CreateAggregatedBoardModal } from './CreateAggregatedBoardModal';
 import { TransferTaskModal } from './TransferTaskModal';
 import { TaskBoardCountBadge } from './TaskBoardCountBadge';
+import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { useApp } from '../store/AppContext';
 import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import {
@@ -343,7 +344,8 @@ function SourceBoardColumn({
         <span className="text-sm text-slate-500 shrink-0">{totalCount}</span>
       </div>
 
-      <div className="aggregated-board-scroll flex-1 overflow-y-auto space-y-2 min-h-[200px]">
+      <ScrollArea type="always" className="min-h-[200px] flex-1">
+        <div className="space-y-2 pr-1">
         {columnOrder.map((col) => {
           const colTasks = tasksByColumn.map.get(col.id) ?? [];
           if (colTasks.length === 0) return null;
@@ -381,7 +383,9 @@ function SourceBoardColumn({
             Перетащите задачу сюда
           </div>
         ) : null}
-      </div>
+        </div>
+        <ScrollBar />
+      </ScrollArea>
     </div>
   );
 }
@@ -1232,8 +1236,8 @@ export function AggregatedBoardView({
                   </button>
                 </div>
               ) : null}
-              <div className="aggregated-board-scroll min-h-0 flex-1 overflow-x-auto">
-                <div className="flex min-h-full gap-3">
+              <ScrollArea type="always" className="min-h-0 flex-1">
+                <div className="flex w-max min-h-full gap-3 pb-1 pr-1">
                   {visibleSources.map((source) => (
                     <SourceBoardColumn
                       key={source.id}
@@ -1248,7 +1252,8 @@ export function AggregatedBoardView({
                     />
                   ))}
                 </div>
-              </div>
+                <ScrollBar orientation="horizontal" />
+              </ScrollArea>
             </div>
             <DragOverlay>
               {activeTask ? (
