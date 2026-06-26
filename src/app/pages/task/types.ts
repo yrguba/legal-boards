@@ -1,4 +1,5 @@
 import type { Board, Document, TaskField, User } from '../../types';
+import type { CommentMentionInsert } from '../../utils/commentMentions';
 
 export type TaskPanelType =
   | 'client'
@@ -144,8 +145,12 @@ export type TaskSidePanelsProps = {
   onPreviewDoc: (doc: DocumentPreviewState) => void;
   assistantPanelChat: any[];
   assistantChatError: string | null;
+  users: User[];
+  currentUserId?: string;
   commentText: string;
   commentComposeKey: number;
+  commentMentionInserts: CommentMentionInsert[];
+  onCommentMentionInsertsChange: (inserts: CommentMentionInsert[]) => void;
   assistantMessage: string;
   isPostingComment: boolean;
   isPostingAssistant: boolean;

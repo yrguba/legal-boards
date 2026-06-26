@@ -531,6 +531,8 @@ model Task {
   typeId       String
   title        String
   description  String?
+  /// Описание в формате Markdown (BlockNote); иначе обычный текст
+  descriptionMarkdown Boolean @default(false)
   assigneeId   String?
   /// Автор со стороны Legal Boards (null — задачу создал клиент LEXPRO)
   createdBy    String?

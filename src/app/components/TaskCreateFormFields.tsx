@@ -5,10 +5,12 @@ import { withoutLegacyPriorityFields } from '../utils/taskFieldFilters';
 import { tasksApi } from '../services/api';
 import { MarkdownBlockNote, MarkdownEditorRoot } from './markdown';
 import { TaskCreateAttachments } from './TaskCreateAttachments';
+import { Switch } from './ui/switch';
 
 export type TaskCreatePayload = {
   title: string;
   description?: string;
+  descriptionMarkdown?: boolean;
   typeId: string;
   assigneeId?: string;
   priority: string;
@@ -35,6 +37,7 @@ export function useTaskCreateForm(board: Board | null, options?: { defaultTypeId
   const [assigneeId, setAssigneeId] = useState('');
   const [priority, setPriority] = useState(DEFAULT_TASK_PRIORITY);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  const [descriptionMarkdown, setDescriptionMarkdown] = useState(false);
   const [editorResetKey, setEditorResetKey] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
@@ -73,6 +76,7 @@ export function useTaskCreateForm(board: Board | null, options?: { defaultTypeId
     setAssigneeId('');
     setPriority(DEFAULT_TASK_PRIORITY);
     setCustomFields({});
+    setDescriptionMarkdown(false);
     setEditorResetKey((k) => k + 1);
     setPendingFiles([]);
   }, [board?.taskTypes, defaultTypeId]);
@@ -126,12 +130,13 @@ export function useTaskCreateForm(board: Board | null, options?: { defaultTypeId
     return {
       title,
       description: description || undefined,
+      descriptionMarkdown: descriptionMarkdown || undefined,
       typeId,
       assigneeId: assigneeId || undefined,
       priority,
       customFields: restAfterDescription,
     };
-  }, [assigneeId, customFields, descriptionField, priority, titleField, typeId]);
+  }, [assigneeId, customFields, descriptionField, descriptionMarkdown, priority, titleField, typeId]);
 
   const canSubmit = Boolean(board && typeId && titleField && (board.taskTypes?.length ?? 0) > 0);
 
@@ -144,6 +149,8 @@ export function useTaskCreateForm(board: Board | null, options?: { defaultTypeId
     setPriority,
     customFields,
     setCustomFields,
+    descriptionMarkdown,
+    setDescriptionMarkdown,
     taskTypes,
     taskFields,
     titleField,
@@ -191,6 +198,8 @@ export function TaskCreateFormFields({
     setPriority,
     customFields,
     setCustomFields,
+    descriptionMarkdown,
+    setDescriptionMarkdown,
     taskTypes,
     taskFields,
     descriptionField,
@@ -275,12 +284,29 @@ export function TaskCreateFormFields({
 
                 {isDescription ? (
                   <div className="overflow-visible rounded border border-slate-300 bg-white">
-                    <MarkdownBlockNote
-                      instanceKey={`task-create-desc-${f.id}-${editorResetKey}`}
-                      markdown={String(customFields[f.id] ?? '')}
-                      onMarkdownChange={(md) => setCustomFields((p) => ({ ...p, [f.id]: md }))}
-                      compact
-                    />
+                    <div className="flex items-center justify-end gap-2 border-b border-slate-200 px-3 py-2">
+                      <span className="text-xs text-slate-500">Форматирование</span>
+                      <Switch
+                        checked={descriptionMarkdown}
+                        onCheckedChange={setDescriptionMarkdown}
+                      />
+                    </div>
+                    {descriptionMarkdown ? (
+                      <MarkdownBlockNote
+                        instanceKey={`task-create-desc-${f.id}-${editorResetKey}`}
+                        markdown={String(customFields[f.id] ?? '')}
+                        onMarkdownChange={(md) => setCustomFields((p) => ({ ...p, [f.id]: md }))}
+                        compact
+                      />
+                    ) : (
+                      <textarea
+                        rows={4}
+                        value={String(customFields[f.id] ?? '')}
+                        onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
+                        className="min-h-[96px] w-full resize-y border-0 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                        placeholder="Описание.."
+                      />
+                    )}
                   </div>
                 ) : null}
 

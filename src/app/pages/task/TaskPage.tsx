@@ -9,6 +9,7 @@ import { boardTimeTrackingIsConfigured } from '../../utils/boardTimeTracking';
 import { renderCustomFieldValue } from './utils/customFieldValue';
 import { formatTaskDate, toDatetimeLocalValue } from './utils/format';
 import { mergeChatMessage, isLawyerClientChannelMessage } from './utils/chatMessages';
+import { encodeCommentMentionText, type CommentMentionInsert } from '../../utils/commentMentions';
 import { setActiveTaskFocus } from '../../utils/activeTaskFocus';
 import { useTaskFieldUpdate } from './hooks/useTaskFieldUpdate';
 import type { TaskPanelType, TaskRecord, DocumentPreviewState, ClientSubPanel } from './types';
@@ -65,6 +66,7 @@ export function TaskPage() {
   const [isPostingInteraction, setIsPostingInteraction] = useState(false);
   const [interactionError, setInteractionError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
+  const [commentMentionInserts, setCommentMentionInserts] = useState<CommentMentionInsert[]>([]);
   const [commentComposeKey, setCommentComposeKey] = useState(0);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -216,13 +218,14 @@ export function TaskPage() {
         const loadedTask = (await tasksApi.getById(taskKey)) as TaskRecord;
         if (cancelled) return;
         setTask(loadedTask);
-        const [loadedBoard, allUsers] = await Promise.all([
-          boardsApi.getById(loadedTask.boardId),
-          usersApi.getAll(),
-        ]);
+        const loadedBoard = await boardsApi.getById(loadedTask.boardId);
+        if (cancelled) return;
+        const workspaceUsers = loadedBoard.workspaceId
+          ? await usersApi.getByWorkspace(loadedBoard.workspaceId)
+          : await usersApi.getAll();
         if (cancelled) return;
         setBoard(loadedBoard);
-        setUsers(allUsers);
+        setUsers(workspaceUsers);
         if (loadedTask.key && loadedTask.key !== taskKey) {
           navigate(taskPath(loadedTask), { replace: true });
         }
@@ -484,7 +487,7 @@ export function TaskPage() {
 
   const postComment = async () => {
     if (!activeTaskId) return;
-    const content = commentText.trim();
+    const content = encodeCommentMentionText(commentText.trim(), commentMentionInserts);
     if (!content) return;
     setIsPostingComment(true);
     try {
@@ -494,6 +497,7 @@ export function TaskPage() {
         comments: [created, ...(prev?.comments || [])],
       }));
       setCommentText('');
+      setCommentMentionInserts([]);
       setCommentComposeKey((k) => k + 1);
       setActivePanel('comments');
     } finally {
@@ -821,9 +825,13 @@ export function TaskPage() {
                   isPostingComment={isPostingComment}
                   isPostingAssistant={isPostingAssistant}
                   onCommentText={setCommentText}
+                  onCommentMentionInsertsChange={setCommentMentionInserts}
                   onAssistantMessage={setAssistantMessage}
                   onPostComment={postComment}
                   onPostAssistant={postAssistantMessage}
+                  users={users}
+                  currentUserId={currentUser?.id}
+                  commentMentionInserts={commentMentionInserts}
                 />
               )}
             </div>

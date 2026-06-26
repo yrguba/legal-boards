@@ -212,6 +212,7 @@ export interface Task {
   position?: number;
   title: string;
   description?: string;
+  descriptionMarkdown?: boolean;
   typeId: string;
   assigneeId?: string;
   priority?: string;

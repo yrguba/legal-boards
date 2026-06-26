@@ -5,6 +5,7 @@ import { isEmptyValue } from './customFieldValue';
 export type InlineFieldKey =
   | 'title'
   | 'description'
+  | 'descriptionMarkdown'
   | 'columnId'
   | 'typeId'
   | 'assigneeId'
@@ -28,6 +29,11 @@ export function validateField(
   if (key === 'description') {
     const descField = taskFields.find((f) => f.id === descriptionFieldId);
     if (descField?.required && isEmptyValue(value)) return `Заполните поле: ${descField.name}`;
+    return null;
+  }
+
+  if (key === 'descriptionMarkdown') {
+    if (typeof value !== 'boolean') return 'Некорректное значение';
     return null;
   }
 

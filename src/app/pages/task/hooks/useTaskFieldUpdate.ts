@@ -29,6 +29,7 @@ export type TaskSnapshot = {
 export type TaskUpdatePatch = Partial<{
   title: string;
   description: string | null;
+  descriptionMarkdown: boolean;
   columnId: string;
   typeId: string;
   assigneeId: string | null;
@@ -89,6 +90,9 @@ function buildPatchForField(
       };
     }
     return patch;
+  }
+  if (key === 'descriptionMarkdown') {
+    return { descriptionMarkdown: value === true };
   }
   if (key === 'columnId') return { columnId: String(value) };
   if (key === 'typeId') return { typeId: String(value) };

@@ -1,5 +1,9 @@
 import { Bot, Loader2, MessageSquare, Send } from 'lucide-react';
-import { MarkdownBlockNote, MarkdownEditorRoot } from '../../../components/markdown';
+import { CommentContent } from '../../../components/CommentContent';
+import { CommentMentionTextarea } from '../../../components/CommentMentionTextarea';
+import { MarkdownEditorRoot } from '../../../components/markdown';
+import type { User } from '../../../types';
+import type { CommentMentionInsert } from '../../../utils/commentMentions';
 import type { TaskSidePanelsProps, TaskPanelType } from '../types';
 import { formatDateTime } from '../utils/format';
 import { TaskDocumentsPanel } from './TaskDocumentsPanel';
@@ -7,13 +11,16 @@ import { TaskActivityPanel } from './TaskActivityPanel';
 
 function ChatFooter(p: {
   activePanel: TaskPanelType;
-  taskId: string;
   commentComposeKey: number;
   commentText: string;
+  commentMentionInserts: CommentMentionInsert[];
+  onCommentMentionInsertsChange: (inserts: CommentMentionInsert[]) => void;
   assistantMessage: string;
   assistantChatError: string | null;
   isPostingComment: boolean;
   isPostingAssistant: boolean;
+  users: User[];
+  currentUserId?: string;
   onCommentText: (v: string) => void;
   onAssistantMessage: (v: string) => void;
   onPostComment: () => void;
@@ -21,7 +28,7 @@ function ChatFooter(p: {
 }) {
   if (p.activePanel !== 'comments' && p.activePanel !== 'assistant') return null;
   return (
-    <div className="shrink-0 border-t border-slate-200 p-4">
+    <div className="relative z-20 shrink-0 border-t border-slate-200 bg-white p-4">
       {p.activePanel === 'assistant' && p.assistantChatError ? (
         <div className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">
           {p.assistantChatError}
@@ -29,12 +36,18 @@ function ChatFooter(p: {
       ) : null}
       <div className="flex gap-2 items-end">
         {p.activePanel === 'comments' ? (
-          <div className="min-w-0 flex-1 rounded border border-slate-300 bg-white">
-            <MarkdownBlockNote
-              instanceKey={`comment-compose-${p.taskId}-${p.commentComposeKey}`}
-              markdown={p.commentText}
-              onMarkdownChange={p.onCommentText}
-              compact
+          <div
+            key={p.commentComposeKey}
+            className="min-w-0 flex-1 rounded border border-slate-300 bg-white"
+          >
+            <CommentMentionTextarea
+              value={p.commentText}
+              onChange={p.onCommentText}
+              mentionInserts={p.commentMentionInserts}
+              onMentionInsertsChange={p.onCommentMentionInsertsChange}
+              users={p.users}
+              currentUserId={p.currentUserId}
+              disabled={p.isPostingComment}
             />
           </div>
         ) : (
@@ -75,7 +88,7 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
 
   return (
     <MarkdownEditorRoot>
-      <>
+      <div className="flex min-h-0 flex-1 flex-col overflow-visible">
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {activePanel === 'activity' ? (
           <TaskActivityPanel
@@ -114,11 +127,7 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
                       </div>
                     </div>
                   </div>
-                  <MarkdownBlockNote
-                    instanceKey={`comment-view-${c.id}`}
-                    markdown={String(c.content || '')}
-                    compact
-                  />
+                  <CommentContent commentId={c.id} content={String(c.content || '')} />
                 </div>
               ))
             )}
@@ -190,19 +199,22 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
 
       <ChatFooter
         activePanel={activePanel}
-        taskId={task.id}
         commentComposeKey={p.commentComposeKey}
         commentText={p.commentText}
+        commentMentionInserts={p.commentMentionInserts}
+        onCommentMentionInsertsChange={p.onCommentMentionInsertsChange}
         assistantMessage={p.assistantMessage}
         assistantChatError={p.assistantChatError}
         isPostingComment={p.isPostingComment}
         isPostingAssistant={p.isPostingAssistant}
+        users={p.users}
+        currentUserId={p.currentUserId}
         onCommentText={p.onCommentText}
         onAssistantMessage={p.onAssistantMessage}
         onPostComment={p.onPostComment}
         onPostAssistant={p.onPostAssistant}
       />
-      </>
+      </div>
     </MarkdownEditorRoot>
   );
 }

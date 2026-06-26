@@ -1,5 +1,6 @@
 import { Calendar, Clock, Flag, Paperclip, Tag, User } from 'lucide-react';
 import { MarkdownBlockNote, MarkdownEditorRoot } from '../../../components/markdown';
+import { Switch } from '../../../components/ui/switch';
 import { t } from '../taskPage.classes';
 import type { TaskMainColumnProps } from '../types';
 import type { TaskField } from '../../../types';
@@ -139,6 +140,87 @@ function CustomFieldInline({
   );
 }
 
+function TaskDescriptionField({
+  task,
+  descriptionMarkdown,
+  savingField,
+  fieldErrors,
+  isFieldLocked,
+  onSaveField,
+}: {
+  task: TaskMainColumnProps['task'];
+  descriptionMarkdown: boolean;
+  savingField: TaskMainColumnProps['savingField'];
+  fieldErrors: TaskMainColumnProps['fieldErrors'];
+  isFieldLocked: TaskMainColumnProps['isFieldLocked'];
+  onSaveField: TaskMainColumnProps['onSaveField'];
+}) {
+  const toggleDisabled =
+    isFieldLocked('descriptionMarkdown') || savingField === 'descriptionMarkdown';
+
+  return (
+    <InlineEditField
+      fieldKey="description"
+      label={
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-medium text-slate-900">Описание</h3>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
+            <span>Форматирование</span>
+            <Switch
+              checked={descriptionMarkdown}
+              disabled={toggleDisabled}
+              onCheckedChange={(checked) => {
+                void onSaveField('descriptionMarkdown', checked);
+              }}
+            />
+          </label>
+        </div>
+      }
+      layout="full"
+      className="border-t border-slate-200 pt-4"
+      saving={savingField === 'description'}
+      locked={isFieldLocked('description')}
+      error={fieldError(fieldErrors, 'description')}
+      placeholder="Добавить описание…"
+      getValue={() => task.description || ''}
+      isEmpty={(v) => !String(v).trim()}
+      onSave={(v) => onSaveField('description', v)}
+      renderView={(v) =>
+        descriptionMarkdown ? (
+          <MarkdownBlockNote
+            instanceKey={`task-description-view-${task.id}`}
+            markdown={String(v)}
+            compact
+            className="bn-markdown-readonly"
+          />
+        ) : (
+          <p className="whitespace-pre-wrap text-sm text-slate-900">{String(v)}</p>
+        )
+      }
+      renderEditor={({ value, onChange, saving, inputRef }) =>
+        descriptionMarkdown ? (
+          <div className={saving ? 'pointer-events-none opacity-60' : ''}>
+            <MarkdownBlockNote
+              instanceKey={`task-description-edit-${task.id}`}
+              markdown={String(value)}
+              onMarkdownChange={onChange}
+            />
+          </div>
+        ) : (
+          <textarea
+            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+            value={String(value)}
+            disabled={saving}
+            rows={6}
+            onChange={(e) => onChange(e.target.value)}
+            className="min-h-[120px] w-full resize-y rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset"
+          />
+        )
+      }
+    />
+  );
+}
+
 export function TaskDetailsCard(p: TaskMainColumnProps) {
   const {
     task,
@@ -176,6 +258,7 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
     onApproveRule,
     onRejectRule,
   } = p;
+  const descriptionMarkdown = task.descriptionMarkdown === true;
 
   return (
     <div className={`${t.card} p-6 mb-6`}>
@@ -389,38 +472,27 @@ export function TaskDetailsCard(p: TaskMainColumnProps) {
 
       <TaskBoardTransitionsPanel taskId={task.id} />
 
-      <MarkdownEditorRoot>
-        <InlineEditField
-          fieldKey="description"
-          label={<h3 className="text-sm font-medium text-slate-900">Описание</h3>}
-          layout="full"
-          className="border-t border-slate-200 pt-4"
-          saving={savingField === 'description'}
-          locked={isFieldLocked('description')}
-          error={fieldError(fieldErrors, 'description')}
-          placeholder="Добавить описание…"
-          getValue={() => task.description || ''}
-          isEmpty={(v) => !String(v).trim()}
-          onSave={(v) => onSaveField('description', v)}
-          renderView={(v) => (
-            <MarkdownBlockNote
-              instanceKey={`task-description-view-${task.id}`}
-              markdown={String(v)}
-              compact
-              className="bn-markdown-readonly"
-            />
-          )}
-          renderEditor={({ value, onChange, saving }) => (
-            <div className={saving ? 'pointer-events-none opacity-60' : ''}>
-              <MarkdownBlockNote
-                instanceKey={`task-description-edit-${task.id}`}
-                markdown={String(value)}
-                onMarkdownChange={onChange}
-              />
-            </div>
-          )}
+      {descriptionMarkdown ? (
+        <MarkdownEditorRoot>
+          <TaskDescriptionField
+            task={task}
+            descriptionMarkdown={descriptionMarkdown}
+            savingField={savingField}
+            fieldErrors={fieldErrors}
+            isFieldLocked={isFieldLocked}
+            onSaveField={onSaveField}
+          />
+        </MarkdownEditorRoot>
+      ) : (
+        <TaskDescriptionField
+          task={task}
+          descriptionMarkdown={descriptionMarkdown}
+          savingField={savingField}
+          fieldErrors={fieldErrors}
+          isFieldLocked={isFieldLocked}
+          onSaveField={onSaveField}
         />
-      </MarkdownEditorRoot>
+      )}
 
       {attachmentsEnabled && (
         <div className="border-t border-slate-200 pt-4 mt-4">

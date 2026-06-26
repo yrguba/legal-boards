@@ -430,3 +430,14 @@
 .lb-thin-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+.bn-markdown-scope a[href^="mention:"] {
+  color: var(--brand-primary, #0d9488);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: default;
+}
+
+.bn-markdown-scope a[href^="mention:"]:hover {
+  text-decoration: underline;
+}

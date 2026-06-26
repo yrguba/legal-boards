@@ -32,7 +32,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { TaskMarkdownPreview } from '../components/markdown';
+import { TaskDescriptionPreview } from '../components/markdown';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { uploadPendingTaskAttachments } from '../components/TaskCreateFormFields';
 import { AggregatedBoardView } from '../components/AggregatedBoardView';
@@ -246,7 +246,12 @@ function TaskCard({
         </button>
       </div>
 
-      {task.description && <TaskMarkdownPreview markdown={task.description} />}
+      {task.description ? (
+        <TaskDescriptionPreview
+          text={task.description}
+          markdown={task.descriptionMarkdown === true}
+        />
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -576,6 +581,7 @@ export function Board() {
     data: {
       title: string;
       description?: string;
+      descriptionMarkdown?: boolean;
       typeId: string;
       assigneeId?: string;
       priority: string;
@@ -592,6 +598,7 @@ export function Board() {
       typeId: data.typeId,
       title: data.title,
       description: data.description,
+      descriptionMarkdown: data.descriptionMarkdown,
       assigneeId: data.assigneeId,
       priority: data.priority,
       customFields: data.customFields,
@@ -1089,11 +1096,14 @@ export function Board() {
                       </h4>
                     </div>
                   </div>
-                  {activeTask.description && (
+                  {activeTask.description ? (
                     <div className="ml-6 min-w-0 max-w-full overflow-hidden">
-                      <TaskMarkdownPreview markdown={activeTask.description} />
+                      <TaskDescriptionPreview
+                        text={activeTask.description}
+                        markdown={activeTask.descriptionMarkdown === true}
+                      />
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ) : null}
             </DragOverlay>

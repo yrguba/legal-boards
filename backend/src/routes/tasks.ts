@@ -6,6 +6,7 @@ import path from 'path';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { broadcast } from '../realtime';
 import { createAndBroadcastNotification } from '../utils/notifications';
+import { parseCommentMentionUserIds } from '../utils/commentMentions';
 import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
 import { assertUserCanAccessTask } from '../utils/taskAccess';
@@ -863,7 +864,7 @@ router.post('/reorder', async (req: AuthRequest, res) => {
 
 router.post('/', async (req: AuthRequest, res) => {
   try {
-    const { boardId, columnId, typeId, title, description, assigneeId, customFields, priority } =
+    const { boardId, columnId, typeId, title, description, descriptionMarkdown, assigneeId, customFields, priority } =
       req.body;
 
     if (req.lexClientId) {
@@ -911,6 +912,7 @@ router.post('/', async (req: AuthRequest, res) => {
             typeId,
             title,
             description,
+            descriptionMarkdown: descriptionMarkdown === true,
             assigneeId: finalAssigneeLex,
             createdBy: null,
             lexCreatorId: req.lexClientId,
@@ -998,6 +1000,7 @@ router.post('/', async (req: AuthRequest, res) => {
           typeId,
           title,
           description,
+          descriptionMarkdown: descriptionMarkdown === true,
           assigneeId: finalAssigneeId,
           createdBy: req.userId,
           lexCreatorId: null,
@@ -1053,12 +1056,13 @@ router.put('/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Изменение задачи доступно только сотрудникам Legal Boards' });
     }
 
-    const { columnId, typeId, title, description, assigneeId, customFields, priority, position, boardId: bodyBoardId } =
+    const { columnId, typeId, title, description, descriptionMarkdown, assigneeId, customFields, priority, position, boardId: bodyBoardId } =
       req.body;
 
     const data: Prisma.TaskUncheckedUpdateInput = {};
     if (title !== undefined) data.title = title;
     if (description !== undefined) data.description = description;
+    if (descriptionMarkdown !== undefined) data.descriptionMarkdown = descriptionMarkdown === true;
     if (Object.prototype.hasOwnProperty.call(req.body, 'assigneeId')) {
       data.assigneeId = assigneeId ?? null;
     }
@@ -1832,7 +1836,12 @@ router.post('/:id/comments', taskUpload.array('files', 10), async (req: AuthRequ
 
     const task = await prisma.task.findUnique({
       where: { id: taskIdParam(req) },
-      select: { title: true, assigneeId: true, createdBy: true },
+      select: {
+        title: true,
+        assigneeId: true,
+        createdBy: true,
+        board: { select: { workspaceId: true } },
+      },
     });
 
     if (task) {
@@ -1841,22 +1850,52 @@ router.post('/:id/comments', taskUpload.array('files', 10), async (req: AuthRequ
         select: { name: true },
       });
 
-      const notifyUserIds = Array.from(
-        new Set([task.assigneeId, task.createdBy].filter(Boolean) as string[])
-      );
-      await Promise.all(
-        notifyUserIds
-          .filter((userId) => userId !== req.userId)
-          .map((userId) =>
-            createAndBroadcastNotification(prisma, {
-              type: 'comment',
-              title: 'Новый комментарий',
-              message: `${actor?.name || 'Пользователь'} оставил(а) комментарий к задаче "${task.title}"`,
-              userId,
-              relatedId: taskIdParam(req),
-            }),
-          ),
-      );
+      const authorId = req.userId!;
+      const mentionedIds = parseCommentMentionUserIds(content);
+      let validMentionIds: string[] = [];
+
+      if (mentionedIds.length > 0 && task.board.workspaceId) {
+        const memberships = await prisma.workspaceUser.findMany({
+          where: {
+            workspaceId: task.board.workspaceId,
+            userId: { in: mentionedIds },
+          },
+          select: { userId: true },
+        });
+        const memberIds = new Set(memberships.map((m) => m.userId));
+        const owner = await prisma.workspace.findUnique({
+          where: { id: task.board.workspaceId },
+          select: { ownerId: true },
+        });
+        if (owner) memberIds.add(owner.ownerId);
+        validMentionIds = mentionedIds.filter((id) => memberIds.has(id) && id !== authorId);
+      }
+
+      const mentionRecipients = new Set(validMentionIds);
+      const commentRecipients = Array.from(
+        new Set([task.assigneeId, task.createdBy].filter(Boolean) as string[]),
+      ).filter((userId) => userId !== authorId && !mentionRecipients.has(userId));
+
+      await Promise.all([
+        ...commentRecipients.map((userId) =>
+          createAndBroadcastNotification(prisma, {
+            type: 'comment',
+            title: 'Новый комментарий',
+            message: `${actor?.name || 'Пользователь'} оставил(а) комментарий к задаче «${task.title}»`,
+            userId,
+            relatedId: taskIdParam(req),
+          }),
+        ),
+        ...validMentionIds.map((userId) =>
+          createAndBroadcastNotification(prisma, {
+            type: 'mention',
+            title: 'Вас упомянули',
+            message: `${actor?.name || 'Пользователь'} упомянул(а) вас в комментарии к задаче «${task.title}»`,
+            userId,
+            relatedId: taskIdParam(req),
+          }),
+        ),
+      ]);
     }
 
     res.json(comment);
