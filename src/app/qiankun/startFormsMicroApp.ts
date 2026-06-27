@@ -1,12 +1,21 @@
 import {
-  FORMS_ACTIVE_RULE,
+  FORMS_HOST_ACTIVE_RULE,
   FORMS_MICRO_APP_CONTAINER,
   FORMS_MICRO_APP_ENTRY,
   FORMS_MICRO_APP_NAME,
+  resolveFormsMicroAppPublicPath,
 } from './formsMicroApp.config';
 import { installFormsApiAuthFetch } from './formsMicroAppApiAuth';
 import { buildFormsMicroAppProps, syncAuthTokenForFormsApp } from './formsMicroAppBridge';
 import { isFormsModalEmbedActive, setFormsModalEmbedActive as setModalEmbedFlag } from './formsModalEmbedState';
+
+function resolveFormsPublicPath(entry: string): string {
+  try {
+    return resolveFormsMicroAppPublicPath(new URL(entry, window.location.origin).origin);
+  } catch {
+    return resolveFormsMicroAppPublicPath();
+  }
+}
 
 function normalizeMicroAppEntry(entry: string): string {
   const trimmed = entry.trim();
@@ -37,8 +46,8 @@ export function setFormsModalEmbedActive(active: boolean) {
 function formsActiveRule(location: Location) {
   if (isFormsModalEmbedActive()) return true;
   return (
-    location.pathname === FORMS_ACTIVE_RULE ||
-    location.pathname.startsWith(`${FORMS_ACTIVE_RULE}/`)
+    location.pathname === FORMS_HOST_ACTIVE_RULE ||
+    location.pathname.startsWith(`${FORMS_HOST_ACTIVE_RULE}/`)
   );
 }
 
@@ -103,6 +112,7 @@ export async function initFormsQiankunHost(
         container: FORMS_MICRO_APP_CONTAINER,
         activeRule: formsActiveRule,
         props: sharedFormsProps,
+        getPublicPath: (entryUrl) => resolveFormsPublicPath(String(entryUrl)),
       },
     ],
     {

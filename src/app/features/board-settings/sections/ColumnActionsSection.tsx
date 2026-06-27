@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Eye, Plus, Trash2 } from 'lucide-react';
 import type { TaskField } from '../../../types';
 import { boardsApi } from '../../../services/api';
 import type {
@@ -10,8 +10,17 @@ import type {
   ColumnActionTrigger,
 } from '../boardAdvancedSettings.types';
 import { newLocalId } from '../boardAdvancedSettings.defaults';
-import { FORMS_DEFAULT_EMBEDDED_PATH } from '../../../qiankun/formsMicroAppPaths';
+import { FORMS_DEFAULT_EMBEDDED_PATH, FORMS_DEFAULT_TEST_FLOW_URL } from '../../../qiankun/formsMicroAppPaths';
 import { FORMS_MICROAPP_ENABLED } from '../../../qiankun/formsMicroAppFeature';
+import { FORMS_MICRO_APP_ENTRY } from '../../../qiankun/formsMicroApp.config';
+import { parseFormsFullPath } from '../../../qiankun/formsActionParams';
+import {
+  extractAccessTokenFromFormsRaw,
+  syncAuthTokenForFormsApp,
+} from '../../../qiankun/formsMicroAppBridge';
+import { LegalFormsMicroAppModal } from '../../../components/LegalFormsMicroAppModal';
+
+const FIELD_TEMPLATE = /^\{field:([^}]+)\}$/;
 
 const SYSTEM_CHECK_OPTIONS: { value: ColumnActionCheckItem['type']; label: string }[] = [
   { value: 'assignee_set', label: 'Назначен исполнитель' },
@@ -53,6 +62,7 @@ export function ColumnActionsSection({
   const [targetColumnsByBoard, setTargetColumnsByBoard] = useState<
     Record<string, { id: string; name: string }[]>
   >({});
+  const [previewRuleId, setPreviewRuleId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -92,6 +102,23 @@ export function ColumnActionsSection({
     () => [...taskFields].sort((a, b) => a.position - b.position),
     [taskFields],
   );
+
+  const previewRule = useMemo(
+    () => (previewRuleId ? rules.find((r) => r.id === previewRuleId) ?? null : null),
+    [previewRuleId, rules],
+  );
+
+  const previewMount = useMemo(() => {
+    if (!previewRule?.config.formsPath?.trim()) return null;
+    return parseFormsFullPath(previewRule.config.formsPath.trim());
+  }, [previewRule]);
+
+  const previewAccessToken = useMemo(() => {
+    if (!previewRule) return null;
+    const fromPath = extractAccessTokenFromFormsRaw(previewRule.config.formsPath ?? '');
+    if (fromPath) return fromPath;
+    return syncAuthTokenForFormsApp('');
+  }, [previewRule]);
 
   const updateRule = (id: string, patch: Partial<BoardColumnActionRule>) => {
     onChange({
@@ -151,9 +178,7 @@ export function ColumnActionsSection({
       if (config.targetBoardId) void loadTargetColumns(config.targetBoardId);
     }
     if (actionKind === 'legal_forms') {
-      config.formsPath =
-        config.formsPath?.trim() ||
-        `https://legal-forms.ru/expertises/v/436/expertise/18fb19e8-d0ce-4e6d-8e45-0a9d716b8998/flows/82KDS2T9/${encodeURIComponent('АМ')}/1907`;
+      config.formsPath = config.formsPath?.trim() || FORMS_DEFAULT_TEST_FLOW_URL;
       config.formsAccessTokenFieldId = config.formsAccessTokenFieldId ?? '';
     }
     updateRule(id, { actionKind, config });
@@ -401,7 +426,7 @@ export function ColumnActionsSection({
               {rule.actionKind === 'legal_forms' ? (
                 <div className="space-y-2 rounded-lg border border-slate-100 bg-white p-3">
                   <p className="text-[11px] text-slate-500">
-                    Полный путь к форме LF — URL с legal-forms.ru или встроенный /forms/….
+                    Полный путь к форме LF — URL с legal-forms.ru или встроенный /forms/{session}/flows/….
                     Хост для qiankun entry берётся из URL автоматически. Статично или {'{field:ID}'}.
                   </p>
                   <div>
@@ -411,7 +436,7 @@ export function ColumnActionsSection({
                     <textarea
                       value={rule.config.formsPath ?? ''}
                       onChange={(e) => updateConfig(rule.id, { formsPath: e.target.value })}
-                      placeholder={`https://legal-forms.ru/expertises/v/436/expertise/…/flows/…/АМ/1907\nили ${FORMS_DEFAULT_EMBEDDED_PATH}`}
+                      placeholder={`${FORMS_DEFAULT_TEST_FLOW_URL}?access_token=…\nили ${FORMS_DEFAULT_EMBEDDED_PATH}`}
                       rows={3}
                       className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-mono"
                     />
@@ -454,6 +479,28 @@ export function ColumnActionsSection({
                       ))}
                     </div>
                   </div>
+                  {FORMS_MICROAPP_ENABLED ? (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        disabled={
+                          !rule.config.formsPath?.trim() ||
+                          FIELD_TEMPLATE.test(rule.config.formsPath.trim())
+                        }
+                        onClick={() => setPreviewRuleId(rule.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/5 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/10 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Eye className="size-3.5" />
+                        Проверить форму
+                      </button>
+                      {FIELD_TEMPLATE.test(rule.config.formsPath?.trim() ?? '') ? (
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Предпросмотр доступен только для статичного URL или /forms/…, не для{' '}
+                          {'{field:…}'}.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -546,6 +593,20 @@ export function ColumnActionsSection({
           Добавить правило
         </button>
       </div>
+
+      {FORMS_MICROAPP_ENABLED && previewRule && previewMount ? (
+        <LegalFormsMicroAppModal
+          open={Boolean(previewRuleId)}
+          title={previewRule.name.trim() || 'Legal Forms'}
+          description="Предпросмотр формы из настроек действия колонки"
+          formsPath={previewMount.embeddedPath}
+          formsEntry={previewMount.entry ?? FORMS_MICRO_APP_ENTRY}
+          pathError={previewMount.error}
+          accessToken={previewAccessToken}
+          onClose={() => setPreviewRuleId(null)}
+          onComplete={() => setPreviewRuleId(null)}
+        />
+      ) : null}
     </section>
   );
 }

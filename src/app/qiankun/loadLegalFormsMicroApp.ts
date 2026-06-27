@@ -4,6 +4,8 @@ import {
   stripFormsEmbeddedQuery,
   syncAuthTokenForFormsApp,
 } from './formsMicroAppBridge';
+import { popFormsEmbedBrowserUrl, pushFormsEmbedBrowserUrl } from './formsMicroAppBrowserUrl';
+import { toHostRoutePath } from './formsMicroAppPaths';
 import {
   initFormsQiankunHost,
   rerouteFormsMicroAppWithoutHostNavigation,
@@ -16,31 +18,15 @@ import {
 let mountGeneration = 0;
 let mountChain: Promise<void> = Promise.resolve();
 
-let savedHostBrowserLocation: { pathname: string; search: string; hash: string } | null = null;
-
-/** LF (Umi) читает window.location — без /forms/… нет запросов /api/flow/…. */
-function syncFormsBrowserLocationForModal(routePath: string) {
-  if (typeof window === 'undefined') return;
-  savedHostBrowserLocation = {
-    pathname: window.location.pathname,
-    search: window.location.search,
-    hash: window.location.hash,
-  };
-  window.history.replaceState(window.history.state, '', routePath);
-  window.dispatchEvent(new PopStateEvent('popstate'));
-}
-
-function restoreHostBrowserLocationAfterModal() {
-  if (typeof window === 'undefined' || !savedHostBrowserLocation) return;
-  const { pathname, search, hash } = savedHostBrowserLocation;
-  savedHostBrowserLocation = null;
-  window.history.replaceState(window.history.state, '', `${pathname}${search}${hash}`);
-  window.dispatchEvent(new PopStateEvent('popstate'));
-}
-
 function ensureFormsMountContainer(container: HTMLElement) {
   const id = FORMS_MICRO_APP_CONTAINER.replace(/^#/, '');
   if (container.id !== id) container.id = id;
+}
+
+function splitPathAndSearch(input: string): { pathname: string; search: string } {
+  const queryIndex = input.indexOf('?');
+  if (queryIndex < 0) return { pathname: input, search: '' };
+  return { pathname: input.slice(0, queryIndex), search: input.slice(queryIndex) };
 }
 
 function applyFormsAccessToken(accessToken: string | null) {
@@ -52,9 +38,8 @@ function applyFormsAccessToken(accessToken: string | null) {
 }
 
 /**
- * Модалка: registerMicroApps + formsModalEmbedActive + sync URL на /forms/… для Umi.
- * Модалка рендерится в ColumnTransitionProvider (вне страницы доски), поэтому RR может
- * перейти на /forms/* без закрытия диалога. Token — localStorage + props, не в address bar.
+ * Модалка / embed: qiankun монтируется в контейнер.
+ * URL React Router не меняется; для preload LF временно подменяем pathname через replaceState.
  */
 export async function mountLegalFormsMicroApp(
   container: HTMLElement,
@@ -64,9 +49,8 @@ export async function mountLegalFormsMicroApp(
 ): Promise<void> {
   ensureFormsMountContainer(container);
 
-  const routePath = stripFormsEmbeddedQuery(formsPath);
-  applyFormsAccessToken(accessToken);
-  updateSharedFormsProps('', routePath);
+  const { pathname: rawPath, search: pathSearch } = splitPathAndSearch(formsPath);
+  const hostPath = toHostRoutePath(stripFormsEmbeddedQuery(rawPath));
 
   const generation = ++mountGeneration;
 
@@ -77,20 +61,30 @@ export async function mountLegalFormsMicroApp(
       throw new Error('Legal Forms mount cancelled');
     }
 
-    const mountPromise = waitForFormsMicroAppMount();
-    await initFormsQiankunHost('', entry, routePath);
+    applyFormsAccessToken(accessToken);
+    syncAuthTokenForFormsApp(pathSearch);
+    pushFormsEmbedBrowserUrl(hostPath, pathSearch);
+    updateSharedFormsProps(pathSearch, hostPath);
 
-    if (generation !== mountGeneration) {
-      throw new Error('Legal Forms mount cancelled');
-    }
+    try {
+      const mountPromise = waitForFormsMicroAppMount();
+      await initFormsQiankunHost(pathSearch, entry, hostPath);
 
-    setFormsModalEmbedActive(true);
-    syncFormsBrowserLocationForModal(routePath);
-    await rerouteFormsMicroAppWithoutHostNavigation();
-    await mountPromise;
+      if (generation !== mountGeneration) {
+        throw new Error('Legal Forms mount cancelled');
+      }
 
-    if (generation !== mountGeneration) {
-      throw new Error('Legal Forms mount cancelled');
+      setFormsModalEmbedActive(true);
+      await rerouteFormsMicroAppWithoutHostNavigation();
+      await mountPromise;
+
+      if (generation !== mountGeneration) {
+        throw new Error('Legal Forms mount cancelled');
+      }
+    } catch (error) {
+      popFormsEmbedBrowserUrl();
+      setFormsModalEmbedActive(false);
+      throw error;
     }
   };
 
@@ -100,10 +94,10 @@ export async function mountLegalFormsMicroApp(
 
 async function unmountLegalFormsMicroAppInternal() {
   setFormsModalEmbedActive(false);
-  restoreHostBrowserLocationAfterModal();
   const unmountPromise = waitForFormsMicroAppUnmount();
   await rerouteFormsMicroAppWithoutHostNavigation();
   await unmountPromise;
+  popFormsEmbedBrowserUrl();
 }
 
 export async function unmountLegalFormsMicroApp() {

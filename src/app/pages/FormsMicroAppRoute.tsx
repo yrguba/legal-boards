@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router';
-import { resolveFormsEntryPath } from '../qiankun/formsMicroAppPaths';
+import { normalizeEmbeddedFormsHostPath, resolveFormsEntryPath } from '../qiankun/formsMicroAppPaths';
 import { applyFormsAccessTokenFromSearch } from '../qiankun/formsMicroAppBridge';
 import { installFormsApiAuthFetch } from '../qiankun/formsMicroAppApiAuth';
 import { isFormsModalEmbedActive } from '../qiankun/formsModalEmbedState';
@@ -12,7 +12,8 @@ const QiankunFormsOutlet = lazy(() =>
 export function FormsMicroAppRoute() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const target = resolveFormsEntryPath(location.pathname, location.search);
+  const normalizedPath = normalizeEmbeddedFormsHostPath(location.pathname);
+  const target = resolveFormsEntryPath(normalizedPath, location.search);
 
   if (`${location.pathname}${location.search}` !== target) {
     applyFormsAccessTokenFromSearch(location.search);

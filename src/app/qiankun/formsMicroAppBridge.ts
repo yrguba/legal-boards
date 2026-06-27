@@ -1,7 +1,9 @@
-import { FORMS_API_ORIGIN } from './formsMicroApp.config';
+import { FORMS_HOST_ACTIVE_RULE, FORMS_SUBAPP_BASENAME, FORMS_API_ORIGIN } from './formsMicroApp.config';
+import { toHostRoutePath } from './formsMicroAppPaths';
 
-/** Ключи localStorage, которые использует headless-forms-app (из их bundle). */
+/** Ключи localStorage, которые использует docstream bundle. */
 const FORMS_ACCESS_TOKEN_KEY = 'accessToken';
+const FORMS_MOUNT_ROOT_ID = 'legal-forms';
 
 /** LF session token из URL (?access_token=.eJx…), не JWT. */
 export function extractAccessTokenFromFormsRaw(raw: string): string | null {
@@ -52,23 +54,28 @@ export function syncAuthTokenForFormsApp(search = ''): string | null {
 
 export function buildFormsMicroAppProps(_search = '', formsPath?: string) {
   const accessToken = localStorage.getItem(FORMS_ACCESS_TOKEN_KEY);
-  const routePath = formsPath ? stripFormsEmbeddedQuery(formsPath) : undefined;
+  const hostPath = formsPath ? toHostRoutePath(stripFormsEmbeddedQuery(formsPath)) : undefined;
+  const routePath = hostPath;
+  const apiBaseUrl =
+    import.meta.env.DEV && !import.meta.env.VITE_FORMS_API_ORIGIN?.trim()
+      ? `${window.location.origin}/`
+      : `${FORMS_API_ORIGIN}/`;
   return {
     embedded: true,
-    basename: '/forms',
+    basename: FORMS_SUBAPP_BASENAME,
     accessToken,
     token: accessToken,
     pathname: routePath,
     path: routePath,
     route: routePath,
-    /** Абсолютный origin LF; относительные `api/…` в prod идут на хост — нужен nginx/proxy. */
-    apiBaseUrl: `${FORMS_API_ORIGIN}/`,
-    apiOrigin: FORMS_API_ORIGIN,
+    /** В dev — same-origin + Vite proxy на LF API; в prod — legal-forms.ru (или nginx proxy). */
+    apiBaseUrl,
+    apiOrigin: import.meta.env.VITE_FORMS_API_ORIGIN?.replace(/\/$/, '') ?? FORMS_API_ORIGIN,
   };
 }
 
 export function countFormsMountNodes(): number {
-  const root = document.getElementById('legal-forms');
+  const root = document.getElementById(FORMS_MOUNT_ROOT_ID);
   if (!root) return 0;
   return root.querySelectorAll('*').length;
 }

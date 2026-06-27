@@ -26,12 +26,39 @@ import { Invite } from './pages/Invite';
 import { FeatureTabGuard } from './components/FeatureTabGuard';
 import { useApp } from './store/AppContext';
 import { BrowserNotificationNavigation } from './store/BrowserNotificationNavigation';
+import { docstreamBrowserPathToHost } from './qiankun/formsMicroAppPaths';
 
 const FormsMicroAppRoute = FORMS_MICROAPP_ENABLED
   ? lazy(() =>
       import('./pages/FormsMicroAppRoute').then((m) => ({ default: m.FormsMicroAppRoute })),
     )
   : null;
+
+function DocstreamRouteRedirect() {
+  const location = useLocation();
+  const hostPath = docstreamBrowserPathToHost(location.pathname);
+  if (!hostPath) {
+    return <Navigate to="/forms/" replace />;
+  }
+  return <Navigate to={`${hostPath}${location.search}${location.hash}`} replace />;
+}
+
+function FormsMicroAppRouteElement() {
+  if (!FORMS_MICROAPP_ENABLED || !FormsMicroAppRoute) {
+    return <FormsDisabledRoute />;
+  }
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center p-8 text-sm text-slate-600">
+          Загрузка модуля форм…
+        </div>
+      }
+    >
+      <FormsMicroAppRoute />
+    </Suspense>
+  );
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useApp();
@@ -107,19 +134,11 @@ export const router = createBrowserRouter([
       },
       {
         path: 'forms/*',
-        element: FORMS_MICROAPP_ENABLED && FormsMicroAppRoute ? (
-          <Suspense
-            fallback={
-              <div className="flex flex-1 items-center justify-center p-8 text-sm text-slate-600">
-                Загрузка модуля форм…
-              </div>
-            }
-          >
-            <FormsMicroAppRoute />
-          </Suspense>
-        ) : (
-          <FormsDisabledRoute />
-        ),
+        element: <FormsMicroAppRouteElement />,
+      },
+      {
+        path: 'docstream/expertise/*',
+        element: <DocstreamRouteRedirect />,
       },
       {
         path: 'employees',

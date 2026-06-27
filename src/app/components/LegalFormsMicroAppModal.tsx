@@ -102,7 +102,11 @@ export function LegalFormsMicroAppModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && !submitting && !booting && onClose()}>
-      <DialogContent className="flex h-[90vh] max-h-[900px] w-[95vw] max-w-6xl flex-col gap-0 overflow-hidden p-0">
+      <DialogContent
+        size="xl"
+        className="flex h-[90vh] max-h-[900px] flex-col gap-0 overflow-hidden p-0"
+        style={{ width: 'min(95vw, 76.8rem)', maxWidth: '76.8rem' }}
+      >
         <DialogHeader className="shrink-0 border-b border-slate-200 px-4 py-3">
           <DialogTitle>{title}</DialogTitle>
           {description ? (

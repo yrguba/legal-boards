@@ -1,5 +1,9 @@
 import type { ProxyOptions } from 'vite';
-import { DEFAULT_FORMS_API_ORIGIN, FORMS_API_PATH_PREFIXES } from './formsMicroApp.constants';
+import {
+  DEFAULT_FORMS_API_ORIGIN,
+  DEFAULT_FORMS_DOCSTREAM_PREFIX,
+  FORMS_API_PATH_PREFIXES,
+} from './formsMicroApp.constants';
 
 const formsProxyTarget =
   process.env.VITE_FORMS_API_ORIGIN?.replace(/\/$/, '') ?? DEFAULT_FORMS_API_ORIGIN;
@@ -23,9 +27,12 @@ const formsProxyEntry: ProxyOptions = {
   },
 };
 
-/** Vite dev-server: LF API на legal-forms.ru, остальной /api — Legal Boards. */
+/** Vite dev-server: LF docstream + API на legal-forms.ru, остальной /api — Legal Boards. */
 export function buildFormsApiViteProxy(): Record<string, ProxyOptions> {
-  return Object.fromEntries(
-    FORMS_API_PATH_PREFIXES.map((prefix) => [prefix, { ...formsProxyEntry }]),
-  );
+  return {
+    [DEFAULT_FORMS_DOCSTREAM_PREFIX]: { ...formsProxyEntry },
+    ...Object.fromEntries(
+      FORMS_API_PATH_PREFIXES.map((prefix) => [prefix, { ...formsProxyEntry }]),
+    ),
+  };
 }

@@ -7,7 +7,7 @@
 # 1. Вставить этот блок ВЫШЕ общего `location /api/` → backend Legal Boards.
 # 2. Префиксы синхронизировать с src/app/qiankun/formsMicroApp.constants.ts
 # 3. `/forms/*` — SPA Legal Boards (try_files / index.html), не проксировать на LF.
-# 4. entry qiankun (`https://legal-forms.ru/headless-forms-app/`) грузится с LF напрямую — CORS на LF.
+# 4. entry qiankun (`https://legal-forms.ru/docstream/forms-app/`) грузится с LF напрямую — CORS на LF.
 
 # --- maps (в http { }, один раз на server) ---------------------------------
 

@@ -2,11 +2,12 @@ import type { BoardColumnActionRule } from '../features/board-settings/boardAdva
 import type { TaskField } from '../types';
 import type { TaskForColumnChecks } from '../utils/boardColumnActions';
 import { getDescriptionFieldId, getTitleFieldId } from '../pages/task/utils/taskFieldIds';
-import { FORMS_ACTIVE_RULE, FORMS_MICRO_APP_ENTRY } from './formsMicroApp.config';
+import { FORMS_ACTIVE_RULE, FORMS_MICRO_APP_ENTRY, resolveFormsMicroAppEntry } from './formsMicroApp.config';
 import {
   FORMS_DEFAULT_EMBEDDED_PATH,
   mapStandaloneLegalFormsPathToHost,
   mapStandaloneLegalFormsUrlToHost,
+  normalizeEmbeddedFormsHostPath,
   resolveFormsEntryPath,
 } from './formsMicroAppPaths';
 import {
@@ -21,7 +22,7 @@ const FIELD_TEMPLATE = /^\{field:([^}]+)\}$/;
 export type ResolvedFormsMount = {
   /** Путь для pushState в host (/forms/…). */
   embeddedPath: string | null;
-  /** Qiankun entry ({origin}/headless-forms-app/). */
+  /** Qiankun entry ({origin}/docstream/forms-app/). */
   entry: string;
   /** Человекочитаемая причина, если путь не удалось разобрать. */
   error?: string;
@@ -64,10 +65,11 @@ function splitPathAndSearch(input: string): { pathname: string; search: string }
 
 /**
  * Разбирает полный путь LF:
- * - https://host/expertises/v/436/expertise/…/flows/…
- * - https://host/forms/436/expertise/…
- * - /forms/436/expertise/…
- * - /expertises/v/436/…
+ * - https://host/docstream/expertise/…/flows/…
+ * - https://host/expertises/v/436/expertise/…/flows/… (legacy)
+ * - https://host/forms/{session}/flows/…
+ * - /forms/{session}/flows/… (legacy /forms/expertise/… тоже нормализуется)
+ * - /docstream/expertise/…
  */
 export function parseFormsFullPath(raw: string): ResolvedFormsMount {
   const trimmed = raw.trim();
@@ -82,7 +84,7 @@ export function parseFormsFullPath(raw: string): ResolvedFormsMount {
         const url = new URL(trimmed);
         return {
           embeddedPath: stripFormsEmbeddedQuery(mapped),
-          entry: `${url.origin}/headless-forms-app/`,
+          entry: resolveFormsMicroAppEntry(url.origin),
         };
       } catch {
         return { embeddedPath: stripFormsEmbeddedQuery(mapped), entry: FORMS_MICRO_APP_ENTRY };
@@ -95,7 +97,7 @@ export function parseFormsFullPath(raw: string): ResolvedFormsMount {
       if (pathname === FORMS_ACTIVE_RULE || pathname.startsWith(`${FORMS_ACTIVE_RULE}/`)) {
         return {
           embeddedPath: stripFormsEmbeddedQuery(pathname),
-          entry: `${url.origin}/headless-forms-app/`,
+          entry: resolveFormsMicroAppEntry(url.origin),
         };
       }
     } catch {
@@ -110,8 +112,9 @@ export function parseFormsFullPath(raw: string): ResolvedFormsMount {
   }
 
   const { pathname, search } = splitPathAndSearch(trimmed);
+  const normalizedPath = normalizeEmbeddedFormsHostPath(pathname);
 
-  const mappedStandalone = mapStandaloneLegalFormsPathToHost(pathname);
+  const mappedStandalone = mapStandaloneLegalFormsPathToHost(normalizedPath);
   if (mappedStandalone) {
     return {
       embeddedPath: stripFormsEmbeddedQuery(mappedStandalone),
@@ -119,9 +122,9 @@ export function parseFormsFullPath(raw: string): ResolvedFormsMount {
     };
   }
 
-  if (pathname === FORMS_ACTIVE_RULE || pathname.startsWith(`${FORMS_ACTIVE_RULE}/`)) {
+  if (normalizedPath === FORMS_ACTIVE_RULE || normalizedPath.startsWith(`${FORMS_ACTIVE_RULE}/`)) {
     return {
-      embeddedPath: stripFormsEmbeddedQuery(pathname),
+      embeddedPath: stripFormsEmbeddedQuery(normalizedPath),
       entry: FORMS_MICRO_APP_ENTRY,
     };
   }
@@ -129,7 +132,7 @@ export function parseFormsFullPath(raw: string): ResolvedFormsMount {
   return {
     embeddedPath: null,
     entry: FORMS_MICRO_APP_ENTRY,
-    error: 'Не удалось разобрать путь — укажите URL legal-forms.ru или /forms/…',
+    error: 'Не удалось разобрать путь — укажите URL legal-forms.ru или /forms/{session}/flows/…',
   };
 }
 
@@ -167,7 +170,7 @@ export function resolveFormsMountFromActionConfig(
         const url = new URL(raw);
         return {
           embeddedPath: stripFormsEmbeddedQuery(fallbackPath),
-          entry: `${url.origin}/headless-forms-app/`,
+          entry: resolveFormsMicroAppEntry(url.origin),
         };
       }
     } catch {

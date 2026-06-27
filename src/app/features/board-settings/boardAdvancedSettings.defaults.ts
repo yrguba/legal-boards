@@ -144,7 +144,7 @@ function composeLegacyFormsPath(cfgRaw: Record<string, unknown>): string {
 
   const hostRaw = typeof cfgRaw.formsHost === 'string' ? cfgRaw.formsHost.trim() : '';
   const tail = suffix ? `/${encodeURIComponent(suffix)}` : '';
-  const path = `/forms/${version}/expertise/${session}/flows/${flowId}/${encodeURIComponent(flowKey)}${tail}`;
+  const path = `/docstream/expertise/${session}/flows/${flowId}/${encodeURIComponent(flowKey)}${tail}`;
 
   if (!hostRaw) return path;
   const host = /^https?:\/\//i.test(hostRaw) ? hostRaw.replace(/\/+$/, '') : `https://${hostRaw.replace(/\/+$/, '')}`;

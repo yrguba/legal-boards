@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 import { Loader2 } from 'lucide-react';
 import { countFormsMountNodes, syncAuthTokenForFormsApp } from '../qiankun/formsMicroAppBridge';
+import { isBareFormsRoute, FORMS_DEFAULT_EMBEDDED_PATH, toHostRoutePath } from '../qiankun/formsMicroAppPaths';
 import { hasFormsAccessToken } from '../qiankun/formsMicroAppApiAuth';
 
 type Phase = 'booting' | 'waiting-container' | 'ready' | 'error';
@@ -47,7 +48,10 @@ export function QiankunFormsOutlet() {
         syncAuthTokenForFormsApp(location.search);
         const { initFormsQiankunHost } = await import('../qiankun/startFormsMicroApp');
         if (cancelled) return;
-        await initFormsQiankunHost(location.search);
+        const hostPath = isBareFormsRoute(location.pathname)
+          ? FORMS_DEFAULT_EMBEDDED_PATH
+          : toHostRoutePath(location.pathname);
+        await initFormsQiankunHost(location.search, undefined, hostPath);
         setPhase('waiting-container');
       } catch (e: unknown) {
         if (!cancelled) {
@@ -64,12 +68,18 @@ export function QiankunFormsOutlet() {
   }, []);
 
   useEffect(() => {
-    syncAuthTokenForFormsApp(location.search);
-    syncAuthTokenForFormsApp(location.search);
-    if (phase !== 'ready') return;
+    if (phase !== 'ready' && phase !== 'waiting-container') return;
 
-    void import('../qiankun/startFormsMicroApp').then(({ rerouteFormsMicroApp }) => {
-      rerouteFormsMicroApp();
+    const hostPath = isBareFormsRoute(location.pathname)
+      ? FORMS_DEFAULT_EMBEDDED_PATH
+      : toHostRoutePath(location.pathname);
+
+    syncAuthTokenForFormsApp(location.search);
+
+    void import('../qiankun/startFormsMicroApp').then(({ initFormsQiankunHost, rerouteFormsMicroApp }) => {
+      void initFormsQiankunHost(location.search, undefined, hostPath).then(() => {
+        if (phase === 'ready') rerouteFormsMicroApp();
+      });
     });
   }, [location.pathname, location.search, phase]);
 
