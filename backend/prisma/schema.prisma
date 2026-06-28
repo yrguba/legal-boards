@@ -79,7 +79,6 @@ model User {
   password     String
   role         String         @default("member")
   avatar       String?
-  departmentId String?
   /// Подтверждён ли email (самостоятельная регистрация)
   emailVerified Boolean       @default(false)
   emailVerificationToken String? @unique
@@ -97,7 +96,6 @@ model User {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  department      Department?       @relation(fields: [departmentId], references: [id])
   ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
   workspaces      WorkspaceUser[]
   groups          UserGroup[]
@@ -129,9 +127,10 @@ model User {
   absences                 UserAbsence[] @relation("UserAbsences")
   absencesSubstituting     UserAbsence[] @relation("UserAbsenceSubstitute")
   feedbackTickets          FeedbackTicket[]
+  archivedBoards           Board[] @relation("BoardArchivedBy")
+  archivedTasks            Task[]  @relation("TaskArchivedBy")
 
   @@index([email])
-  @@index([departmentId])
 }
 
 /// Статус присутствия сотрудника в рамках пространства
@@ -346,7 +345,6 @@ model Department {
   updatedAt   DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  users     User[]
   groups    Group[]
   chatChannels WorkspaceChatChannel[]
   workspaceMembers WorkspaceUser[]
@@ -360,15 +358,15 @@ model Group {
   name         String
   description  String?
   workspaceId  String
-  /// Направление / продукт внутри отдела
-  departmentId String
+  /// Направление / продукт внутри отдела; NULL — отдельная группа workspace
+  departmentId String?
   /// Руководитель направления
   leaderId     String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  department Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   leader     User?       @relation("GroupLeader", fields: [leaderId], references: [id], onDelete: SetNull)
   users      UserGroup[]
   chatChannels WorkspaceChatChannel[]
@@ -429,10 +427,13 @@ model Board {
   attachmentsEnabled Boolean @default(true)
   /// Расширенные настройки доски (JSON): авто-назначение, учёт времени по статусам, iframe-сервисы
   advancedSettings Json     @default("{}")
+  archivedAt   DateTime?
+  archivedById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   workspace  Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  archivedBy User?        @relation("BoardArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
   columns    BoardColumn[]
   taskFields TaskField[]
   taskTypes  TaskType[]
@@ -445,6 +446,8 @@ model Board {
 
   @@index([workspaceId])
   @@index([kind])
+  @@index([archivedAt])
+  @@index([workspaceId, archivedAt])
 }
 
 /// Исходные доски, входящие в сводную
@@ -551,10 +554,15 @@ model Task {
   timeTrackingCycleOpen    Boolean   @default(false)
   /// Заключение исполнителя для клиента (LEXPRO и др.)
   conclusionText           String?   @db.Text
+  archivedAt               DateTime?
+  archivedById             String?
+  /// Задача архивирована вместе с доской (восстанавливается при restore доски)
+  archivedWithBoardId      String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   board        Board           @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  archivedBy   User?           @relation("TaskArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
   column       BoardColumn     @relation(fields: [columnId], references: [id])
   type         TaskType        @relation(fields: [typeId], references: [id])
   creator      User?           @relation("TaskCreator", fields: [createdBy], references: [id])
@@ -579,6 +587,9 @@ model Task {
   @@index([assigneeId])
   @@index([createdBy])
   @@index([lexCreatorId])
+  @@index([archivedAt])
+  @@index([boardId, archivedAt])
+  @@index([archivedWithBoardId])
 }
 
 /// История смены колонки/типа задачи (для LEXPRO и GET /tasks/:id/status-history), не зависит от получателей уведомлений

@@ -80,7 +80,7 @@ export interface Group {
   name: string;
   description?: string;
   workspaceId: string;
-  departmentId: string;
+  departmentId: string | null;
   memberIds: string[];
   leaderId?: string | null;
   leader?: GroupLeader | null;
@@ -186,6 +186,49 @@ export interface Board {
   /** Только для kind=aggregated */
   sources?: AggregatedBoardSource[];
   _count?: { tasks?: number; aggregatedSources?: number };
+}
+
+export interface ArchiveUserRef {
+  id: string;
+  name: string;
+  email?: string;
+}
+
+export interface AccountDeletionPrecheck {
+  canDelete: boolean;
+  email: string;
+  ownedWorkspaces: {
+    id: string;
+    name: string;
+    memberCount: number;
+    soleMember: boolean;
+    needsTransfer: boolean;
+  }[];
+  otherWorkspaceIds: string[];
+  blockers: { code: string; message: string }[];
+}
+
+export interface ArchivedBoard {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  kind?: 'standard' | 'aggregated';
+  archivedAt: string;
+  archivedBy?: ArchiveUserRef | null;
+  _count?: { tasks?: number };
+}
+
+export interface ArchivedTask {
+  id: string;
+  key?: string;
+  number?: number;
+  title: string;
+  archivedAt: string;
+  archivedWithBoardId?: string | null;
+  archivedBy?: ArchiveUserRef | null;
+  creator?: ArchiveUserRef | null;
+  board: { id: string; code: string; name: string };
 }
 
 export interface TaskAttachment {

@@ -1,5 +1,5 @@
 import type { AggregatedBoardSource, Task } from '../types';
-import { getColumnTaskIds, sortTasksByPosition } from './kanbanTaskOrder';
+import { sortTasksByPosition } from './kanbanTaskOrder';
 
 export function aggDropZoneId(sourceBoardId: string, columnId: string): string {
   return `agg:${sourceBoardId}:${columnId}`;
@@ -14,6 +14,42 @@ export function parseAggDropZoneId(
   return { sourceBoardId, columnId };
 }
 
+/** Уникальный id карточки на сводной (задача может быть на нескольких досках). */
+export function aggTaskDragId(sourceBoardId: string, taskId: string): string {
+  return `task:${sourceBoardId}:${taskId}`;
+}
+
+export function parseAggTaskDragId(
+  dragId: string,
+): { sourceBoardId: string; taskId: string } | null {
+  if (!dragId.startsWith('task:')) return null;
+  const rest = dragId.slice('task:'.length);
+  const sep = rest.indexOf(':');
+  if (sep <= 0) return null;
+  return {
+    sourceBoardId: rest.slice(0, sep),
+    taskId: rest.slice(sep + 1),
+  };
+}
+
+export function taskDragId(task: Task): string {
+  return aggTaskDragId(taskSourceBoardId(task), task.id);
+}
+
+export function aggregatedTaskCardKey(task: Task): string {
+  return `${taskSourceBoardId(task)}:${task.id}`;
+}
+
+export function findAggregatedTaskByDragId(tasks: Task[], dragId: string): Task | undefined {
+  const parsed = parseAggTaskDragId(dragId);
+  if (parsed) {
+    return tasks.find(
+      (t) => t.id === parsed.taskId && taskSourceBoardId(t) === parsed.sourceBoardId,
+    );
+  }
+  return tasks.find((t) => t.id === dragId);
+}
+
 export function taskSourceBoardId(task: Task): string {
   return task.sourceBoardId ?? task.boardId;
 }
@@ -22,6 +58,26 @@ export function taskStatusColumnId(task: Task): string {
   return task.sourceColumnId ?? task.columnId;
 }
 
+export function getStatusColumnDragIds(tasks: Task[], columnId: string): string[] {
+  return tasks
+    .filter((t) => taskStatusColumnId(t) === columnId)
+    .sort(sortTasksByPosition)
+    .map((t) => taskDragId(t));
+}
+
+/** Id задач в колонке на конкретной доске (для API reorder). */
+export function getStatusColumnTaskIdsForBoard(
+  tasks: Task[],
+  columnId: string,
+  sourceBoardId: string,
+): string[] {
+  return tasks
+    .filter((t) => taskSourceBoardId(t) === sourceBoardId && taskStatusColumnId(t) === columnId)
+    .sort(sortTasksByPosition)
+    .map((t) => t.id);
+}
+
+/** @deprecated используйте getStatusColumnTaskIdsForBoard */
 export function getStatusColumnTaskIds(tasks: Task[], columnId: string): string[] {
   return tasks
     .filter((t) => taskStatusColumnId(t) === columnId)
@@ -44,16 +100,17 @@ export function columnIdsEqual(a: string[], b: string[]): boolean {
 /** Оптимистичное перемещение между статусами и сортировка (columnId уникален глобально). */
 export function applyAggregatedDragReorder(
   tasks: Task[],
-  activeId: string,
-  overId: string,
+  activeDragId: string,
+  overDragId: string,
   allColumnIds: string[],
   sources: AggregatedBoardSource[],
 ): Task[] {
-  const activeTask = tasks.find((t) => t.id === activeId);
+  const activeTask = findAggregatedTaskByDragId(tasks, activeDragId);
   if (!activeTask) return tasks;
 
-  const drop = parseAggDropZoneId(overId);
-  const overTask = tasks.find((t) => t.id === overId);
+  const activeId = taskDragId(activeTask);
+  const drop = parseAggDropZoneId(overDragId);
+  const overTask = findAggregatedTaskByDragId(tasks, overDragId);
   const overColumnId = drop?.columnId ?? (overTask ? taskStatusColumnId(overTask) : null);
   if (!overColumnId) return tasks;
 
@@ -62,7 +119,7 @@ export function applyAggregatedDragReorder(
 
   const orderByColumn = new Map<string, string[]>();
   for (const colId of columnIdSet) {
-    orderByColumn.set(colId, getStatusColumnTaskIds(tasks, colId));
+    orderByColumn.set(colId, getStatusColumnDragIds(tasks, colId));
   }
 
   const sourceIds = [...(orderByColumn.get(activeColumnId) ?? [])];
@@ -76,7 +133,8 @@ export function applyAggregatedDragReorder(
   if (activeColumnId === overColumnId) {
     targetIds = sourceIds;
     if (overTask) {
-      const overIndex = (orderByColumn.get(overColumnId) ?? []).indexOf(overId);
+      const overDragIdResolved = taskDragId(overTask);
+      const overIndex = (orderByColumn.get(overColumnId) ?? []).indexOf(overDragIdResolved);
       insertIndex = overIndex >= 0 ? overIndex : targetIds.length;
       if (insertIndex > sourceIndex) insertIndex -= 1;
     } else {
@@ -88,7 +146,8 @@ export function applyAggregatedDragReorder(
     orderByColumn.set(activeColumnId, sourceIds);
     targetIds = [...(orderByColumn.get(overColumnId) ?? [])].filter((id) => id !== activeId);
     if (overTask) {
-      insertIndex = (orderByColumn.get(overColumnId) ?? []).indexOf(overId);
+      const overDragIdResolved = taskDragId(overTask);
+      insertIndex = (orderByColumn.get(overColumnId) ?? []).indexOf(overDragIdResolved);
       if (insertIndex < 0) insertIndex = targetIds.length;
     } else {
       insertIndex = targetIds.length;
@@ -97,25 +156,34 @@ export function applyAggregatedDragReorder(
     orderByColumn.set(overColumnId, targetIds);
   }
 
-  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const taskByCard = new Map(tasks.map((t) => [aggregatedTaskCardKey(t), t]));
   const next: Task[] = [];
+  const included = new Set<string>();
 
   for (const colId of allColumnIds) {
-    const ids = orderByColumn.get(colId);
-    if (!ids) continue;
+    const dragIds = orderByColumn.get(colId);
+    if (!dragIds) continue;
     const colName = columnNameById(sources, colId);
-    ids.forEach((id, position) => {
-      const row = taskById.get(id);
-      if (row) {
-        next.push({
-          ...row,
-          columnId: colId,
-          sourceColumnId: colId,
-          sourceColumnName: colName ?? row.sourceColumnName,
-          position,
-        });
-      }
+    dragIds.forEach((dragId, position) => {
+      const parsed = parseAggTaskDragId(dragId);
+      if (!parsed) return;
+      const cardKey = `${parsed.sourceBoardId}:${parsed.taskId}`;
+      const row = taskByCard.get(cardKey);
+      if (!row) return;
+      included.add(cardKey);
+      next.push({
+        ...row,
+        columnId: colId,
+        sourceColumnId: colId,
+        sourceColumnName: colName ?? row.sourceColumnName,
+        position,
+      });
     });
+  }
+
+  for (const row of tasks) {
+    const key = aggregatedTaskCardKey(row);
+    if (!included.has(key)) next.push(row);
   }
 
   return next;
@@ -127,10 +195,23 @@ export function resolveAggregatedDrop(
 ): { sourceBoardId: string; columnId: string } | null {
   const drop = parseAggDropZoneId(overId);
   if (drop) return drop;
-  const overTask = tasks.find((t) => t.id === overId);
+  const overTask = findAggregatedTaskByDragId(tasks, overId);
   if (!overTask) return null;
   return {
     sourceBoardId: taskSourceBoardId(overTask),
     columnId: taskStatusColumnId(overTask),
+  };
+}
+
+export function resolveActiveAggregatedDrag(
+  activeDragId: string,
+  tasks: Task[],
+): { task: Task; taskId: string; sourceBoardId: string } | null {
+  const task = findAggregatedTaskByDragId(tasks, activeDragId);
+  if (!task) return null;
+  return {
+    task,
+    taskId: task.id,
+    sourceBoardId: taskSourceBoardId(task),
   };
 }

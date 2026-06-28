@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest, requireStaffUser } from '../middleware/auth';
 import { ensureChannelForNewGroup } from '../utils/workspaceChatChannels';
-import { assertCanManageWorkspace } from '../utils/workspaceRole';
+import { assertCanManageWorkspace, getWorkspaceMemberProfile, isWorkspaceMember } from '../utils/workspaceRole';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -44,17 +44,104 @@ async function assertGroupDepartment(
 async function assertGroupLeader(
   leaderId: string | null | undefined,
   departmentId: string,
+  workspaceId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!leaderId) return { ok: true };
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { ownerId: true },
+  });
+  if (!workspace) return { ok: false, error: 'Пространство не найдено' };
+
   const leader = await prisma.user.findUnique({
     where: { id: leaderId },
-    select: { id: true, departmentId: true, name: true },
+    select: { id: true, name: true },
   });
   if (!leader) return { ok: false, error: 'Руководитель не найден' };
-  if (leader.departmentId !== departmentId) {
+
+  const profile = await getWorkspaceMemberProfile(
+    prisma,
+    leaderId,
+    workspaceId,
+    workspace.ownerId,
+  );
+  if (profile?.departmentId !== departmentId) {
     return { ok: false, error: `«${leader.name}» не относится к отделу этого направления` };
   }
   return { ok: true };
+}
+
+async function assertUsersInDepartment(
+  workspaceId: string,
+  departmentId: string,
+  userIds: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (userIds.length === 0) return { ok: true };
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { ownerId: true },
+  });
+  if (!workspace) return { ok: false, error: 'Пространство не найдено' };
+
+  for (const userId of userIds) {
+    const profile = await getWorkspaceMemberProfile(
+      prisma,
+      userId,
+      workspaceId,
+      workspace.ownerId,
+    );
+    if (profile?.departmentId !== departmentId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      return {
+        ok: false,
+        error: `Сотрудник «${user?.name ?? userId}» не в отделе этой группы`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+async function assertUsersInWorkspace(
+  workspaceId: string,
+  userIds: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (userIds.length === 0) return { ok: true };
+
+  for (const userId of userIds) {
+    const ok = await isWorkspaceMember(prisma, userId, workspaceId);
+    if (!ok) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      return {
+        ok: false,
+        error: `Сотрудник «${user?.name ?? userId}» не состоит в этом пространстве`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+async function assertLeaderInWorkspace(
+  leaderId: string | null | undefined,
+  workspaceId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!leaderId) return { ok: true };
+  const ok = await isWorkspaceMember(prisma, leaderId, workspaceId);
+  if (ok) return { ok: true };
+  return { ok: false, error: 'Руководитель не найден в этом пространстве' };
+}
+
+function parseDepartmentId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
@@ -130,26 +217,36 @@ router.post('/', async (req: AuthRequest, res) => {
     const manage = await assertCanManageWorkspace(prisma, req.userId!, workspaceId);
     if (!manage.ok) return res.status(403).json({ error: 'Недостаточно прав' });
 
-    if (!departmentId) {
-      return res.status(400).json({ error: 'departmentId обязателен (группа внутри отдела)' });
+    const deptId = parseDepartmentId(departmentId);
+    const memberIdsList: string[] = Array.isArray(memberIds) ? memberIds : [];
+
+    if (deptId) {
+      const deptGate = await assertGroupDepartment(workspaceId, deptId);
+      if (!deptGate.ok) return res.status(400).json({ error: deptGate.error });
+
+      const leaderGate = await assertGroupLeader(leaderId || null, deptId, workspaceId);
+      if (!leaderGate.ok) return res.status(400).json({ error: leaderGate.error });
+
+      const membersGate = await assertUsersInDepartment(workspaceId, deptId, memberIdsList);
+      if (!membersGate.ok) return res.status(400).json({ error: membersGate.error });
+    } else {
+      const leaderGate = await assertLeaderInWorkspace(leaderId || null, workspaceId);
+      if (!leaderGate.ok) return res.status(400).json({ error: leaderGate.error });
+
+      const membersGate = await assertUsersInWorkspace(workspaceId, memberIdsList);
+      if (!membersGate.ok) return res.status(400).json({ error: membersGate.error });
     }
-
-    const deptGate = await assertGroupDepartment(workspaceId, departmentId);
-    if (!deptGate.ok) return res.status(400).json({ error: deptGate.error });
-
-    const leaderGate = await assertGroupLeader(leaderId || null, departmentId);
-    if (!leaderGate.ok) return res.status(400).json({ error: leaderGate.error });
 
     const group = await prisma.group.create({
       data: {
         name,
         description,
         workspaceId,
-        departmentId,
+        departmentId: deptId,
         leaderId: leaderId || null,
-        users: memberIds
+        users: memberIdsList.length
           ? {
-              create: memberIds.map((userId: string) => ({ userId })),
+              create: memberIdsList.map((userId: string) => ({ userId })),
             }
           : undefined,
       },
@@ -197,9 +294,14 @@ router.put('/:id', async (req: AuthRequest, res) => {
     }
 
     if (leaderId !== undefined) {
-      const deptForLeader = departmentId || existing.departmentId;
-      const leaderGate = await assertGroupLeader(leaderId || null, deptForLeader);
-      if (!leaderGate.ok) return res.status(400).json({ error: leaderGate.error });
+      if (existing.departmentId) {
+        const deptForLeader = departmentId || existing.departmentId;
+        const leaderGate = await assertGroupLeader(leaderId || null, deptForLeader!, existing.workspaceId);
+        if (!leaderGate.ok) return res.status(400).json({ error: leaderGate.error });
+      } else {
+        const leaderGate = await assertLeaderInWorkspace(leaderId || null, existing.workspaceId);
+        if (!leaderGate.ok) return res.status(400).json({ error: leaderGate.error });
+      }
     }
 
     const group = await prisma.group.update({
@@ -249,31 +351,25 @@ router.post('/:id/members', async (req: AuthRequest, res) => {
     const { userIds } = req.body;
     const group = await prisma.group.findUnique({
       where: { id: req.params.id },
-      select: { departmentId: true },
+      select: { departmentId: true, workspaceId: true },
     });
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
 
-    if (userIds?.length) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, departmentId: true, name: true },
-      });
-      for (const u of users) {
-        if (u.departmentId !== group.departmentId) {
-          return res.status(400).json({
-            error: `Сотрудник «${u.name}» не в отделе этой группы`,
-          });
-        }
-      }
-    }
+    const userIdsList: string[] = Array.isArray(userIds)
+      ? userIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    const membersGate = group.departmentId
+      ? await assertUsersInDepartment(group.workspaceId, group.departmentId, userIdsList)
+      : await assertUsersInWorkspace(group.workspaceId, userIdsList);
+    if (!membersGate.ok) return res.status(400).json({ error: membersGate.error });
 
     await prisma.userGroup.deleteMany({
       where: { groupId: req.params.id },
     });
 
-    if (userIds && userIds.length > 0) {
+    if (userIdsList.length > 0) {
       await prisma.userGroup.createMany({
-        data: userIds.map((userId: string) => ({
+        data: userIdsList.map((userId: string) => ({
           groupId: req.params.id,
           userId,
         })),

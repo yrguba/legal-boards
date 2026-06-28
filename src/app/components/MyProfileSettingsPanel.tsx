@@ -22,6 +22,7 @@ import {
 import type { UserAbsence, UserPresenceInfo, UserPresenceStatus } from '../types';
 import { UserPresenceBadge } from './UserPresenceBadge';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
+import { AccountDangerZone } from './AccountDangerZone';
 
 type SettableStatus = Exclude<UserPresenceStatus, 'vacation'>;
 
@@ -569,6 +570,8 @@ export function MyProfileSettingsPanel() {
           Сменить пароль
         </Link>
       </section>
+
+      <AccountDangerZone />
     </div>
   );
 }

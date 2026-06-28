@@ -16,6 +16,18 @@ export function getColumnTaskIds(tasks: Task[], columnId: string): string[] {
   return getColumnTaskOrder(tasks, columnId).map((t) => t.id);
 }
 
+/** Добавляет новую задачу в начало колонки и сдвигает position у остальных (как при POST /tasks). */
+export function prependCreatedTask(tasks: Task[], created: Task): Task[] {
+  if (tasks.some((t) => t.id === created.id)) return tasks;
+  const columnId = created.columnId;
+  const next = tasks.map((t) =>
+    t.columnId === columnId
+      ? { ...t, position: (typeof t.position === 'number' ? t.position : 0) + 1 }
+      : t,
+  );
+  return [{ ...created, position: created.position ?? 0 }, ...next];
+}
+
 export function columnIdsEqual(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i]);
 }

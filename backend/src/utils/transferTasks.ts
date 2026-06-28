@@ -337,6 +337,8 @@ export async function transferTasks(
 
   if (!sourceBoard) throw new Error('SOURCE_BOARD_NOT_FOUND');
   if (!targetBoard) throw new Error('TARGET_BOARD_NOT_FOUND');
+  if (sourceBoard.archivedAt) throw new Error('SOURCE_BOARD_ARCHIVED');
+  if (targetBoard.archivedAt) throw new Error('TARGET_BOARD_ARCHIVED');
   if (targetBoard.kind === 'aggregated') throw new Error('AGGREGATED_BOARD');
 
   const resolvedColumnId =

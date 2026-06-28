@@ -6,10 +6,10 @@ import { getLexIntakeWorkspaceIds, workspaceAllowsLexIntake } from '../utils/lex
 import { ensureEmployeeProfileSchema, canManageEmployeeProfile } from '../utils/employeeProfile';
 import {
   assertCanManageWorkspace,
-  isAlreadyWorkspaceMember,
   resolveWorkspaceRole,
 } from '../utils/workspaceRole';
 import { removeUserFromWorkspace } from '../utils/removeWorkspaceMember';
+import { leaveWorkspace, transferWorkspaceOwnership } from '../utils/workspaceOwnership';
 import {
   handleCancelWorkspaceInvite,
   handleCreateWorkspaceInvite,
@@ -21,6 +21,9 @@ import {
   listQuickCreatePresets,
   replaceQuickCreatePresets,
 } from '../utils/quickCreatePresets';
+import { assertWorkspaceMember as assertWorkspaceMemberAccess } from '../utils/documentAccess';
+import { ARCHIVED_ONLY } from '../utils/archiveScope';
+import { enrichTaskWithKey } from '../utils/taskKeys';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -203,32 +206,61 @@ router.delete('/:workspaceId/members/:userId', requireStaffUser, async (req: Aut
   }
 });
 
+router.post('/:workspaceId/transfer-ownership', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const newOwnerId =
+      typeof req.body?.newOwnerId === 'string' ? req.body.newOwnerId.trim() : '';
+    if (!newOwnerId) {
+      return res.status(400).json({ error: 'Укажите newOwnerId' });
+    }
+
+    const result = await transferWorkspaceOwnership(
+      prisma,
+      workspaceId,
+      req.userId!,
+      newOwnerId,
+    );
+    if (!result.ok) {
+      const status =
+        result.code === 'NOT_FOUND'
+          ? 404
+          : result.code === 'NOT_OWNER' || result.code === 'NOT_MEMBER'
+            ? 400
+            : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
+    }
+
+    res.json({ message: 'Владение передано' });
+  } catch (error) {
+    console.error('Transfer workspace ownership error:', error);
+    res.status(500).json({ error: 'Ошибка передачи владения' });
+  }
+});
+
 router.post('/:workspaceId/leave', requireStaffUser, async (req: AuthRequest, res) => {
   try {
     const workspaceId = req.params.workspaceId;
-    const member = await isAlreadyWorkspaceMember(prisma, req.userId!, workspaceId);
-    if (!member) {
-      return res.status(404).json({ error: 'Вы не состоите в этом пространстве', code: 'NOT_MEMBER' });
-    }
-
-    const ws = await prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { ownerId: true, name: true },
-    });
-    if (!ws) return res.status(404).json({ error: 'Рабочее пространство не найдено' });
-    if (ws.ownerId === req.userId) {
-      return res.status(400).json({
-        error: 'Владелец не может покинуть пространство. Удалите его или передайте владение.',
-        code: 'OWNER',
-      });
-    }
-
-    const result = await removeUserFromWorkspace(prisma, workspaceId, req.userId!, { notify: false });
+    const result = await leaveWorkspace(prisma, req.userId!, workspaceId);
     if (!result.ok) {
-      return res.status(400).json({ error: result.error, code: result.code });
+      const status =
+        result.code === 'NOT_FOUND' || result.code === 'NOT_MEMBER'
+          ? 404
+          : result.code === 'TRANSFER_OWNERSHIP_REQUIRED'
+            ? 409
+            : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
     }
 
-    res.json({ message: `Вы покинули «${ws.name}»` });
+    if (result.workspaceDeleted) {
+      res.json({
+        message: `Пространство «${result.workspaceName}» удалено — вы были единственным участником`,
+        workspaceDeleted: true,
+      });
+      return;
+    }
+
+    res.json({ message: `Вы покинули «${result.workspaceName}»`, workspaceDeleted: false });
   } catch (error) {
     console.error('Leave workspace error:', error);
     res.status(500).json({ error: 'Ошибка выхода из пространства' });
@@ -441,6 +473,76 @@ router.delete('/:id', requireStaffUser, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Delete workspace error:', error);
     res.status(500).json({ error: 'Ошибка удаления рабочего пространства' });
+  }
+});
+
+router.get('/:id/archive/boards', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const member = await assertWorkspaceMemberAccess(
+      prisma,
+      req.params.id,
+      req.userId!,
+      req.userRole,
+    );
+    if (!member) {
+      return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+    }
+
+    const boards = await prisma.board.findMany({
+      where: { workspaceId: req.params.id, ...ARCHIVED_ONLY },
+      include: {
+        archivedBy: { select: { id: true, name: true, email: true } },
+        _count: { select: { tasks: true } },
+      },
+      orderBy: { archivedAt: 'desc' },
+    });
+
+    res.json(boards);
+  } catch (error) {
+    console.error('List archived boards error:', error);
+    res.status(500).json({ error: 'Ошибка получения архива досок' });
+  }
+});
+
+router.get('/:id/archive/tasks', requireStaffUser, async (req: AuthRequest, res) => {
+  try {
+    const member = await assertWorkspaceMemberAccess(
+      prisma,
+      req.params.id,
+      req.userId!,
+      req.userRole,
+    );
+    if (!member) {
+      return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+    }
+
+    const tasks = await prisma.task.findMany({
+      where: {
+        board: { workspaceId: req.params.id },
+        ...ARCHIVED_ONLY,
+      },
+      include: {
+        board: { select: { id: true, code: true, name: true } },
+        archivedBy: { select: { id: true, name: true, email: true } },
+        creator: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { archivedAt: 'desc' },
+    });
+
+    res.json(
+      tasks.map((t) =>
+        enrichTaskWithKey(
+          {
+            ...t,
+            key: undefined,
+          },
+          t.board.code,
+        ),
+      ),
+    );
+  } catch (error) {
+    console.error('List archived tasks error:', error);
+    res.status(500).json({ error: 'Ошибка получения архива задач' });
   }
 });
 

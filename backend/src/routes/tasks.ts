@@ -58,6 +58,13 @@ import {
 } from '../utils/activityLog';
 import { resolveBoardRef } from '../utils/boardResolve';
 import {
+  archiveTask,
+  assertCanManageTaskArchive,
+  permanentDeleteTask,
+  restoreTask,
+} from '../utils/archive';
+import { isArchived, NOT_ARCHIVED } from '../utils/archiveScope';
+import {
   assertAggregatedBoardView,
   isAggregatedBoard,
   loadAggregatedSourcesDto,
@@ -153,6 +160,27 @@ async function notifyLexClientsConclusion(taskId: string) {
       lexCreatorId: t.lexCreatorId,
     });
   }
+}
+
+function shapeCreatedTaskForClient(task: Record<string, unknown>, boardCode?: string | null) {
+  return enrichTaskWithKey(unifyTaskRow(task), boardCode ?? undefined);
+}
+
+function broadcastTaskCreated(
+  boardId: string,
+  task: Record<string, unknown>,
+  boardCode: string | undefined,
+  actor: { userId?: string | null; lexClientId?: string | null },
+) {
+  const shaped = shapeCreatedTaskForClient(task, boardCode);
+  broadcast({
+    type: 'task_created',
+    boardId,
+    task: shaped,
+    ...(actor.userId ? { actorUserId: actor.userId } : {}),
+    ...(actor.lexClientId ? { actorLexClientId: actor.lexClientId } : {}),
+  });
+  return shaped;
 }
 
 function unifyTaskRow(task: Record<string, unknown>) {
@@ -272,6 +300,9 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
     if (!board) {
       return res.status(404).json({ error: 'Доска не найдена' });
     }
+    if (isArchived(board)) {
+      return res.status(404).json({ error: 'Доска в архиве' });
+    }
 
     const viewGate = await assertAggregatedBoardView(prisma, req, board);
     if (!viewGate.ok) {
@@ -295,7 +326,10 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
       }
 
       const tasks = await prisma.taskBoardPlacement.findMany({
-        where: { boardId: { in: sourceIds } },
+        where: {
+          boardId: { in: sourceIds },
+          task: NOT_ARCHIVED,
+        },
         include: {
           type: true,
           task: {
@@ -343,7 +377,10 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
     const placements = await prisma.taskBoardPlacement.findMany({
       where: {
         boardId: board.id,
-        ...(req.lexClientId ? { task: { lexCreatorId: req.lexClientId } } : {}),
+        task: {
+          ...NOT_ARCHIVED,
+          ...(req.lexClientId ? { lexCreatorId: req.lexClientId } : {}),
+        },
       },
       include: {
         type: true,
@@ -955,7 +992,13 @@ router.post('/', async (req: AuthRequest, res) => {
         });
       }
 
-      return res.json(enrichTaskWithKey(unifyTaskRow(lexTask as Record<string, unknown>), board.code));
+      const shapedLex = broadcastTaskCreated(
+        boardId,
+        lexTask as Record<string, unknown>,
+        board.code,
+        { lexClientId: req.lexClientId },
+      );
+      return res.json(shapedLex);
     }
 
     if (!req.userId) {
@@ -1043,7 +1086,13 @@ router.post('/', async (req: AuthRequest, res) => {
       });
     }
 
-    res.json(enrichTaskWithKey(unifyTaskRow(task as Record<string, unknown>), boardRow?.code));
+    const shaped = broadcastTaskCreated(
+      boardId,
+      task as Record<string, unknown>,
+      boardRow?.code,
+      { userId: req.userId },
+    );
+    res.json(shaped);
   } catch (error) {
     console.error('Create task error:', error);
     res.status(500).json({ error: 'Ошибка создания задачи' });
@@ -1775,14 +1824,118 @@ router.delete('/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Удаление задачи доступно только сотрудникам Legal Boards' });
     }
 
-    await prisma.task.delete({
-      where: { id: taskIdParam(req) },
+    const taskId = taskIdParam(req);
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, createdBy: true, boardId: true, archivedAt: true },
     });
+    if (!task) {
+      return res.status(404).json({ error: 'Задача не найдена' });
+    }
 
-    res.json({ message: 'Задача удалена' });
+    const gate = await assertCanManageTaskArchive(prisma, task, {
+      userId: req.userId!,
+      userRole: req.userRole,
+    });
+    if (!gate.ok) {
+      return res.status(403).json({ error: gate.error });
+    }
+
+    const permanent = req.query.permanent === 'true' || req.query.permanent === '1';
+
+    if (permanent) {
+      await permanentDeleteTask(prisma, taskId);
+      res.json({ message: 'Задача удалена безвозвратно' });
+      return;
+    }
+
+    res.set('Deprecation', 'true');
+    res.set('Link', '</api/tasks/{id}/archive>; rel="successor-version"');
+
+    if (task.archivedAt) {
+      res.json({ message: 'Задача уже в архиве' });
+      return;
+    }
+
+    await archiveTask(prisma, taskId, req.userId!);
+    res.json({ message: 'Задача перенесена в архив' });
   } catch (error) {
     console.error('Delete task error:', error);
     res.status(500).json({ error: 'Ошибка удаления задачи' });
+  }
+});
+
+router.post('/:id/archive', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Архивация задачи доступна только сотрудникам Legal Boards' });
+    }
+
+    const taskId = taskIdParam(req);
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, createdBy: true, boardId: true, archivedAt: true },
+    });
+    if (!task) {
+      return res.status(404).json({ error: 'Задача не найдена' });
+    }
+
+    const gate = await assertCanManageTaskArchive(prisma, task, {
+      userId: req.userId!,
+      userRole: req.userRole,
+    });
+    if (!gate.ok) {
+      return res.status(403).json({ error: gate.error });
+    }
+
+    if (task.archivedAt) {
+      return res.json({ message: 'Задача уже в архиве' });
+    }
+
+    await archiveTask(prisma, taskId, req.userId!);
+    res.json({ message: 'Задача перенесена в архив' });
+  } catch (error) {
+    console.error('Archive task error:', error);
+    res.status(500).json({ error: 'Ошибка архивации задачи' });
+  }
+});
+
+router.post('/:id/restore', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Восстановление задачи доступно только сотрудникам Legal Boards' });
+    }
+
+    const taskId = taskIdParam(req);
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, createdBy: true, boardId: true, archivedAt: true },
+    });
+    if (!task) {
+      return res.status(404).json({ error: 'Задача не найдена' });
+    }
+
+    const gate = await assertCanManageTaskArchive(prisma, task, {
+      userId: req.userId!,
+      userRole: req.userRole,
+    });
+    if (!gate.ok) {
+      return res.status(403).json({ error: gate.error });
+    }
+
+    if (!task.archivedAt) {
+      return res.status(400).json({ error: 'Задача не в архиве' });
+    }
+
+    const result = await restoreTask(prisma, taskId);
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json({ message: 'Задача восстановлена' });
+  } catch (error) {
+    console.error('Restore task error:', error);
+    res.status(500).json({ error: 'Ошибка восстановления задачи' });
   }
 });
 

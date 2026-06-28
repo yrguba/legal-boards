@@ -18,6 +18,55 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const WORKSPACE_STORAGE_PREFIX = 'legal_boards_workspace_';
+
+function readStoredWorkspaceId(userId: string): string | null {
+  try {
+    return localStorage.getItem(`${WORKSPACE_STORAGE_PREFIX}${userId}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredWorkspaceId(userId: string, workspaceId: string): void {
+  try {
+    localStorage.setItem(`${WORKSPACE_STORAGE_PREFIX}${userId}`, workspaceId);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function resolveWorkspaceSelection(
+  list: Workspace[],
+  userId: string,
+  options?: { selectId?: string; prevId?: string | null },
+): Workspace | null {
+  if (list.length === 0) return null;
+
+  const { selectId, prevId } = options ?? {};
+  if (selectId) {
+    const selected = list.find((w) => w.id === selectId);
+    if (selected) return selected;
+  }
+
+  const storedId = readStoredWorkspaceId(userId);
+  if (storedId) {
+    const stored = list.find((w) => w.id === storedId);
+    if (stored) return stored;
+  }
+
+  if (prevId) {
+    const prev = list.find((w) => w.id === prevId);
+    if (prev) return prev;
+  }
+
+  return list[0];
+}
+
+function persistWorkspaceSelection(userId: string, workspace: Workspace | null) {
+  if (workspace) writeStoredWorkspaceId(userId, workspace.id);
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -44,7 +93,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }
 
             setWorkspaces(fetchedWorkspaces);
-            if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
+            if (fetchedWorkspaces.length > 0) {
+              const selected = resolveWorkspaceSelection(fetchedWorkspaces, user.id);
+              setCurrentWorkspace(selected);
+              persistWorkspaceSelection(user.id, selected);
+            }
           }
         } catch (err) {
           console.error('Auth verification failed:', err);
@@ -73,7 +126,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         setWorkspaces(fetchedWorkspaces);
-        if (fetchedWorkspaces.length > 0) setCurrentWorkspace(fetchedWorkspaces[0]);
+        if (fetchedWorkspaces.length > 0) {
+          const selected = resolveWorkspaceSelection(fetchedWorkspaces, user.id);
+          setCurrentWorkspace(selected);
+          persistWorkspaceSelection(user.id, selected);
+        }
       }
 
       return user as User;
@@ -92,24 +149,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const switchWorkspace = (workspaceId: string) => {
     const workspace = workspaces.find((w) => w.id === workspaceId);
-    if (workspace) {
+    if (workspace && currentUser) {
       setCurrentWorkspace(workspace);
+      persistWorkspaceSelection(currentUser.id, workspace);
     }
   };
 
   const refreshWorkspaces = async (selectWorkspaceId?: string) => {
     const list = await workspacesApi.getAll();
     setWorkspaces(list);
+    if (!currentUser) {
+      setCurrentWorkspace(list[0] ?? null);
+      return;
+    }
     setCurrentWorkspace((prev) => {
-      if (selectWorkspaceId) {
-        const w = list.find((x) => x.id === selectWorkspaceId);
-        if (w) return w;
-      }
-      if (prev) {
-        const still = list.find((x) => x.id === prev.id);
-        if (still) return still;
-      }
-      return list[0] ?? null;
+      const next = resolveWorkspaceSelection(list, currentUser.id, {
+        selectId: selectWorkspaceId,
+        prevId: prev?.id,
+      });
+      persistWorkspaceSelection(currentUser.id, next);
+      return next;
     });
   };
 

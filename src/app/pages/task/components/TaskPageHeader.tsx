@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { ArrowLeft, ArrowRightLeft } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRightLeft } from 'lucide-react';
 import { t } from '../taskPage.classes';
 import { InlineEditField } from '../../../components/inline-edit/InlineEditField';
 import type { InlineFieldKey } from '../utils/validateField';
@@ -9,6 +9,8 @@ type Props = {
   title: string;
   canTransfer?: boolean;
   onTransfer?: () => void;
+  canArchive?: boolean;
+  onArchive?: () => void;
   savingField: InlineFieldKey | null;
   fieldError?: string | null;
   titleLocked?: boolean;
@@ -20,6 +22,8 @@ export function TaskPageHeader({
   title,
   canTransfer,
   onTransfer,
+  canArchive,
+  onArchive,
   savingField,
   fieldError,
   titleLocked,
@@ -73,6 +77,16 @@ export function TaskPageHeader({
           />
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {canArchive && onArchive ? (
+            <button
+              type="button"
+              onClick={onArchive}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+            >
+              <Archive className="w-4 h-4" />
+              В архив
+            </button>
+          ) : null}
           {canTransfer && onTransfer ? (
             <button type="button" onClick={onTransfer} className={t.btnSecondary}>
               <span className="inline-flex items-center gap-1.5">

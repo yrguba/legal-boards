@@ -45,6 +45,10 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
 
   const workspaceDepartments = departments.filter((d) => d.workspaceId === currentWorkspace?.id);
   const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
+  const teamGroups = workspaceGroups.filter((g) => !g.departmentId);
+  const directionGroups = workspaceGroups.filter(
+    (g) => g.departmentId && (!formData.departmentId || g.departmentId === formData.departmentId),
+  );
 
   const resetForm = () => {
     setFormData({
@@ -311,7 +315,18 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
                 <label className="block text-sm font-medium text-slate-700 mb-1">Отдел</label>
                 <select
                   value={formData.departmentId}
-                  onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setFormData((prev) => ({
+                      ...prev,
+                      departmentId: next,
+                      groupIds: prev.groupIds.filter((gid) => {
+                        const g = workspaceGroups.find((x) => x.id === gid);
+                        if (!g?.departmentId) return true;
+                        return g.departmentId === next;
+                      }),
+                    }));
+                  }}
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="">Не указано</option>
@@ -323,26 +338,53 @@ export function CreateEmployeeModal({ isOpen, onClose, onSuccess }: CreateEmploy
                 </select>
               </div>
 
-              {workspaceGroups.length > 0 ? (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Группы</label>
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {workspaceGroups.map((group) => (
-                      <label
-                        key={group.id}
-                        className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={formData.groupIds.includes(group.id)}
-                          onChange={() => toggleGroup(group.id)}
-                          className="w-4 h-4 text-brand border-slate-300 rounded focus:ring-brand"
-                        />
-                        <span className="text-sm text-slate-700">{group.name}</span>
+              {teamGroups.length > 0 || directionGroups.length > 0 ? (
+                <>
+                  {teamGroups.length > 0 ? (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Группы</label>
+                      <div className="space-y-2 max-h-32 overflow-y-auto">
+                        {teamGroups.map((group) => (
+                          <label
+                            key={group.id}
+                            className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={formData.groupIds.includes(group.id)}
+                              onChange={() => toggleGroup(group.id)}
+                              className="w-4 h-4 text-brand border-slate-300 rounded focus:ring-brand"
+                            />
+                            <span className="text-sm text-slate-700">{group.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {directionGroups.length > 0 ? (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Направления / продукты
                       </label>
-                    ))}
-                  </div>
-                </div>
+                      <div className="space-y-2 max-h-32 overflow-y-auto">
+                        {directionGroups.map((group) => (
+                          <label
+                            key={group.id}
+                            className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={formData.groupIds.includes(group.id)}
+                              onChange={() => toggleGroup(group.id)}
+                              className="w-4 h-4 text-brand border-slate-300 rounded focus:ring-brand"
+                            />
+                            <span className="text-sm text-slate-700">{group.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
             </div>
 

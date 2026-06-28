@@ -43,6 +43,10 @@ import {
 } from '../utils/employeeProfile';
 import { handleWorkspaceMemberLookup } from '../utils/workspaceInviteAdmin';
 import {
+  deleteUserAccount,
+  getAccountDeletionPrecheck,
+} from '../utils/deleteUserAccount';
+import {
   assertWorkspaceMemberUser,
   getEffectivePresenceForUser,
   listUserAbsences,
@@ -91,7 +95,6 @@ function mapMeUser(user: {
   name: string;
   role: string;
   avatar: string | null;
-  departmentId?: string | null;
   mustChangePassword?: boolean;
 }) {
   return {
@@ -100,7 +103,6 @@ function mapMeUser(user: {
     name: user.name,
     role: user.role,
     avatar: user.avatar ?? undefined,
-    departmentId: user.departmentId ?? undefined,
     mustChangePassword: user.mustChangePassword ?? false,
   };
 }
@@ -147,7 +149,6 @@ router.patch('/me', async (req: AuthRequest, res) => {
         name: true,
         role: true,
         avatar: true,
-        departmentId: true,
         mustChangePassword: true,
       },
     });
@@ -184,7 +185,6 @@ router.post('/me/avatar', avatarUpload.single('file'), async (req: AuthRequest, 
         name: true,
         role: true,
         avatar: true,
-        departmentId: true,
         mustChangePassword: true,
       },
     });
@@ -225,7 +225,6 @@ router.delete('/me/avatar', async (req: AuthRequest, res) => {
         name: true,
         role: true,
         avatar: true,
-        departmentId: true,
         mustChangePassword: true,
       },
     });
@@ -394,6 +393,47 @@ router.delete('/me/absences/:absenceId', async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Delete absence error:', error);
     res.status(500).json({ error: 'Ошибка удаления отсутствия' });
+  }
+});
+
+router.get('/me/delete-account/precheck', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const precheck = await getAccountDeletionPrecheck(prisma, req.userId);
+    if (!precheck) return res.status(404).json({ error: 'Пользователь не найден' });
+    res.json(precheck);
+  } catch (error) {
+    console.error('Account deletion precheck error:', error);
+    res.status(500).json({ error: 'Ошибка проверки удаления аккаунта' });
+  }
+});
+
+router.post('/me/delete-account', async (req: AuthRequest, res) => {
+  try {
+    if (!req.userId) return res.status(403).json({ error: 'Недостаточно прав' });
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!password) {
+      return res.status(400).json({ error: 'Укажите пароль для подтверждения' });
+    }
+
+    const result = await deleteUserAccount(prisma, req.userId, password);
+    if (!result.ok) {
+      const status =
+        result.code === 'INVALID_PASSWORD'
+          ? 401
+          : result.code === 'BLOCKED' || result.code === 'TRANSFER_OWNERSHIP_REQUIRED'
+            ? 409
+            : 400;
+      return res.status(status).json({ error: result.error, code: result.code });
+    }
+
+    res.json({
+      message: 'Аккаунт удалён. Email можно использовать для новой регистрации.',
+      email: result.email,
+    });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ error: 'Ошибка удаления аккаунта' });
   }
 });
 
@@ -1018,7 +1058,6 @@ router.post('/', async (req: AuthRequest, res) => {
           name,
           password: hashedPassword,
           role,
-          departmentId: departmentId || null,
           emailVerified: true,
           mustChangePassword,
           profileFields: { fullName: name } as Prisma.InputJsonValue,
@@ -1029,7 +1068,6 @@ router.post('/', async (req: AuthRequest, res) => {
           name: true,
           role: true,
           avatar: true,
-          departmentId: true,
           createdAt: true,
         },
       });
@@ -1128,7 +1166,6 @@ router.get('/', async (_req: AuthRequest, res) => {
         name: true,
         role: true,
         avatar: true,
-        departmentId: true,
         createdAt: true,
       },
     });

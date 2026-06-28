@@ -10,7 +10,7 @@ interface EmployeesContextType {
   groups: Group[];
   loading: boolean;
   error: string | null;
-  createDepartment: (data: { name: string; description: string; workspaceId: string }) => Promise<void>;
+  createDepartment: (data: { name: string; description: string; workspaceId: string }) => Promise<Department>;
   updateDepartment: (
     id: string,
     data: { name?: string; description?: string },
@@ -21,7 +21,7 @@ interface EmployeesContextType {
     description: string;
     memberIds: string[];
     workspaceId: string;
-    departmentId: string;
+    departmentId?: string | null;
     leaderId?: string | null;
   }) => Promise<void>;
   updateGroup: (
@@ -77,7 +77,8 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
 
   const createDepartment = async (data: { name: string; description: string; workspaceId: string }) => {
     const newDepartment = await departmentsApi.create(data);
-    setDepartments([...departments, newDepartment]);
+    await refreshData();
+    return newDepartment;
   };
 
   const updateDepartment = async (id: string, data: { name?: string; description?: string }) => {
@@ -95,7 +96,7 @@ export function EmployeesProvider({ children }: { children: ReactNode }) {
     description: string;
     memberIds: string[];
     workspaceId: string;
-    departmentId: string;
+    departmentId?: string | null;
     leaderId?: string | null;
   }) => {
     const newGroup = await groupsApi.create(data);

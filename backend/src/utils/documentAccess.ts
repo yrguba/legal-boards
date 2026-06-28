@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { getWorkspaceMemberProfile } from './workspaceRole';
 
 export type UserDocAccess = {
   userId: string;
@@ -50,8 +51,8 @@ export async function getUserDocumentAccess(
   });
   let departmentId = membership?.departmentId ?? null;
   if (!membership && ws?.ownerId === userId) {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { departmentId: true } });
-    departmentId = user?.departmentId ?? null;
+    const profile = await getWorkspaceMemberProfile(prisma, userId, workspaceId, ws.ownerId);
+    departmentId = profile?.departmentId ?? null;
   }
   return {
     userId,

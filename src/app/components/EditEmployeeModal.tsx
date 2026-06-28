@@ -20,6 +20,7 @@ export function EditEmployeeModal({ isOpen, onClose, onSubmit, employee }: EditE
 
   const workspaceDepartments = departments.filter((d) => d.workspaceId === currentWorkspace?.id);
   const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
+  const teamGroups = workspaceGroups.filter((g) => !g.departmentId);
   const groupsInDept = useMemo(() => {
     if (!departmentId) return [];
     return workspaceGroups.filter((g) => g.departmentId === departmentId);
@@ -103,7 +104,8 @@ export function EditEmployeeModal({ isOpen, onClose, onSubmit, employee }: EditE
                 setSelectedGroups((prev) =>
                   prev.filter((gid) => {
                     const g = workspaceGroups.find((x) => x.id === gid);
-                    return g?.departmentId === next;
+                    if (!g?.departmentId) return true;
+                    return g.departmentId === next;
                   }),
                 );
               }}
@@ -119,8 +121,37 @@ export function EditEmployeeModal({ isOpen, onClose, onSubmit, employee }: EditE
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Группы</label>
+            <div className="border border-slate-200 rounded max-h-40 overflow-y-auto">
+              {teamGroups.length === 0 ? (
+                <div className="p-4 text-center text-sm text-slate-500">Нет групп</div>
+              ) : (
+                teamGroups.map((group) => (
+                  <label
+                    key={group.id}
+                    className="flex items-center gap-3 p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedGroups.includes(group.id)}
+                      onChange={() => toggleGroup(group.id)}
+                      className="w-4 h-4 text-brand"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-slate-900">{group.name}</div>
+                      {group.description ? (
+                        <div className="text-xs text-slate-500">{group.description}</div>
+                      ) : null}
+                    </div>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              Направления / продукты (группы отдела)
+              Направления / продукты (внутри отдела)
             </label>
             <div className="border border-slate-200 rounded max-h-48 overflow-y-auto">
               {!departmentId ? (

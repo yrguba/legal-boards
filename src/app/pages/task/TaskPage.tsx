@@ -36,6 +36,17 @@ import { getWsUrl } from '../../utils/wsUrl';
 import { taskPath } from '../../utils/taskUrls';
 import { isExternalClientTask } from './utils/externalClientTask';
 import { useFeatureTabsConfig } from '../../features/featureTabs/useFeatureTabsConfig';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../components/ui/alert-dialog';
+import { buttonVariants } from '../../components/ui/button';
+import { cn } from '../../components/ui/utils';
 
 export function TaskPage() {
   const { currentUser } = useApp();
@@ -67,6 +78,7 @@ export function TaskPage() {
   const [interactionError, setInteractionError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
   const [commentMentionInserts, setCommentMentionInserts] = useState<CommentMentionInsert[]>([]);
+  const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
   const [commentComposeKey, setCommentComposeKey] = useState(0);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -115,6 +127,13 @@ export function TaskPage() {
   >(null);
 
   const canTransfer = canManageWorkspace;
+  const canArchive =
+    !!task &&
+    !!currentUser &&
+    (canManageWorkspace || task.createdBy === currentUser.id);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [activityItems, setActivityItems] = useState<TaskActivityItem[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -488,21 +507,41 @@ export function TaskPage() {
   const postComment = async () => {
     if (!activeTaskId) return;
     const content = encodeCommentMentionText(commentText.trim(), commentMentionInserts);
-    if (!content) return;
+    if (!content && pendingCommentFiles.length === 0) return;
     setIsPostingComment(true);
     try {
-      const created = await tasksApi.addComment(activeTaskId, content);
+      const created = await tasksApi.addComment(
+        activeTaskId,
+        content,
+        pendingCommentFiles.length > 0 ? pendingCommentFiles : undefined,
+      );
       setTask((prev: any) => ({
         ...prev,
         comments: [created, ...(prev?.comments || [])],
       }));
       setCommentText('');
       setCommentMentionInserts([]);
+      setPendingCommentFiles([]);
       setCommentComposeKey((k) => k + 1);
       setActivePanel('comments');
     } finally {
       setIsPostingComment(false);
     }
+  };
+
+  const addCommentFiles = (files: FileList | File[]) => {
+    setPendingCommentFiles((prev) => {
+      const next = [...prev];
+      for (const file of Array.from(files)) {
+        if (next.length >= 10) break;
+        next.push(file);
+      }
+      return next;
+    });
+  };
+
+  const removeCommentFile = (index: number) => {
+    setPendingCommentFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const removeTaskAttachment = async (attachmentId: string) => {
@@ -638,6 +677,21 @@ export function TaskPage() {
     }
   };
 
+  const confirmArchiveTask = async () => {
+    if (!task || !board) return;
+    setIsArchiving(true);
+    setArchiveError(null);
+    try {
+      await tasksApi.archive(task.id);
+      setArchiveDialogOpen(false);
+      navigate(`/board/${(board as { code?: string }).code || board.id}`, { replace: true });
+    } catch (e: unknown) {
+      setArchiveError(e instanceof Error ? e.message : 'Не удалось перенести задачу в архив');
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-6">
@@ -726,6 +780,11 @@ export function TaskPage() {
         onSaveTitle={(v) => saveField('title', v)}
         canTransfer={canTransfer}
         onTransfer={() => setTransferOpen(true)}
+        canArchive={canArchive}
+        onArchive={() => {
+          setArchiveError(null);
+          setArchiveDialogOpen(true);
+        }}
       />
 
       <ResizablePanelGroup
@@ -822,6 +881,10 @@ export function TaskPage() {
                   commentText={commentText}
                   commentComposeKey={commentComposeKey}
                   assistantMessage={assistantMessage}
+                  attachmentsEnabled={board.attachmentsEnabled !== false}
+                  pendingCommentFiles={pendingCommentFiles}
+                  onAddCommentFiles={addCommentFiles}
+                  onRemoveCommentFile={removeCommentFile}
                   isPostingComment={isPostingComment}
                   isPostingAssistant={isPostingAssistant}
                   onCommentText={setCommentText}
@@ -880,6 +943,44 @@ export function TaskPage() {
           }}
         />
       ) : null}
+
+      <AlertDialog
+        open={archiveDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !isArchiving) {
+            setArchiveDialogOpen(false);
+            setArchiveError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Перенести задачу в архив?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Задача «{task.title}» будет скрыта с доски. Восстановление — в настройках → Архив.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {archiveError ? (
+            <p className="text-sm text-red-600" role="alert">
+              {archiveError}
+            </p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isArchiving}>Отмена</AlertDialogCancel>
+            <button
+              type="button"
+              disabled={isArchiving}
+              className={cn(
+                buttonVariants(),
+                'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600',
+              )}
+              onClick={() => void confirmArchiveTask()}
+            >
+              {isArchiving ? 'Архивация…' : 'В архив'}
+            </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

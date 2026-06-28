@@ -7,7 +7,7 @@ import { UserAvatar } from './UserAvatar';
 interface ManageDepartmentMembersModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (departmentId: string, memberIds: string[]) => void;
+  onSubmit: (departmentId: string, memberIds: string[]) => void | Promise<void>;
   department: Department | null;
 }
 
@@ -18,6 +18,7 @@ export function ManageDepartmentMembersModal({
   department,
 }: ManageDepartmentMembersModalProps) {
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
   const { users } = useEmployees();
 
   useEffect(() => {
@@ -29,10 +30,16 @@ export function ManageDepartmentMembersModal({
 
   if (!isOpen || !department) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(department.id, selectedMembers);
-    onClose();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onSubmit(department.id, selectedMembers);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
   };
 
   const toggleMember = (userId: string) => {
@@ -57,7 +64,7 @@ export function ManageDepartmentMembersModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
+        <form onSubmit={(e) => void handleSubmit(e)} className="flex-1 overflow-y-auto p-6">
           <div className="border border-slate-200 rounded">
             {users.map((user) => (
               <label
@@ -84,15 +91,17 @@ export function ManageDepartmentMembersModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded transition-colors"
+              disabled={busy}
+              className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded transition-colors disabled:opacity-50"
             >
               Отмена
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors"
+              disabled={busy}
+              className="px-4 py-2 bg-brand text-white rounded hover:bg-brand-hover transition-colors disabled:opacity-50"
             >
-              Сохранить
+              {busy ? 'Сохранение…' : 'Сохранить'}
             </button>
           </div>
         </form>

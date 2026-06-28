@@ -151,6 +151,10 @@ export type TaskSidePanelsProps = {
   commentComposeKey: number;
   commentMentionInserts: CommentMentionInsert[];
   onCommentMentionInsertsChange: (inserts: CommentMentionInsert[]) => void;
+  attachmentsEnabled: boolean;
+  pendingCommentFiles: File[];
+  onAddCommentFiles: (files: FileList | File[]) => void;
+  onRemoveCommentFile: (index: number) => void;
   assistantMessage: string;
   isPostingComment: boolean;
   isPostingAssistant: boolean;

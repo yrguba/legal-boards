@@ -26,8 +26,11 @@ import {
   applyAggregatedDragReorder,
   columnIdsEqual,
   columnNameById,
-  getStatusColumnTaskIds,
+  findAggregatedTaskByDragId,
+  getStatusColumnTaskIdsForBoard,
+  resolveActiveAggregatedDrag,
   resolveAggregatedDrop,
+  taskDragId,
   taskSourceBoardId,
   taskStatusColumnId,
 } from '../utils/aggregatedKanbanDnD';
@@ -85,12 +88,14 @@ function statusGroupKey(sourceBoardId: string, columnId: string): string {
 
 function AggregatedTaskCard({
   task,
+  dragId,
   getAssigneeName,
   canSelect,
   selected,
   onToggleSelect,
 }: {
   task: Task;
+  dragId: string;
   getAssigneeName: (id?: string) => string;
   canSelect?: boolean;
   selected?: boolean;
@@ -100,7 +105,7 @@ function AggregatedTaskCard({
   const typeColor = task.type?.color ?? '#6b7280';
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: task.id,
+    id: dragId,
   });
 
   const style = {
@@ -215,66 +220,12 @@ function StatusDropZone({
       {isCollapsed ? (
         <div className="min-h-[2rem]" aria-hidden />
       ) : (
-        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={tasks.map((t) => taskDragId(t))} strategy={verticalListSortingStrategy}>
           <div className="space-y-1 min-h-[1.5rem]">
             {tasks.map((task) => (
               <AggregatedTaskCard
-                key={task.id}
-                task={task}
-                getAssigneeName={getAssigneeName}
-                canSelect={canSelect}
-                selected={selectedTaskIds?.has(task.id)}
-                onToggleSelect={onToggleSelect}
-              />
-            ))}
-          </div>
-        </SortableContext>
-      )}
-    </div>
-  );
-}
-
-function UnknownStatusGroup({
-  tasks,
-  getAssigneeName,
-  isCollapsed,
-  onToggleCollapse,
-  canSelect,
-  selectedTaskIds,
-  onToggleSelect,
-}: {
-  tasks: Task[];
-  getAssigneeName: (id?: string) => string;
-  isCollapsed: boolean;
-  onToggleCollapse: () => void;
-  canSelect?: boolean;
-  selectedTaskIds?: Set<string>;
-  onToggleSelect?: (taskId: string) => void;
-}) {
-  return (
-    <div className="rounded-md p-1 border-2 border-transparent">
-      <button
-        type="button"
-        onClick={onToggleCollapse}
-        className="flex items-center gap-1 mb-1 w-full text-left rounded hover:bg-slate-100/80 transition-colors py-0.5"
-        aria-expanded={!isCollapsed}
-      >
-        {isCollapsed ? (
-          <ChevronRight className="size-3.5 shrink-0 text-slate-500" />
-        ) : (
-          <ChevronDown className="size-3.5 shrink-0 text-slate-500" />
-        )}
-        <span className="text-xs font-medium text-slate-500">Прочие</span>
-        <span className="text-xs text-slate-400">({tasks.length})</span>
-      </button>
-      {isCollapsed ? (
-        <div className="min-h-[1.5rem]" aria-hidden />
-      ) : (
-        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          <div className="space-y-1">
-            {tasks.map((task) => (
-              <AggregatedTaskCard
-                key={task.id}
+                key={taskDragId(task)}
+                dragId={taskDragId(task)}
                 task={task}
                 getAssigneeName={getAssigneeName}
                 canSelect={canSelect}
@@ -329,8 +280,25 @@ function SourceBoardColumn({
     return { map, unknown };
   }, [tasks, columnOrder]);
 
+  const orphanGroups = useMemo(() => {
+    const groups = new Map<string, { columnId: string; name: string; tasks: Task[] }>();
+    for (const task of tasksByColumn.unknown) {
+      const colId = taskStatusColumnId(task);
+      const name = task.sourceColumnName?.trim() || 'Прочие';
+      const existing = groups.get(colId);
+      if (existing) {
+        existing.tasks.push(task);
+      } else {
+        groups.set(colId, { columnId: colId, name, tasks: [task] });
+      }
+    }
+    for (const group of groups.values()) {
+      group.tasks.sort(sortTasksByPosition);
+    }
+    return [...groups.values()];
+  }, [tasksByColumn.unknown]);
+
   const totalCount = tasks.length;
-  const unknownKey = statusGroupKey(source.id, '__unknown__');
 
   return (
     <div className="flex-shrink-0 w-72 rounded-lg bg-slate-50 p-2.5 flex flex-col max-h-[calc(100vh-12rem)]">
@@ -348,7 +316,6 @@ function SourceBoardColumn({
         <div className="space-y-2 pr-1">
         {columnOrder.map((col) => {
           const colTasks = tasksByColumn.map.get(col.id) ?? [];
-          if (colTasks.length === 0) return null;
           const groupKey = statusGroupKey(source.id, col.id);
           return (
             <StatusDropZone
@@ -366,23 +333,23 @@ function SourceBoardColumn({
           );
         })}
 
-        {tasksByColumn.unknown.length > 0 ? (
-          <UnknownStatusGroup
-            tasks={tasksByColumn.unknown}
-            getAssigneeName={getAssigneeName}
-            isCollapsed={collapsedGroups.has(unknownKey)}
-            onToggleCollapse={() => onToggleStatusGroup(unknownKey)}
-            canSelect={canSelect}
-            selectedTaskIds={selectedTaskIds}
-            onToggleSelect={onToggleSelect}
-          />
-        ) : null}
-
-        {totalCount === 0 ? (
-          <div className="flex items-center justify-center h-32 text-sm text-slate-400 border-2 border-dashed border-slate-300 rounded-lg">
-            Перетащите задачу сюда
-          </div>
-        ) : null}
+        {orphanGroups.map((group) => {
+          const groupKey = statusGroupKey(source.id, group.columnId);
+          return (
+            <StatusDropZone
+              key={`orphan-${group.columnId}`}
+              sourceBoardId={source.id}
+              column={{ id: group.columnId, name: group.name }}
+              tasks={group.tasks}
+              getAssigneeName={getAssigneeName}
+              isCollapsed={collapsedGroups.has(groupKey)}
+              onToggleCollapse={() => onToggleStatusGroup(groupKey)}
+              canSelect={canSelect}
+              selectedTaskIds={selectedTaskIds}
+              onToggleSelect={onToggleSelect}
+            />
+          );
+        })}
         </div>
         <ScrollBar />
       </ScrollArea>
@@ -444,10 +411,18 @@ export function AggregatedBoardView({
   const [deleteBoardError, setDeleteBoardError] = useState<string | null>(null);
   const [workspaceBoards, setWorkspaceBoards] = useState<Board[]>([]);
 
-  const allColumnIds = useMemo(
-    () => sources.flatMap((s) => s.columns.map((c) => c.id)),
-    [sources],
-  );
+  const allColumnIds = useMemo(() => {
+    const ids = sources.flatMap((s) => s.columns.map((c) => c.id));
+    const known = new Set(ids);
+    for (const task of tasks) {
+      const colId = taskStatusColumnId(task);
+      if (!known.has(colId)) {
+        known.add(colId);
+        ids.push(colId);
+      }
+    }
+    return ids;
+  }, [sources, tasks]);
   const sourceBoardIds = useMemo(() => sources.map((s) => s.id), [sources]);
 
   useEffect(() => {
@@ -697,10 +672,10 @@ export function AggregatedBoardView({
     return Array.isArray(raw) ? raw : [];
   };
 
-  const revertTaskStatus = (taskId: string, columnId: string) => {
+  const revertTaskStatus = (taskId: string, columnId: string, sourceBoardId: string) => {
     onTasksChange((prev) =>
       prev.map((t) =>
-        t.id === taskId
+        t.id === taskId && taskSourceBoardId(t) === sourceBoardId
           ? {
               ...t,
               columnId,
@@ -730,7 +705,9 @@ export function AggregatedBoardView({
       const colName = columnNameById(sources, targetColumnId);
       onTasksChange((prev) =>
         prev.map((task) =>
-          task.id === taskId ? mergeTaskFromUpdateResponse(task, updated, colName) : task,
+          task.id === taskId && (!boardId || taskSourceBoardId(task) === boardId)
+            ? mergeTaskFromUpdateResponse(task, updated, colName)
+            : task,
         ),
       );
       const sourceBoard = boardId ? sourceBoards.get(boardId) : undefined;
@@ -756,13 +733,16 @@ export function AggregatedBoardView({
 
   const handleDragStart = (event: DragStartEvent) => {
     setDragMoveError(null);
-    const task = tasks.find((t) => t.id === event.active.id);
+    const activeDragId = String(event.active.id);
+    const resolved = resolveActiveAggregatedDrag(activeDragId, tasks);
+    const task = resolved?.task ?? findAggregatedTaskByDragId(tasks, activeDragId);
     dragSnapshotRef.current = tasks;
     dragOriginColumnRef.current = task ? taskStatusColumnId(task) : null;
     dragOriginBoardRef.current = task ? taskSourceBoardId(task) : null;
-    dragOriginOrderRef.current = task
-      ? getStatusColumnTaskIds(tasks, taskStatusColumnId(task))
-      : null;
+    dragOriginOrderRef.current =
+      task && dragOriginBoardRef.current
+        ? getStatusColumnTaskIdsForBoard(tasks, taskStatusColumnId(task), dragOriginBoardRef.current)
+        : null;
     setActiveTask(task ?? null);
   };
 
@@ -781,7 +761,8 @@ export function AggregatedBoardView({
     const { active, over } = event;
     setActiveTask(null);
 
-    const activeTaskId = String(active.id);
+    const activeResolved = resolveActiveAggregatedDrag(String(active.id), tasks);
+    const activeTaskId = activeResolved?.taskId ?? String(active.id);
     const originColumnId = dragOriginColumnRef.current;
     const originBoardId = dragOriginBoardRef.current;
     const originOrder = dragOriginOrderRef.current;
@@ -791,7 +772,7 @@ export function AggregatedBoardView({
     dragOriginOrderRef.current = null;
     dragSnapshotRef.current = null;
 
-    if (!over || !originColumnId || !originBoardId) {
+    if (!over || !originColumnId || !originBoardId || !activeResolved) {
       if (snapshot) onTasksChange(snapshot);
       return;
     }
@@ -803,11 +784,10 @@ export function AggregatedBoardView({
     }
 
     const { sourceBoardId: targetBoardId, columnId: targetColumnId } = drop;
-    const draggedTask = tasks.find((t) => t.id === activeTaskId);
+    const draggedTask = activeResolved.task;
 
     if (targetBoardId !== originBoardId) {
       if (snapshot) onTasksChange(snapshot);
-      if (!draggedTask) return;
       setTransferSourceBoardId(originBoardId);
       setTransferTaskId(activeTaskId);
       setTransferPreset({ boardId: targetBoardId, columnId: targetColumnId });
@@ -816,7 +796,7 @@ export function AggregatedBoardView({
     }
 
     if (originColumnId === targetColumnId) {
-      const newOrder = getStatusColumnTaskIds(tasks, originColumnId);
+      const newOrder = getStatusColumnTaskIdsForBoard(tasks, originColumnId, originBoardId);
       if (!originOrder || columnIdsEqual(originOrder, newOrder)) return;
       const srcBoard = sourceBoards.get(originBoardId);
       if (!srcBoard) {
@@ -849,7 +829,7 @@ export function AggregatedBoardView({
     );
     if (pendingMsg) {
       setDragMoveError(pendingMsg);
-      revertTaskStatus(activeTaskId, originColumnId);
+      revertTaskStatus(activeTaskId, originColumnId, originBoardId);
       return;
     }
 
@@ -864,12 +844,12 @@ export function AggregatedBoardView({
     );
     if (actionPlan.checkErrors.length > 0) {
       setDragMoveError(formatColumnTransitionCheckErrors(actionPlan.checkErrors));
-      revertTaskStatus(activeTaskId, originColumnId);
+      revertTaskStatus(activeTaskId, originColumnId, originBoardId);
       return;
     }
 
     if (actionPlan.interactiveSteps.length > 0) {
-      revertTaskStatus(activeTaskId, originColumnId);
+      revertTaskStatus(activeTaskId, originColumnId, originBoardId);
       const taskId = activeTaskId;
       const fromColumnId = originColumnId;
       const toColumnId = targetColumnId;
@@ -892,7 +872,7 @@ export function AggregatedBoardView({
           )) as TaskColumnActionCompletionRow;
           onTasksChange((prev) =>
             prev.map((t) => {
-              if (t.id !== taskId) return t;
+              if (t.id !== taskId || taskSourceBoardId(t) !== sourceBoardId) return t;
               const list = taskColumnActionCompletions(t);
               return { ...t, columnActionCompletions: mergeActionCompletion(list, row) };
             }),
@@ -912,7 +892,11 @@ export function AggregatedBoardView({
       return;
     }
 
-    const targetPosition = getStatusColumnTaskIds(tasks, targetColumnId).indexOf(activeTaskId);
+    const targetPosition = getStatusColumnTaskIdsForBoard(
+      tasks,
+      targetColumnId,
+      originBoardId,
+    ).indexOf(activeTaskId);
     try {
       await finishColumnMove(
         activeTaskId,
@@ -1180,7 +1164,7 @@ export function AggregatedBoardView({
                   className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
-                  Удалить
+                  В архив
                 </button>
               </>
             ) : null}
@@ -1348,9 +1332,9 @@ export function AggregatedBoardView({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Удалить сводную доску?</AlertDialogTitle>
+            <AlertDialogTitle>Перенести сводную доску в архив?</AlertDialogTitle>
             <AlertDialogDescription>
-              Сводная доска «{board.name}» будет удалена. Исходные доски и их задачи не затрагиваются.
+              Сводная доска «{board.name}» будет скрыта из списка. Исходные доски не затрагиваются. Восстановление — в настройках → Архив.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteBoardError ? (
@@ -1369,7 +1353,7 @@ export function AggregatedBoardView({
               )}
               onClick={() => void confirmDeleteBoard()}
             >
-              {isDeletingBoard ? 'Удаление…' : 'Удалить'}
+              {isDeletingBoard ? 'Архивация…' : 'В архив'}
             </button>
           </AlertDialogFooter>
         </AlertDialogContent>

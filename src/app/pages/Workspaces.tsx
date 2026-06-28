@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { useApp } from '../store/AppContext';
 import { workspacesApi } from '../services/api';
-import { Building2, Check, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Building2, Check, LogOut, Pencil, Plus, Trash2 } from 'lucide-react';
+import { LeaveWorkspaceDialog } from '../components/LeaveWorkspaceDialog';
 
 function formatDate(iso: string) {
   try {
@@ -28,6 +29,11 @@ export function Workspaces() {
   const [editDesc, setEditDesc] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [leaveTarget, setLeaveTarget] = useState<{
+    id: string;
+    name: string;
+    isOwner: boolean;
+  } | null>(null);
 
   const startEdit = (ws: { id: string; name: string; description?: string | null }) => {
     setEditingId(ws.id);
@@ -212,32 +218,34 @@ export function Workspaces() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                    <div className="min-w-0 flex gap-3">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex gap-3 min-w-0">
                       <div className="w-10 h-10 rounded-lg bg-brand-light flex items-center justify-center flex-shrink-0">
                         <Building2 className="size-5 text-brand" />
                       </div>
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-medium text-slate-900">{ws.name}</h3>
+                          <h3 className="font-medium text-slate-900 break-words">{ws.name}</h3>
                           {isCurrent ? (
-                            <span className="text-xs font-medium text-brand bg-brand-light px-2 py-0.5 rounded">
+                            <span className="text-xs font-medium text-brand bg-brand-light px-2 py-0.5 rounded shrink-0">
                               Текущее
                             </span>
                           ) : null}
                           {ws.isOwner ? (
-                            <span className="text-xs text-slate-500">Владелец</span>
+                            <span className="text-xs text-slate-500 shrink-0">Владелец</span>
                           ) : (
-                            <span className="text-xs text-slate-500">Участник</span>
+                            <span className="text-xs text-slate-500 shrink-0">Участник</span>
                           )}
                         </div>
                         {ws.description ? (
-                          <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{ws.description}</p>
+                          <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap break-words">
+                            {ws.description}
+                          </p>
                         ) : null}
                         <p className="text-xs text-slate-400 mt-2">Создано {formatDate(ws.createdAt)}</p>
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2 sm:justify-end sm:flex-shrink-0">
+                    <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
                       {!isCurrent && (
                         <button
                           type="button"
@@ -271,6 +279,16 @@ export function Workspaces() {
                           {deleteId === ws.id ? 'Удаление…' : 'Удалить'}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLeaveTarget({ id: ws.id, name: ws.name, isOwner: !!ws.isOwner })
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50"
+                      >
+                        <LogOut className="size-3.5" />
+                        Покинуть
+                      </button>
                     </div>
                   </div>
                 )}
@@ -279,6 +297,17 @@ export function Workspaces() {
           })
         )}
       </div>
+
+      {leaveTarget ? (
+        <LeaveWorkspaceDialog
+          open
+          workspace={leaveTarget}
+          onOpenChange={(open) => {
+            if (!open) setLeaveTarget(null);
+          }}
+          onSuccess={() => refreshWorkspaces()}
+        />
+      ) : null}
     </div>
   );
 }

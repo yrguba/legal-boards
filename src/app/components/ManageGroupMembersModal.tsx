@@ -26,10 +26,11 @@ export function ManageGroupMembersModal({
     }
   }, [group]);
 
-  const eligibleUsers = useMemo(
-    () => (group ? users.filter((u) => u.departmentId === group.departmentId) : []),
-    [users, group],
-  );
+  const eligibleUsers = useMemo(() => {
+    if (!group) return [];
+    if (!group.departmentId) return users;
+    return users.filter((u) => u.departmentId === group.departmentId);
+  }, [users, group]);
 
   if (!isOpen || !group) return null;
 
@@ -62,7 +63,11 @@ export function ManageGroupMembersModal({
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
-          <p className="text-xs text-slate-500 mb-2">Доступны только сотрудники из отдела направления</p>
+          <p className="text-xs text-slate-500 mb-2">
+            {group.departmentId
+              ? 'Доступны только сотрудники из отдела направления'
+              : 'Доступны все сотрудники пространства'}
+          </p>
           <div className="border border-slate-200 rounded">
             {eligibleUsers.length === 0 ? (
               <p className="p-3 text-sm text-slate-500">Нет сотрудников в этом отделе</p>

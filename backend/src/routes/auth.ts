@@ -35,7 +35,6 @@ function publicUser(user: {
   email: string;
   name: string;
   role: string;
-  departmentId?: string | null;
   avatar?: string | null;
   mustChangePassword?: boolean;
 }) {
@@ -44,7 +43,6 @@ function publicUser(user: {
     email: user.email,
     name: user.name,
     role: user.role,
-    departmentId: user.departmentId ?? undefined,
     avatar: user.avatar ?? undefined,
     mustChangePassword: user.mustChangePassword ?? false,
   };
@@ -246,7 +244,6 @@ router.get('/invite', async (req, res) => {
         email: true,
         name: true,
         role: true,
-        departmentId: true,
         avatar: true,
         mustChangePassword: true,
         passwordInviteExpiresAt: true,
@@ -528,7 +525,6 @@ router.post('/verify', async (req, res) => {
         email: true,
         name: true,
         role: true,
-        departmentId: true,
         avatar: true,
         emailVerified: true,
         mustChangePassword: true,
@@ -562,7 +558,7 @@ router.post('/change-password', authenticate, async (req: AuthRequest, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: req.userId! },
-      select: { id: true, email: true, name: true, role: true, departmentId: true, avatar: true, password: true, mustChangePassword: true },
+      select: { id: true, email: true, name: true, role: true, avatar: true, password: true, mustChangePassword: true },
     });
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
@@ -596,7 +592,6 @@ router.post('/change-password', authenticate, async (req: AuthRequest, res) => {
         email: true,
         name: true,
         role: true,
-        departmentId: true,
         avatar: true,
         mustChangePassword: true,
       },

@@ -154,6 +154,17 @@ export const usersApi = {
     });
   },
 
+  async getDeleteAccountPrecheck() {
+    return fetchApi<import('../types').AccountDeletionPrecheck>('/users/me/delete-account/precheck');
+  },
+
+  async deleteAccount(password: string) {
+    return fetchApi<{ message: string; email: string }>('/users/me/delete-account', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  },
+
   async getMyPresence(workspaceId: string) {
     const q = new URLSearchParams({ workspaceId });
     return fetchApi<{ presence: import('../types').UserPresenceInfo }>(
@@ -374,6 +385,20 @@ export const workspacesApi = {
     return fetchApi<void>(`/workspaces/${id}`, { method: 'DELETE' });
   },
 
+  async leave(workspaceId: string) {
+    return fetchApi<{ message: string; workspaceDeleted?: boolean }>(
+      `/workspaces/${workspaceId}/leave`,
+      { method: 'POST' },
+    );
+  },
+
+  async transferOwnership(workspaceId: string, newOwnerId: string) {
+    return fetchApi<{ message: string }>(`/workspaces/${workspaceId}/transfer-ownership`, {
+      method: 'POST',
+      body: JSON.stringify({ newOwnerId }),
+    });
+  },
+
   async addUser(workspaceId: string, userEmail: string) {
     return fetchApi<any>(`/workspaces/${workspaceId}/users`, {
       method: 'POST',
@@ -434,6 +459,14 @@ export const workspacesApi = {
       method: 'DELETE',
     });
   },
+
+  async getArchivedBoards(workspaceId: string) {
+    return fetchApi<import('../types').ArchivedBoard[]>(`/workspaces/${workspaceId}/archive/boards`);
+  },
+
+  async getArchivedTasks(workspaceId: string) {
+    return fetchApi<import('../types').ArchivedTask[]>(`/workspaces/${workspaceId}/archive/tasks`);
+  },
 };
 
 // Departments API
@@ -486,7 +519,7 @@ export const groupsApi = {
     name: string;
     description?: string;
     workspaceId: string;
-    departmentId: string;
+    departmentId?: string | null;
     memberIds?: string[];
     leaderId?: string | null;
   }) {
@@ -581,6 +614,18 @@ export const boardsApi = {
 
   async delete(id: string) {
     return fetchApi<void>(`/boards/${id}`, { method: 'DELETE' });
+  },
+
+  async archive(id: string) {
+    return fetchApi<{ message: string }>(`/boards/${id}/archive`, { method: 'POST' });
+  },
+
+  async restore(id: string) {
+    return fetchApi<{ message: string }>(`/boards/${id}/restore`, { method: 'POST' });
+  },
+
+  async deletePermanent(id: string) {
+    return fetchApi<void>(`/boards/${id}?permanent=true`, { method: 'DELETE' });
   },
 
   async moveTasks(boardId: string, fromColumnId: string, toColumnId: string) {
@@ -688,7 +733,38 @@ export const tasksApi = {
     return fetchApi<void>(`/tasks/${id}`, { method: 'DELETE' });
   },
 
-  async addComment(taskId: string, content: string) {
+  async archive(id: string) {
+    return fetchApi<{ message: string }>(`/tasks/${id}/archive`, { method: 'POST' });
+  },
+
+  async restore(id: string) {
+    return fetchApi<{ message: string }>(`/tasks/${id}/restore`, { method: 'POST' });
+  },
+
+  async deletePermanent(id: string) {
+    return fetchApi<void>(`/tasks/${id}?permanent=true`, { method: 'DELETE' });
+  },
+
+  async addComment(taskId: string, content: string, files?: File[]) {
+    if (files && files.length > 0) {
+      const formData = new FormData();
+      formData.append('content', content);
+      for (const file of files) {
+        formData.append('files', file);
+      }
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API_URL}/tasks/${taskId}/comments`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Ошибка отправки комментария' }));
+        throw new ApiError(response.status, error.error || 'Ошибка отправки комментария');
+      }
+      return response.json();
+    }
+
     return fetchApi<any>(`/tasks/${taskId}/comments`, {
       method: 'POST',
       body: JSON.stringify({ content }),

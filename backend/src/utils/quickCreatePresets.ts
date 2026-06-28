@@ -1,5 +1,6 @@
 import type { Board, BoardColumn, PrismaClient, QuickCreateTaskPreset } from '@prisma/client';
 import { isAggregatedBoard } from './aggregatedBoard';
+import { NOT_ARCHIVED } from './archiveScope';
 
 export type QuickCreatePresetDto = {
   id: string;
@@ -21,7 +22,7 @@ export function serializeQuickCreatePreset(
   preset: QuickCreateTaskPreset,
   board: BoardWithRelations | null,
 ): QuickCreatePresetDto | null {
-  if (!board || isAggregatedBoard(board)) return null;
+  if (!board || isAggregatedBoard(board) || board.archivedAt) return null;
 
   const column = board.columns.find((c) => c.id === preset.columnId);
   if (!column) return null;
@@ -56,7 +57,7 @@ export async function listQuickCreatePresets(
 
   const boardIds = [...new Set(presets.map((p) => p.boardId))];
   const boards = await prisma.board.findMany({
-    where: { id: { in: boardIds }, workspaceId },
+    where: { id: { in: boardIds }, workspaceId, ...NOT_ARCHIVED },
     include: {
       columns: { orderBy: { position: 'asc' } },
     },
@@ -93,7 +94,7 @@ export async function replaceQuickCreatePresets(
     ...new Set(incoming.map((p) => String(p.boardId ?? '').trim()).filter(Boolean)),
   ];
   const boards = await prisma.board.findMany({
-    where: { id: { in: boardIds }, workspaceId },
+    where: { id: { in: boardIds }, workspaceId, ...NOT_ARCHIVED },
     include: { columns: true },
   });
   const boardById = new Map(boards.map((b) => [b.id, b]));
@@ -112,6 +113,9 @@ export async function replaceQuickCreatePresets(
     if (!board) throw new Error(`Пресет «${name}»: доска не найдена в пространстве`);
     if (isAggregatedBoard(board)) {
       throw new Error(`Пресет «${name}»: нельзя использовать сводную доску`);
+    }
+    if (board.archivedAt) {
+      throw new Error(`Пресет «${name}»: доска в архиве`);
     }
     if (!board.columns.some((c) => c.id === columnId)) {
       throw new Error(`Пресет «${name}»: колонка не принадлежит выбранной доске`);

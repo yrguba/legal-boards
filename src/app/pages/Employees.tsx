@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useEmployees } from '../store/EmployeesContext';
 import { Plus, UserPlus, Edit, Settings, Trash2, X, KeyRound } from 'lucide-react';
@@ -17,7 +17,7 @@ import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import { UserPresenceBadge } from '../components/UserPresenceBadge';
 import { UserAvatar } from '../components/UserAvatar';
 
-type ViewMode = 'all' | 'catalog' | 'departments' | 'groups';
+type ViewMode = 'all' | 'catalog' | 'departments' | 'teams' | 'directions';
 
 function MemberRow({ user, onRemove }: { user: User; onRemove?: () => void }) {
   return (
@@ -64,6 +64,7 @@ export function Employees() {
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [profileEmployee, setProfileEmployee] = useState<User | null>(null);
   const [createGroupDeptId, setCreateGroupDeptId] = useState<string>('');
+  const [groupModalVariant, setGroupModalVariant] = useState<'team' | 'direction'>('direction');
   const [isDepartmentModalOpen, setIsDepartmentModalOpen] = useState(false);
   const [departmentEditing, setDepartmentEditing] = useState<Department | null>(null);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -85,7 +86,10 @@ export function Employees() {
       if (departmentEditing) {
         await updateDepartment(departmentEditing.id, data);
       } else {
-        await createDepartment({ ...data, workspaceId: currentWorkspace.id });
+        const created = await createDepartment({ ...data, workspaceId: currentWorkspace.id });
+        if (created?.id) {
+          setActiveDeptId(created.id);
+        }
       }
       setIsDepartmentModalOpen(false);
       setDepartmentEditing(null);
@@ -95,9 +99,14 @@ export function Employees() {
   };
 
   const confirmDeleteDepartment = async (dept: Department) => {
+    const deptGroupCount = workspaceDirections.filter((g) => g.departmentId === dept.id).length;
+    const groupsNote =
+      deptGroupCount > 0
+        ? `\n\nБудут безвозвратно удалены направления (${deptGroupCount}).`
+        : '';
     if (
       !window.confirm(
-        `Удалить отдел «${dept.name}»? Сотрудники будут переведены в «Без отдела».`,
+        `Удалить отдел «${dept.name}»? Сотрудники будут переведены в «Без отдела».${groupsNote}`,
       )
     ) {
       return;
@@ -113,7 +122,7 @@ export function Employees() {
     name: string;
     description: string;
     memberIds: string[];
-    departmentId: string;
+    departmentId: string | null;
     leaderId: string | null;
   }) => {
     if (!currentWorkspace) return;
@@ -192,12 +201,38 @@ export function Employees() {
     setSelectedGroup(null);
   };
 
-  const workspaceDepartments = departments.filter(
-    (d) => d.workspaceId === currentWorkspace?.id
+  const workspaceDepartments = useMemo(
+    () =>
+      departments.filter(
+        (d) => d.workspaceId === currentWorkspace?.id && d.id && d.name,
+      ),
+    [departments, currentWorkspace?.id],
   );
-  const workspaceGroups = groups.filter((g) => g.workspaceId === currentWorkspace?.id);
+  const workspaceGroups = useMemo(
+    () => groups.filter((g) => g.workspaceId === currentWorkspace?.id),
+    [groups, currentWorkspace?.id],
+  );
+  const workspaceTeams = useMemo(
+    () => workspaceGroups.filter((g) => !g.departmentId),
+    [workspaceGroups],
+  );
+  const workspaceDirections = useMemo(
+    () => workspaceGroups.filter((g) => g.departmentId),
+    [workspaceGroups],
+  );
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
   const departmentById = useMemo(() => new Map(departments.map((d) => [d.id, d])), [departments]);
+
+  useEffect(() => {
+    if (viewMode !== 'departments') return;
+    if (workspaceDepartments.length === 0) {
+      setActiveDeptId('');
+      return;
+    }
+    if (!activeDeptId || !workspaceDepartments.some((d) => d.id === activeDeptId)) {
+      setActiveDeptId(workspaceDepartments[0].id);
+    }
+  }, [viewMode, workspaceDepartments, activeDeptId]);
 
   const currentDept =
     workspaceDepartments.find((d) => d.id === activeDeptId) ?? workspaceDepartments[0] ?? null;
@@ -205,7 +240,7 @@ export function Employees() {
     ? users.filter((u) => u.departmentId === currentDept.id)
     : [];
   const currentDeptGroups = currentDept
-    ? workspaceGroups.filter((g) => g.departmentId === currentDept.id)
+    ? workspaceDirections.filter((g) => g.departmentId === currentDept.id)
     : [];
 
   const getUserDepartment = (userId: string) => {
@@ -318,9 +353,19 @@ export function Employees() {
           Отделы
         </button>
         <button
-          onClick={() => setViewMode('groups')}
+          onClick={() => setViewMode('teams')}
           className={`px-4 py-2 text-sm rounded transition-colors ${
-            viewMode === 'groups'
+            viewMode === 'teams'
+              ? 'bg-brand-light text-brand'
+              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          Группы
+        </button>
+        <button
+          onClick={() => setViewMode('directions')}
+          className={`px-4 py-2 text-sm rounded transition-colors ${
+            viewMode === 'directions'
               ? 'bg-brand-light text-brand'
               : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
           }`}
@@ -442,7 +487,7 @@ export function Employees() {
               <h2 className="text-lg font-medium text-slate-900">Отдел</h2>
               {workspaceDepartments.length > 0 ? (
                 <select
-                  value={currentDept?.id ?? ''}
+                  value={activeDeptId}
                   onChange={(e) => setActiveDeptId(e.target.value)}
                   className="px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-brand min-w-[200px]"
                 >
@@ -552,6 +597,7 @@ export function Employees() {
                         type="button"
                         onClick={() => {
                           setGroupEditing(null);
+                          setGroupModalVariant('direction');
                           setCreateGroupDeptId(currentDept.id);
                           setIsGroupModalOpen(true);
                         }}
@@ -595,11 +641,12 @@ export function Employees() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setGroupEditing(group);
-                                    setCreateGroupDeptId(currentDept.id);
-                                    setIsGroupModalOpen(true);
-                                  }}
+                                    onClick={() => {
+                                      setGroupEditing(group);
+                                      setGroupModalVariant('direction');
+                                      setCreateGroupDeptId(currentDept.id);
+                                      setIsGroupModalOpen(true);
+                                    }}
                                   className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
                                   title="Редактировать направление"
                                 >
@@ -643,7 +690,105 @@ export function Employees() {
         </div>
       )}
 
-      {viewMode === 'groups' && (
+      {viewMode === 'teams' && (
+        <div>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-lg font-medium text-slate-900">Группы</h2>
+              <p className="text-sm text-slate-600 mt-1">
+                Отдельные группы сотрудников, не привязанные к отделам
+              </p>
+            </div>
+            {canManageOrg ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupEditing(null);
+                  setGroupModalVariant('team');
+                  setCreateGroupDeptId('');
+                  setIsGroupModalOpen(true);
+                }}
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-white text-slate-700 border border-slate-200 rounded hover:bg-slate-50 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Создать группу
+              </button>
+            ) : null}
+          </div>
+          {workspaceTeams.length === 0 ? (
+            <div className="bg-white rounded-lg border border-slate-200 p-10 text-center text-sm text-slate-500">
+              Группы ещё не созданы
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {workspaceTeams.map((group) => {
+                const members = users.filter((u) => (u.groupIds || []).includes(group.id));
+                return (
+                  <div key={group.id} className="bg-white rounded-lg border border-slate-200 p-4">
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="min-w-0">
+                        <h5 className="font-medium text-slate-900 truncate">{group.name}</h5>
+                        {group.description ? (
+                          <p className="text-xs text-slate-500 mt-0.5">{group.description}</p>
+                        ) : null}
+                      </div>
+                      {canManageOrg ? (
+                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => openManageGroupMembers(group)}
+                            className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                            title="Управление участниками"
+                          >
+                            <UserPlus className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGroupEditing(group);
+                              setGroupModalVariant('team');
+                              setIsGroupModalOpen(true);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-brand hover:bg-brand-light rounded transition-colors"
+                            title="Редактировать группу"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void confirmDeleteGroup(group)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Удалить группу"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1 max-h-60 overflow-y-auto">
+                      {members.length === 0 ? (
+                        <div className="text-sm text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded">
+                          Нет участников
+                        </div>
+                      ) : (
+                        members.map((u) => (
+                          <MemberRow
+                            key={u.id}
+                            user={u}
+                            onRemove={canManageOrg ? () => void removeFromGroup(u, group.id) : undefined}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewMode === 'directions' && (
         <div>
           <div className="flex justify-between items-center mb-4">
             <div>
@@ -653,7 +798,7 @@ export function Employees() {
           </div>
           <div className="space-y-8">
             {workspaceDepartments.map((dept) => {
-              const deptGroups = workspaceGroups.filter((g) => g.departmentId === dept.id);
+              const deptGroups = workspaceDirections.filter((g) => g.departmentId === dept.id);
               return (
                 <div key={dept.id}>
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -663,6 +808,7 @@ export function Employees() {
                         type="button"
                         onClick={() => {
                           setGroupEditing(null);
+                          setGroupModalVariant('direction');
                           setCreateGroupDeptId(dept.id);
                           setIsGroupModalOpen(true);
                         }}
@@ -708,6 +854,7 @@ export function Employees() {
                                     type="button"
                                     onClick={() => {
                                       setGroupEditing(group);
+                                      setGroupModalVariant('direction');
                                       setCreateGroupDeptId(dept.id);
                                       setIsGroupModalOpen(true);
                                     }}
@@ -771,6 +918,7 @@ export function Employees() {
 
       <CreateGroupModal
         isOpen={isGroupModalOpen}
+        variant={groupModalVariant}
         editingGroup={groupEditing}
         departments={workspaceDepartments}
         defaultDepartmentId={createGroupDeptId}

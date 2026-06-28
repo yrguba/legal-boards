@@ -34,12 +34,17 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
       where: { workspaceId: req.params.workspaceId },
       include: {
         _count: {
-          select: { users: true },
+          select: { workspaceMembers: true },
         },
       },
     });
 
-    res.json(departments);
+    res.json(
+      departments.map((d) => ({
+        ...d,
+        _count: { users: d._count.workspaceMembers },
+      })),
+    );
   } catch (error) {
     console.error('Get departments error:', error);
     res.status(500).json({ error: 'Ошибка получения отделов' });
@@ -51,13 +56,17 @@ router.get('/:id', async (req: AuthRequest, res) => {
     const department = await prisma.department.findUnique({
       where: { id: req.params.id },
       include: {
-        users: {
+        workspaceMembers: {
           select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            avatar: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                avatar: true,
+              },
+            },
           },
         },
       },
@@ -67,7 +76,10 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Отдел не найден' });
     }
 
-    res.json(department);
+    res.json({
+      ...department,
+      users: department.workspaceMembers.map((m) => m.user),
+    });
   } catch (error) {
     console.error('Get department error:', error);
     res.status(500).json({ error: 'Ошибка получения отдела' });
@@ -78,6 +90,10 @@ router.post('/', async (req: AuthRequest, res) => {
   try {
     const { name, description, workspaceId } = req.body;
 
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Название отдела обязательно' });
+    }
+
     if (!workspaceId) {
       return res.status(400).json({ error: 'workspaceId обязателен' });
     }
@@ -87,8 +103,8 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const department = await prisma.department.create({
       data: {
-        name,
-        description,
+        name: name.trim(),
+        description: typeof description === 'string' ? description.trim() || null : null,
         workspaceId,
       },
     });
@@ -133,16 +149,24 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     const gate = await assertCanManageDepartment(req.userId!, req.params.id);
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
 
-    await prisma.user.updateMany({
-      where: { departmentId: req.params.id },
-      data: { departmentId: null },
+    const groupCount = await prisma.group.count({ where: { departmentId: req.params.id } });
+
+    await prisma.$transaction(async (tx) => {
+      if (groupCount > 0) {
+        await tx.userGroup.deleteMany({ where: { group: { departmentId: req.params.id } } });
+        await tx.group.deleteMany({ where: { departmentId: req.params.id } });
+      }
+      await tx.workspaceUser.updateMany({
+        where: { departmentId: req.params.id },
+        data: { departmentId: null },
+      });
+      await tx.department.delete({ where: { id: req.params.id } });
     });
 
-    await prisma.department.delete({
-      where: { id: req.params.id },
+    res.json({
+      message: 'Отдел удален',
+      deletedGroups: groupCount,
     });
-
-    res.json({ message: 'Отдел удален' });
   } catch (error) {
     console.error('Delete department error:', error);
     res.status(500).json({ error: 'Ошибка удаления отдела' });
@@ -154,19 +178,51 @@ router.post('/:id/members', async (req: AuthRequest, res) => {
     const gate = await assertCanManageDepartment(req.userId!, req.params.id);
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
 
-    const { userIds } = req.body;
+    const { userIds: rawUserIds } = req.body;
+    const departmentId = req.params.id;
+    const workspaceId = gate.workspaceId;
+    const userIds: string[] = Array.isArray(rawUserIds)
+      ? rawUserIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
 
-    await prisma.user.updateMany({
-      where: { departmentId: req.params.id },
-      data: { departmentId: null },
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { ownerId: true },
     });
-
-    if (userIds && userIds.length > 0) {
-      await prisma.user.updateMany({
-        where: { id: { in: userIds } },
-        data: { departmentId: req.params.id },
-      });
+    if (!workspace) {
+      return res.status(404).json({ error: 'Пространство не найдено' });
     }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.workspaceUser.updateMany({
+        where: { workspaceId, departmentId },
+        data: { departmentId: null },
+      });
+
+      if (userIds.length === 0) return;
+
+      const memberships = await tx.workspaceUser.findMany({
+        where: { workspaceId, userId: { in: userIds } },
+        select: { userId: true },
+      });
+      const memberSet = new Set(memberships.map((m) => m.userId));
+
+      await tx.workspaceUser.updateMany({
+        where: { workspaceId, userId: { in: userIds } },
+        data: { departmentId },
+      });
+
+      if (userIds.includes(workspace.ownerId) && !memberSet.has(workspace.ownerId)) {
+        await tx.workspaceUser.create({
+          data: {
+            workspaceId,
+            userId: workspace.ownerId,
+            role: 'admin',
+            departmentId,
+          },
+        });
+      }
+    });
 
     res.json({ message: 'Участники отдела обновлены' });
   } catch (error) {

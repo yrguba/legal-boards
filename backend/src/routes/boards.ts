@@ -15,6 +15,13 @@ import {
   loadAggregatedSourcesDto,
   validateAggregatedSourceBoardIds,
 } from '../utils/aggregatedBoard';
+import {
+  archiveBoard,
+  assertCanManageBoardArchive,
+  permanentDeleteBoard,
+  restoreBoard,
+} from '../utils/archive';
+import { isArchived, NOT_ARCHIVED } from '../utils/archiveScope';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -38,7 +45,7 @@ router.get('/workspace/:workspaceId', async (req: AuthRequest, res) => {
     }
 
     const boards = await prisma.board.findMany({
-      where: { workspaceId: req.params.workspaceId },
+      where: { workspaceId: req.params.workspaceId, ...NOT_ARCHIVED },
       include: {
         columns: { orderBy: { position: 'asc' } },
         taskFields: { orderBy: { position: 'asc' } },
@@ -183,6 +190,9 @@ router.get('/:id', async (req: AuthRequest, res) => {
     const board = await resolveBoardRef(prisma, idOrCode);
     if (!board) {
       return res.status(404).json({ error: 'Доска не найдена' });
+    }
+    if (isArchived(board)) {
+      return res.status(404).json({ error: 'Доска в архиве' });
     }
 
     const full = await prisma.board.findUnique({
@@ -871,6 +881,9 @@ router.post(
       if (msg === 'SOURCE_BOARD_NOT_FOUND') {
         return res.status(404).json({ error: 'Исходная доска не найдена' });
       }
+      if (msg === 'SOURCE_BOARD_ARCHIVED' || msg === 'TARGET_BOARD_ARCHIVED') {
+        return res.status(400).json({ error: 'Нельзя переносить задачи с архивной доски или на архивную доску' });
+      }
       if (msg === 'TARGET_BOARD_NOT_FOUND') {
         return res.status(404).json({ error: 'Целевая доска не найдена' });
       }
@@ -888,24 +901,98 @@ router.post(
 
 router.delete('/:id', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
   try {
+    const permanent = req.query.permanent === 'true' || req.query.permanent === '1';
     const idOrCode = req.params.id;
     const existing = await prisma.board.findFirst({
       where: { OR: [{ id: idOrCode }, { code: idOrCode }] },
-      select: { id: true },
+      select: { id: true, workspaceId: true, archivedAt: true },
     });
 
     if (!existing) {
       return res.status(404).json({ error: 'Доска не найдена' });
     }
 
-    await prisma.board.delete({
-      where: { id: existing.id },
+    const gate = await assertCanManageBoardArchive(prisma, existing, {
+      userId: req.userId!,
+      userRole: req.userRole,
     });
+    if (!gate.ok) {
+      return res.status(403).json({ error: gate.error });
+    }
 
-    res.json({ message: 'Доска удалена' });
+    if (permanent) {
+      await permanentDeleteBoard(prisma, existing.id);
+      res.json({ message: 'Доска удалена безвозвратно' });
+      return;
+    }
+
+    res.set('Deprecation', 'true');
+    res.set('Link', '</api/boards/{id}/archive>; rel="successor-version"');
+
+    if (existing.archivedAt) {
+      res.json({ message: 'Доска уже в архиве' });
+      return;
+    }
+
+    await archiveBoard(prisma, existing.id, req.userId!);
+    res.json({ message: 'Доска перенесена в архив' });
   } catch (error) {
     console.error('Delete board error:', error);
     res.status(500).json({ error: 'Ошибка удаления доски' });
+  }
+});
+
+router.post('/:id/archive', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+  try {
+    const board = await resolveBoardRef(prisma, req.params.id);
+    if (!board) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
+    const gate = await assertCanManageBoardArchive(prisma, board, {
+      userId: req.userId!,
+      userRole: req.userRole,
+    });
+    if (!gate.ok) {
+      return res.status(403).json({ error: gate.error });
+    }
+
+    if (board.archivedAt) {
+      return res.json({ message: 'Доска уже в архиве' });
+    }
+
+    await archiveBoard(prisma, board.id, req.userId!);
+    res.json({ message: 'Доска перенесена в архив' });
+  } catch (error) {
+    console.error('Archive board error:', error);
+    res.status(500).json({ error: 'Ошибка архивации доски' });
+  }
+});
+
+router.post('/:id/restore', requireStaffUser, authorize('admin', 'manager'), async (req: AuthRequest, res) => {
+  try {
+    const board = await resolveBoardRef(prisma, req.params.id);
+    if (!board) {
+      return res.status(404).json({ error: 'Доска не найдена' });
+    }
+
+    const gate = await assertCanManageBoardArchive(prisma, board, {
+      userId: req.userId!,
+      userRole: req.userRole,
+    });
+    if (!gate.ok) {
+      return res.status(403).json({ error: gate.error });
+    }
+
+    if (!board.archivedAt) {
+      return res.status(400).json({ error: 'Доска не в архиве' });
+    }
+
+    await restoreBoard(prisma, board.id);
+    res.json({ message: 'Доска восстановлена' });
+  } catch (error) {
+    console.error('Restore board error:', error);
+    res.status(500).json({ error: 'Ошибка восстановления доски' });
   }
 });
 

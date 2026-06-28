@@ -1,10 +1,17 @@
-import { Bot, Loader2, MessageSquare, Send } from 'lucide-react';
+import { useRef } from 'react';
+import { Bot, Loader2, MessageSquare, Paperclip, Send } from 'lucide-react';
+import {
+  MessageAttachmentItem,
+  PendingAttachmentPreview,
+  usePendingAttachmentPreviews,
+} from '../../../components/ChatAttachments';
 import { CommentContent } from '../../../components/CommentContent';
 import { CommentMentionTextarea } from '../../../components/CommentMentionTextarea';
 import { MarkdownEditorRoot } from '../../../components/markdown';
 import type { User } from '../../../types';
 import type { CommentMentionInsert } from '../../../utils/commentMentions';
 import type { TaskSidePanelsProps, TaskPanelType } from '../types';
+import { filePublicUrl } from '../utils/documentPaths';
 import { formatDateTime } from '../utils/format';
 import { TaskDocumentsPanel } from './TaskDocumentsPanel';
 import { TaskActivityPanel } from './TaskActivityPanel';
@@ -19,14 +26,28 @@ function ChatFooter(p: {
   assistantChatError: string | null;
   isPostingComment: boolean;
   isPostingAssistant: boolean;
+  attachmentsEnabled: boolean;
+  pendingCommentFiles: File[];
   users: User[];
   currentUserId?: string;
   onCommentText: (v: string) => void;
   onAssistantMessage: (v: string) => void;
+  onAddCommentFiles: (files: FileList | File[]) => void;
+  onRemoveCommentFile: (index: number) => void;
   onPostComment: () => void;
   onPostAssistant: () => void;
 }) {
+  const commentFileInputRef = useRef<HTMLInputElement>(null);
+  const pendingAttachmentPreviews = usePendingAttachmentPreviews(p.pendingCommentFiles);
+
   if (p.activePanel !== 'comments' && p.activePanel !== 'assistant') return null;
+
+  const canPostComment =
+    (p.commentText.trim().length > 0 ||
+      p.commentMentionInserts.length > 0 ||
+      p.pendingCommentFiles.length > 0) &&
+    !p.isPostingComment;
+
   return (
     <div className="relative z-20 shrink-0 border-t border-slate-200 bg-white p-4">
       {p.activePanel === 'assistant' && p.assistantChatError ? (
@@ -34,7 +55,45 @@ function ChatFooter(p: {
           {p.assistantChatError}
         </div>
       ) : null}
-      <div className="flex gap-2 items-end">
+      {p.activePanel === 'comments' && pendingAttachmentPreviews.length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {pendingAttachmentPreviews.map((item, index) => (
+            <PendingAttachmentPreview
+              key={item.key}
+              name={item.file.name}
+              type={item.file.type}
+              previewUrl={item.previewUrl}
+              onRemove={() => p.onRemoveCommentFile(index)}
+            />
+          ))}
+        </div>
+      ) : null}
+      <div className="flex items-end gap-2">
+        {p.activePanel === 'comments' && p.attachmentsEnabled ? (
+          <>
+            <label
+              className={`relative inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center self-end rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 ${
+                p.isPostingComment ? 'pointer-events-none opacity-50' : ''
+              }`}
+              title="Прикрепить файлы"
+            >
+              <input
+                ref={commentFileInputRef}
+                type="file"
+                multiple
+                className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                disabled={p.isPostingComment}
+                onChange={(e) => {
+                  if (e.target.files?.length) {
+                    p.onAddCommentFiles(e.target.files);
+                  }
+                  e.target.value = '';
+                }}
+              />
+              <Paperclip className="pointer-events-none size-5" aria-hidden />
+            </label>
+          </>
+        ) : null}
         {p.activePanel === 'comments' ? (
           <div
             key={p.commentComposeKey}
@@ -71,10 +130,10 @@ function ChatFooter(p: {
           }
           disabled={
             p.activePanel === 'comments'
-              ? !p.commentText.trim() || p.isPostingComment
+              ? !canPostComment
               : !p.assistantMessage.trim() || p.isPostingAssistant
           }
-          className="rounded bg-brand px-3 py-2 text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+          className="self-end rounded bg-brand px-3 py-2 text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Send className="h-4 w-4" />
         </button>
@@ -127,7 +186,23 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
                       </div>
                     </div>
                   </div>
-                  <CommentContent commentId={c.id} content={String(c.content || '')} />
+                  {c.content ? (
+                    <CommentContent commentId={c.id} content={String(c.content || '')} />
+                  ) : null}
+                  {Array.isArray(c.attachments) && c.attachments.length > 0 ? (
+                    <div className={`space-y-2 ${c.content ? 'mt-3' : ''}`}>
+                      {c.attachments.map((att: { id: string; name: string; type: string; path?: string }) => (
+                        <MessageAttachmentItem
+                          key={att.id}
+                          name={att.name}
+                          type={att.type}
+                          href={filePublicUrl(p.apiBaseUrl, att.path) ?? null}
+                          mine={false}
+                          onOpenPreview={p.onPreviewDoc}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ))
             )}
@@ -207,10 +282,14 @@ export function TaskSidePanels(p: TaskSidePanelsProps) {
         assistantChatError={p.assistantChatError}
         isPostingComment={p.isPostingComment}
         isPostingAssistant={p.isPostingAssistant}
+        attachmentsEnabled={p.attachmentsEnabled}
+        pendingCommentFiles={p.pendingCommentFiles}
         users={p.users}
         currentUserId={p.currentUserId}
         onCommentText={p.onCommentText}
         onAssistantMessage={p.onAssistantMessage}
+        onAddCommentFiles={p.onAddCommentFiles}
+        onRemoveCommentFile={p.onRemoveCommentFile}
         onPostComment={p.onPostComment}
         onPostAssistant={p.onPostAssistant}
       />

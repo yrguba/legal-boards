@@ -6,13 +6,15 @@ import { NotificationSettingsPanel } from '../components/NotificationSettingsPan
 import { MyProfileSettingsPanel } from '../components/MyProfileSettingsPanel';
 import { MyFeedbackPanel } from '../components/MyFeedbackPanel';
 import { QuickCreatePresetsPanel } from '../components/QuickCreatePresetsPanel';
+import { ArchivePanel } from '../components/ArchivePanel';
 import { useWorkspacePermissions } from '../utils/workspacePermissions';
-import { Building2, Users, Shield, Bell, UserCircle, MessageSquarePlus, Zap } from 'lucide-react';
+import { Building2, Users, Shield, Bell, UserCircle, MessageSquarePlus, Zap, Archive } from 'lucide-react';
 
 type SettingsTab =
   | 'profile'
   | 'feedback'
   | 'workspace'
+  | 'archive'
   | 'quickCreate'
   | 'users'
   | 'permissions'
@@ -70,6 +72,17 @@ export function Settings() {
             >
               <Building2 className="w-5 h-5" />
               <span>Рабочее пространство</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('archive')}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded transition-colors ${
+                activeTab === 'archive'
+                  ? 'bg-brand-light text-brand'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <Archive className="w-5 h-5" />
+              <span>Архив</span>
             </button>
             {canManageWorkspace ? (
               <button
@@ -148,6 +161,8 @@ export function Settings() {
           )}
 
           {activeTab === 'quickCreate' && canManageWorkspace ? <QuickCreatePresetsPanel /> : null}
+
+          {activeTab === 'archive' ? <ArchivePanel /> : null}
 
           {activeTab === 'users' && (
             <div className="bg-white rounded-lg border border-slate-200 p-6">

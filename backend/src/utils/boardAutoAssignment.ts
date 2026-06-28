@@ -126,6 +126,7 @@ async function usersForOnLoadTarget(
   members: Set<string>,
   targetKind: ParsedAutoAssignRule['targetKind'],
   targetId: string,
+  workspaceId: string,
 ): Promise<string[]> {
   const memberArr = [...members];
   if (memberArr.length === 0) return [];
@@ -135,14 +136,15 @@ async function usersForOnLoadTarget(
   }
 
   if (targetKind === 'department') {
-    const rows = await prisma.user.findMany({
+    const rows = await prisma.workspaceUser.findMany({
       where: {
-        id: { in: memberArr },
+        workspaceId,
+        userId: { in: memberArr },
         departmentId: targetId,
       },
-      select: { id: true },
+      select: { userId: true },
     });
-    return rows.map((r) => r.id);
+    return rows.map((r) => r.userId);
   }
 
   const inGroup = await prisma.userGroup.findMany({
@@ -157,20 +159,22 @@ async function filterByTarget(
   userIds: string[],
   targetKind: ParsedAutoAssignRule['targetKind'],
   targetId: string,
+  workspaceId: string,
 ): Promise<string[]> {
   if (userIds.length === 0) return [];
   if (targetKind === 'user') {
     return userIds.includes(targetId) ? [targetId] : [];
   }
   if (targetKind === 'department') {
-    const rows = await prisma.user.findMany({
+    const rows = await prisma.workspaceUser.findMany({
       where: {
-        id: { in: userIds },
+        workspaceId,
+        userId: { in: userIds },
         departmentId: targetId,
       },
-      select: { id: true },
+      select: { userId: true },
     });
-    const set = new Set(rows.map((r) => r.id));
+    const set = new Set(rows.map((r) => r.userId));
     return userIds.filter((id) => set.has(id));
   }
   const inGroup = await prisma.userGroup.findMany({
@@ -202,7 +206,7 @@ export async function resolveAssigneeFromBoardRules(
 
   if (rule.assignmentMode === 'by_priority') {
     let ordered = rule.priorityUserIds.filter((id) => members.has(id));
-    ordered = await filterByTarget(prisma, ordered, rule.targetKind, rule.targetId);
+    ordered = await filterByTarget(prisma, ordered, rule.targetKind, rule.targetId, opts.workspaceId);
     if (ordered.length === 0 && rule.targetKind === 'user' && members.has(rule.targetId)) {
       ordered = [rule.targetId];
     }
@@ -211,7 +215,13 @@ export async function resolveAssigneeFromBoardRules(
     return pickLeastLoadedUserId(ordered, counts);
   }
 
-  const pool = await usersForOnLoadTarget(prisma, members, rule.targetKind, rule.targetId);
+  const pool = await usersForOnLoadTarget(
+    prisma,
+    members,
+    rule.targetKind,
+    rule.targetId,
+    opts.workspaceId,
+  );
   if (pool.length === 0) return null;
 
   pool.sort((a, b) => a.localeCompare(b));

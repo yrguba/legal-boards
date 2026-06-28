@@ -336,9 +336,6 @@ export async function assertUserGroupsMatchDepartment(
   groupIds: string[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (groupIds.length === 0) return { ok: true };
-  if (!departmentId) {
-    return { ok: false, error: 'Назначьте отдел перед добавлением в группу направления' };
-  }
 
   const groups = await prisma.group.findMany({
     where: { id: { in: groupIds } },
@@ -350,6 +347,13 @@ export async function assertUserGroupsMatchDepartment(
   }
 
   for (const g of groups) {
+    if (g.departmentId === null) continue;
+    if (!departmentId) {
+      return {
+        ok: false,
+        error: `Направление «${g.name}» требует назначенного отдела у сотрудника`,
+      };
+    }
     if (g.departmentId !== departmentId) {
       return {
         ok: false,

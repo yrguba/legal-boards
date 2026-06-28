@@ -56,6 +56,7 @@ import { TaskPriorityBadge } from '../components/TaskPriorityBadge';
 import { TASK_PRIORITY_KEYS, normalizeTaskPriority } from '../utils/taskPriority';
 import { boardTimeTrackingIsConfigured } from '../utils/boardTimeTracking';
 import { useApp } from '../store/AppContext';
+import { useRealtime } from '../store/RealtimeContext';
 import { useWorkspacePermissions } from '../utils/workspacePermissions';
 import {
   AlertDialog,
@@ -74,6 +75,7 @@ import {
   applyDragReorder,
   columnIdsEqual,
   getColumnTaskIds,
+  prependCreatedTask,
   sortTasksByPosition,
 } from '../utils/kanbanTaskOrder';
 
@@ -294,6 +296,7 @@ export function Board() {
   const { boardId } = useParams();
   const navigate = useNavigate();
   const { currentUser } = useApp();
+  const { subscribe } = useRealtime();
   const { canManageWorkspace } = useWorkspacePermissions();
   const [board, setBoard] = useState<BoardType | null>(null);
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
@@ -376,6 +379,46 @@ export function Board() {
       cancelled = true;
     };
   }, [boardId]);
+
+  const watchedBoardIds = useMemo(() => {
+    if (!board) return new Set<string>();
+    if (board.kind === 'aggregated') {
+      return new Set((board.sources ?? []).map((s) => s.id));
+    }
+    return new Set([board.id]);
+  }, [board]);
+
+  useEffect(() => {
+    if (watchedBoardIds.size === 0) return;
+
+    return subscribe((data) => {
+      if (data.type !== 'task_created') return;
+      const eventBoardId = typeof data.boardId === 'string' ? data.boardId : '';
+      if (!eventBoardId || !watchedBoardIds.has(eventBoardId)) return;
+
+      const rawTask = data.task;
+      if (!rawTask || typeof rawTask !== 'object') return;
+      const baseTask = rawTask as TaskType;
+      if (!baseTask.id) return;
+
+      let incoming = baseTask;
+      if (board?.kind === 'aggregated') {
+        const source = board.sources?.find((s) => s.id === eventBoardId);
+        if (!source) return;
+        const col = source.columns.find((c) => c.id === incoming.columnId);
+        incoming = {
+          ...incoming,
+          sourceBoardId: eventBoardId,
+          sourceBoardCode: source.code,
+          sourceBoardName: source.name,
+          sourceColumnId: incoming.columnId,
+          sourceColumnName: col?.name ?? '—',
+        };
+      }
+
+      setTasks((prev) => prependCreatedTask(prev, incoming));
+    });
+  }, [board, watchedBoardIds, subscribe]);
 
   const boardTasks = tasks;
 
@@ -608,14 +651,7 @@ export function Board() {
       await uploadPendingTaskAttachments(String(created.id), pendingFiles);
     }
 
-    setTasks((prev) => {
-      const next = prev.map((t) =>
-        t.columnId === createTaskColumnId
-          ? { ...t, position: (typeof t.position === 'number' ? t.position : 0) + 1 }
-          : t,
-      );
-      return [{ ...created, position: created.position ?? 0 }, ...next];
-    });
+    setTasks((prev) => prependCreatedTask(prev, { ...created, position: created.position ?? 0 }));
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -1020,7 +1056,7 @@ export function Board() {
                   className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
-                  Удалить
+                  В архив
                 </button>
               </>
             ) : null}
@@ -1315,9 +1351,9 @@ export function Board() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Удалить доску?</AlertDialogTitle>
+            <AlertDialogTitle>Перенести доску в архив?</AlertDialogTitle>
             <AlertDialogDescription>
-              Доска «{board?.name}» и все связанные задачи будут удалены без возможности восстановления.
+              Доска «{board?.name}» и все её задачи будут перенесены в архив. Восстановление — в настройках → Архив.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteBoardError ? (
@@ -1336,7 +1372,7 @@ export function Board() {
               )}
               onClick={() => void confirmDeleteBoard()}
             >
-              {isDeletingBoard ? 'Удаление…' : 'Удалить'}
+              {isDeletingBoard ? 'Архивация…' : 'В архив'}
             </button>
           </AlertDialogFooter>
         </AlertDialogContent>

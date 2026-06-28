@@ -2,6 +2,7 @@ import type { Board, PrismaClient } from '@prisma/client';
 import type { AuthRequest } from '../middleware/auth';
 import { assertWorkspaceMember, getUserDocumentAccess } from './documentAccess';
 import { canSeeAggregatedBoard } from './boardAccess';
+import { NOT_ARCHIVED } from './archiveScope';
 
 export const BOARD_KIND_STANDARD = 'standard';
 export const BOARD_KIND_AGGREGATED = 'aggregated';
@@ -22,7 +23,7 @@ export async function validateAggregatedSourceBoardIds(
   }
 
   const boards = await prisma.board.findMany({
-    where: { id: { in: unique }, workspaceId },
+    where: { id: { in: unique }, workspaceId, ...NOT_ARCHIVED },
   });
 
   if (boards.length !== unique.length) {
@@ -55,7 +56,7 @@ export async function loadAggregatedSourcesDto(
   aggregatedBoardId: string,
 ): Promise<AggregatedSourceDto[]> {
   const rows = await prisma.aggregatedBoardSource.findMany({
-    where: { aggregatedBoardId },
+    where: { aggregatedBoardId, sourceBoard: NOT_ARCHIVED },
     orderBy: { position: 'asc' },
     include: {
       sourceBoard: {

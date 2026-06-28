@@ -28,7 +28,7 @@ export function CommentMentionTextarea({
   currentUserId,
   disabled,
   placeholder = 'Комментарий..',
-  rows = 3,
+  rows = 2,
 }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
@@ -152,7 +152,7 @@ export function CommentMentionTextarea({
         onKeyDown={handleKeyDown}
         onClick={syncMentionFromCursor}
         onKeyUp={syncMentionFromCursor}
-        className="min-h-[72px] w-full resize-y rounded border-0 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+        className="min-h-[44px] max-h-32 w-full resize-y rounded border-0 bg-white px-3 py-2 text-sm leading-5 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
       />
 
       {menuOpen ? (

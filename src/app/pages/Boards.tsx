@@ -375,7 +375,7 @@ export function Boards() {
                             setBoardPendingDelete(board);
                           }}
                           className="p-2 rounded hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors"
-                          aria-label="Удалить доску"
+                          aria-label="В архив"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -450,11 +450,11 @@ export function Boards() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Удалить доску?</AlertDialogTitle>
+            <AlertDialogTitle>Перенести доску в архив?</AlertDialogTitle>
             <AlertDialogDescription>
               {boardPendingDelete?.kind === 'aggregated'
-                ? `Сводная доска «${boardPendingDelete?.name}» будет удалена. Исходные доски и их задачи не затрагиваются.`
-                : `Доска «${boardPendingDelete?.name}» и все связанные задачи будут удалены без возможности восстановления.`}
+                ? `Сводная доска «${boardPendingDelete?.name}» будет скрыта из списка. Её можно восстановить в настройках → Архив.`
+                : `Доска «${boardPendingDelete?.name}» и все её задачи будут перенесены в архив. Восстановление — в настройках → Архив.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -468,7 +468,7 @@ export function Boards() {
               )}
               onClick={() => void confirmDeleteBoard()}
             >
-              {isDeletingBoard ? 'Удаление…' : 'Удалить'}
+              {isDeletingBoard ? 'Архивация…' : 'В архив'}
             </button>
           </AlertDialogFooter>
         </AlertDialogContent>
