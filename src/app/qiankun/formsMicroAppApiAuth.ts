@@ -1,6 +1,6 @@
 import { isLegalFormsApiPath } from './formsMicroApp.constants';
+import { normalizeFormsAccessToken, readFormsAccessTokenFromStorage } from './formsMicroAppBridge';
 
-const FORMS_ACCESS_TOKEN_KEY = 'accessToken';
 const PATCH_FLAG = '__formsApiFetchPatched';
 
 /** LF session token из URL (?access_token=.eJx…), не JWT. */
@@ -12,7 +12,7 @@ export function isLegalFormsFlaskSessionToken(token: string): boolean {
 }
 
 function readFormsAccessToken(): string | null {
-  return localStorage.getItem(FORMS_ACCESS_TOKEN_KEY);
+  return readFormsAccessTokenFromStorage();
 }
 
 function resolveRequestUrl(input: RequestInfo | URL): URL | null {
@@ -30,15 +30,16 @@ function applyLegalFormsAuth(
   parsed: URL,
   token: string,
 ): void {
-  if (isLegalFormsFlaskSessionToken(token)) {
+  const clean = normalizeFormsAccessToken(token) ?? token.trim();
+  if (isLegalFormsFlaskSessionToken(clean)) {
     // LF API: Bearer с .eJx… → «Malformed token» (JWT decoder). Только query, как на standalone.
     headers.delete('Authorization');
-    parsed.searchParams.set('access_token', token);
+    parsed.searchParams.set('access_token', clean);
     return;
   }
 
   if (!headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
+    headers.set('Authorization', `Bearer ${clean}`);
   }
 }
 

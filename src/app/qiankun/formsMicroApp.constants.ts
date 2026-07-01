@@ -44,7 +44,11 @@ export const FORMS_API_PATH_PREFIXES = [
 ] as const;
 
 export function isLegalFormsApiPath(pathname: string): boolean {
+  const apiPath = pathname.startsWith(`${DEFAULT_FORMS_DOCSTREAM_PREFIX}/api/`)
+    ? pathname.slice(DEFAULT_FORMS_DOCSTREAM_PREFIX.length)
+    : pathname;
+
   return FORMS_API_PATH_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    (prefix) => apiPath === prefix || apiPath.startsWith(`${prefix}/`),
   );
 }

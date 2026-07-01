@@ -18,6 +18,7 @@ import { Workspaces } from './pages/Workspaces';
 import { Knowledge } from './pages/Knowledge';
 import { LexClients } from './pages/LexClients';
 import { Analytics } from './pages/Analytics';
+import { MyTasks } from './pages/MyTasks';
 import { Conferences } from './pages/Conferences';
 import { ConferenceRoom } from './pages/ConferenceRoom';
 import { ConferenceJoin } from './pages/ConferenceJoin';
@@ -139,6 +140,10 @@ export const router = createBrowserRouter([
       {
         path: 'docstream/expertise/*',
         element: <DocstreamRouteRedirect />,
+      },
+      {
+        path: 'my-tasks',
+        element: <MyTasks />,
       },
       {
         path: 'employees',

@@ -168,3 +168,40 @@ export function docstreamBrowserPathToHost(pathname: string): string | null {
   if (hostPath === pathname) return null;
   return hostPath;
 }
+
+/** session / expertise id из пути LF (/docstream/expertise/{id}/… или /forms/{id}/flows/…). */
+export function extractExpertiseIdFromFormsPath(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  let pathname = trimmed;
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      pathname = new URL(trimmed).pathname;
+    } catch {
+      return null;
+    }
+  } else {
+    const q = trimmed.indexOf('?');
+    pathname = q >= 0 ? trimmed.slice(0, q) : trimmed;
+  }
+
+  pathname = pathname.replace(/\/+$/, '') || '/';
+
+  const docstreamMatch = pathname.match(DOCSTREAM_FLOW_PATH);
+  if (docstreamMatch) return docstreamMatch[1];
+
+  const legacyExpertiseHost = pathname.match(HOST_FLOW_LEGACY_EXPERTISE_PATH);
+  if (legacyExpertiseHost) return legacyExpertiseHost[1];
+
+  const hostMatch = pathname.match(HOST_FLOW_PATH);
+  if (hostMatch) return hostMatch[1];
+
+  const legacyHost = pathname.match(LEGACY_HOST_FORMS_WITH_VERSION);
+  if (legacyHost) return legacyHost[2];
+
+  const legacyStandalone = pathname.match(LEGACY_STANDALONE_FLOW_PATH);
+  if (legacyStandalone) return legacyStandalone[2];
+
+  return null;
+}

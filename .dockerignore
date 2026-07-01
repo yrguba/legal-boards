@@ -1,0 +1,31 @@
+# Frontend Docker build — контекст только для deploy/Dockerfile.frontend
+
+.git
+.gitignore
+.cursor
+.agent
+**/.DS_Store
+
+# Зависимости и артефакты сборки
+node_modules
+dist
+**/node_modules
+**/dist
+
+# Не нужны для vite build
+backend
+lexpro-front
+docs
+deploy/on-prem
+
+# Секреты и локальные данные
+.env
+.env.*
+**/.env
+**/.env.*
+**/uploads
+
+# Прочее
+*.log
+coverage
+terminals

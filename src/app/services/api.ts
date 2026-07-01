@@ -423,6 +423,10 @@ export const workspacesApi = {
       name: string;
       boardId: string;
       columnId: string;
+      typeId?: string | null;
+      legalFormsEnabled?: boolean;
+      legalFormsPath?: string | null;
+      legalFormsAccessToken?: string | null;
       position?: number;
       enabled?: boolean;
     }>,
@@ -673,6 +677,17 @@ export const tasksApi = {
     return fetchApi<any[]>(`/tasks/board/${boardId}`);
   },
 
+  async getMyTasks(
+    workspaceId: string,
+    opts?: { scope?: 'assigned' | 'created' | 'all' },
+  ) {
+    const params = new URLSearchParams({ workspaceId });
+    if (opts?.scope && opts.scope !== 'assigned') {
+      params.set('scope', opts.scope);
+    }
+    return fetchApi<any[]>(`/tasks/my?${params.toString()}`);
+  },
+
   async getById(id: string) {
     return fetchApi<any>(`/tasks/${id}`);
   },
@@ -813,6 +828,13 @@ export const tasksApi = {
       throw new ApiError(response.status, error.error);
     }
     return response.json();
+  },
+
+  async attachLink(taskId: string, url: string, name?: string) {
+    return fetchApi<any>(`/tasks/${taskId}/attachments/link`, {
+      method: 'POST',
+      body: JSON.stringify({ url, name }),
+    });
   },
 
   async patchTaskConclusion(taskId: string, conclusionText: string | null) {

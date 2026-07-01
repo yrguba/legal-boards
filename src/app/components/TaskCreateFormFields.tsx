@@ -181,6 +181,7 @@ export function TaskCreateFormFields({
   board,
   hideAuthor = false,
   hideAssignee = false,
+  hideTypeSelector = false,
 }: {
   form: TaskCreateFormState;
   users: User[];
@@ -188,6 +189,7 @@ export function TaskCreateFormFields({
   board: Board | null;
   hideAuthor?: boolean;
   hideAssignee?: boolean;
+  hideTypeSelector?: boolean;
 }) {
   const {
     typeId,
@@ -214,6 +216,7 @@ export function TaskCreateFormFields({
   return (
     <MarkdownEditorRoot>
       <>
+      {!hideTypeSelector ? (
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">Тип *</label>
         <select value={typeId} onChange={(e) => setTypeId(e.target.value)} className={inputClassName}>
@@ -227,6 +230,7 @@ export function TaskCreateFormFields({
           ))}
         </select>
       </div>
+      ) : null}
 
       {!hideAuthor ? (
         <div>

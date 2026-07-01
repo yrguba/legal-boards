@@ -9,6 +9,13 @@ import {
   DialogTitle,
 } from './ui/dialog';
 import { FORMS_MICRO_APP_CONTAINER } from '../qiankun/formsMicroApp.config';
+import {
+  generateAndAttachLegalExpertiseDocument,
+  requestLegalExpertiseConclusion,
+  resolveExpertiseIdForFormsPath,
+} from '../qiankun/formsLegalExpertiseApi';
+import { resetFormsHostSession } from '../qiankun/formsMicroAppHostBridge';
+import { legalFormsDialogHandlers } from '../qiankun/formsMicroAppDialogHandlers';
 import { mountLegalFormsMicroApp, unmountLegalFormsMicroApp } from '../qiankun/loadLegalFormsMicroApp';
 
 type Props = {
@@ -21,8 +28,12 @@ type Props = {
   accessToken: string | null;
   submitting?: boolean;
   error?: string | null;
+  /** Если задан — после conclusion документ прикрепляется к задаче. */
+  attachDocumentToTaskId?: string;
   onClose: () => void;
   onComplete: () => void | Promise<void>;
+  /** Вызывается микрофронтом LF через prop saveForm — сохраняем данные формы у себя. */
+  onSaveForm?: (data: unknown) => void;
 };
 
 const FORMS_CONTAINER_ID = FORMS_MICRO_APP_CONTAINER.replace(/^#/, '');
@@ -37,13 +48,21 @@ export function LegalFormsMicroAppModal({
   accessToken,
   submitting = false,
   error = null,
+  attachDocumentToTaskId,
   onClose,
   onComplete,
+  onSaveForm,
 }: Props) {
   const [mountContainer, setMountContainer] = useState<HTMLDivElement | null>(null);
   const [booting, setBooting] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
-  const mountedRef = useRef(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const onSaveFormRef = useRef(onSaveForm);
+
+  useEffect(() => {
+    onSaveFormRef.current = onSaveForm;
+  }, [onSaveForm]);
 
   const containerRef = useCallback((node: HTMLDivElement | null) => {
     setMountContainer(node);
@@ -52,11 +71,15 @@ export function LegalFormsMicroAppModal({
   useEffect(() => {
     if (!open) {
       void unmountLegalFormsMicroApp();
+      resetFormsHostSession();
       setBootError(null);
+      setActionError(null);
       setBooting(false);
-      mountedRef.current = false;
+      setGenerating(false);
       return;
     }
+
+    resetFormsHostSession((data) => onSaveFormRef.current?.(data));
 
     if (pathError) {
       setBootError(pathError);
@@ -75,6 +98,7 @@ export function LegalFormsMicroAppModal({
     let cancelled = false;
     setBooting(true);
     setBootError(null);
+    setActionError(null);
 
     void mountLegalFormsMicroApp(mountContainer, formsPath, accessToken, formsEntry)
       .then(() => {
@@ -82,7 +106,6 @@ export function LegalFormsMicroAppModal({
           void unmountLegalFormsMicroApp();
           return;
         }
-        mountedRef.current = true;
         setBooting(false);
       })
       .catch((e: unknown) => {
@@ -93,19 +116,56 @@ export function LegalFormsMicroAppModal({
 
     return () => {
       cancelled = true;
-      mountedRef.current = false;
       void unmountLegalFormsMicroApp();
     };
   }, [open, formsPath, formsEntry, accessToken, pathError, mountContainer]);
 
-  const displayError = error || bootError;
+  const displayError = error || bootError || actionError;
+
+  const handleGenerateDocument = async () => {
+    if (!formsPath || !accessToken?.trim()) return;
+
+    const expertiseId = resolveExpertiseIdForFormsPath(formsPath);
+    if (!expertiseId) {
+      setActionError('Не удалось определить expertiseId из пути к форме.');
+      return;
+    }
+
+    setActionError(null);
+    setGenerating(true);
+    try {
+      if (attachDocumentToTaskId) {
+        await generateAndAttachLegalExpertiseDocument(
+          attachDocumentToTaskId,
+          formsPath,
+          accessToken,
+        );
+      } else {
+        const res = await requestLegalExpertiseConclusion(expertiseId, accessToken);
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '');
+          throw new Error(
+            detail.trim() || `Не удалось сформировать документ (HTTP ${res.status})`,
+          );
+        }
+      }
+      await onComplete();
+    } catch (e: unknown) {
+      setActionError(e instanceof Error ? e.message : 'Не удалось сформировать документ');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const busy = submitting || booting || generating;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && !submitting && !booting && onClose()}>
+    <Dialog modal={false} open={open} onOpenChange={(v) => !v && !busy && onClose()}>
       <DialogContent
         size="xl"
         className="flex h-[90vh] max-h-[900px] flex-col gap-0 overflow-hidden p-0"
         style={{ width: 'min(95vw, 76.8rem)', maxWidth: '76.8rem' }}
+        {...legalFormsDialogHandlers}
       >
         <DialogHeader className="shrink-0 border-b border-slate-200 px-4 py-3">
           <DialogTitle>{title}</DialogTitle>
@@ -142,7 +202,7 @@ export function LegalFormsMicroAppModal({
         <DialogFooter className="shrink-0 gap-2 border-t border-slate-200 px-4 py-3 sm:gap-0">
           <button
             type="button"
-            disabled={submitting || booting}
+            disabled={busy}
             onClick={onClose}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
@@ -150,12 +210,14 @@ export function LegalFormsMicroAppModal({
           </button>
           <button
             type="button"
-            disabled={submitting || booting || !formsPath || Boolean(displayError)}
-            onClick={() => void onComplete()}
+            disabled={
+              busy || !formsPath || !accessToken?.trim() || Boolean(pathError) || Boolean(bootError)
+            }
+            onClick={() => void handleGenerateDocument()}
             className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50"
           >
-            {submitting ? <Loader2 className="size-4 animate-spin" /> : null}
-            Готово — продолжить
+            {generating || submitting ? <Loader2 className="size-4 animate-spin" /> : null}
+            Сформировать документ
           </button>
         </DialogFooter>
       </DialogContent>

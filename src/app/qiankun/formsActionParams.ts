@@ -1,4 +1,3 @@
-import type { BoardColumnActionRule } from '../features/board-settings/boardAdvancedSettings.types';
 import type { TaskField } from '../types';
 import type { TaskForColumnChecks } from '../utils/boardColumnActions';
 import { getDescriptionFieldId, getTitleFieldId } from '../pages/task/utils/taskFieldIds';
@@ -136,8 +135,15 @@ export function parseFormsFullPath(raw: string): ResolvedFormsMount {
   };
 }
 
+export type LegalFormsActionConfig = {
+  formsPath?: string;
+  /** Статичный LF access_token (пресет быстрого создания). */
+  formsAccessToken?: string;
+  formsAccessTokenFieldId?: string;
+};
+
 export function resolveFormsMountFromActionConfig(
-  config: BoardColumnActionRule['config'],
+  config: LegalFormsActionConfig,
   task: TaskForColumnChecks,
   taskFields: TaskField[],
 ): ResolvedFormsMount {
@@ -183,10 +189,15 @@ export function resolveFormsMountFromActionConfig(
 }
 
 export function resolveFormsAccessTokenForTask(
-  config: BoardColumnActionRule['config'],
+  config: LegalFormsActionConfig,
   task: TaskForColumnChecks,
   taskFields: TaskField[],
 ): string | null {
+  const fromPreset = config.formsAccessToken?.trim();
+  if (fromPreset) {
+    return persistFormsAccessToken(fromPreset);
+  }
+
   const configured = config.formsPath?.trim() ?? '';
   const rawPath = configured
     ? resolveFormsActionParam(config.formsPath, task, taskFields).trim()

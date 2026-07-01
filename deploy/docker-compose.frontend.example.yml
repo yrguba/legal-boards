@@ -14,7 +14,9 @@ services:
         VITE_API_URL: /api
         # Legal Forms (qiankun): false по умолчанию; включить когда готов nginx LF API
         VITE_FORMS_MICROAPP_ENABLED: "false"
-        # VITE_WS_URL не нужен: prod использует wss://legal-boards.ru/ws через same origin
+        # VITE_FORMS_API_ORIGIN=https://legal-forms.customer.ru
+        # VITE_FORMS_DOCSTREAM_ORIGIN=https://legal-forms.customer.ru/docstream
+        # VITE_WS_URL не нужен: prod использует wss://…/ws через same origin
     ports:
       - "${FRONTEND_PORT:-8080}:80"
     restart: unless-stopped

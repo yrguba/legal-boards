@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react';
+import type { LegalFormsActionConfig } from '../qiankun/formsActionParams';
 import type { TaskField } from '../types';
-import type { ColumnTransitionInteractiveStep, TaskForColumnChecks } from '../utils/boardColumnActions';
+import type { TaskForColumnChecks } from '../utils/boardColumnActions';
 import {
   resolveFormsAccessTokenForTask,
   resolveFormsMountFromActionConfig,
@@ -10,58 +11,56 @@ import { getFormsHostSavedFormData } from '../qiankun/formsMicroAppHostBridge';
 import { LegalFormsMicroAppModal } from './LegalFormsMicroAppModal';
 
 type Props = {
-  step: ColumnTransitionInteractiveStep;
-  stepIndex: number;
-  stepsLength: number;
+  open: boolean;
+  title: string;
+  description?: string;
+  config: LegalFormsActionConfig;
   task: TaskForColumnChecks;
   taskFields: TaskField[];
-  targetColumnName?: string;
-  submitting: boolean;
-  error: string | null;
+  attachDocumentToTaskId?: string;
+  submitting?: boolean;
+  error?: string | null;
   onClose: () => void;
   onComplete: (payload: Record<string, unknown>) => void | Promise<void>;
 };
 
-export function LegalFormsColumnStep({
-  step,
-  stepIndex,
-  stepsLength,
+export function LegalFormsTaskModal({
+  open,
+  title,
+  description,
+  config,
   task,
   taskFields,
-  targetColumnName,
-  submitting,
-  error,
+  attachDocumentToTaskId,
+  submitting = false,
+  error = null,
   onClose,
   onComplete,
 }: Props) {
   const formsMount = useMemo(
-    () => resolveFormsMountFromActionConfig(step.rule.config, task, taskFields),
-    [step.rule.config, task, taskFields],
+    () => resolveFormsMountFromActionConfig(config, task, taskFields),
+    [config, task, taskFields],
   );
 
   const formsAccessToken = useMemo(
-    () => resolveFormsAccessTokenForTask(step.rule.config, task, taskFields),
-    [step.rule.config, task, taskFields],
+    () => resolveFormsAccessTokenForTask(config, task, taskFields),
+    [config, task, taskFields],
   );
 
   const savedFormRef = useRef<unknown>(null);
 
-  const phaseLabel =
-    step.phase === 'enter'
-      ? `Для перехода в «${targetColumnName || 'новый статус'}»`
-      : 'Перед выходом из текущего статуса';
-
   return (
     <LegalFormsMicroAppModal
-      open
-      title={step.rule.name.trim() || 'Форма Legal Forms'}
-      description={`${phaseLabel} — шаг ${stepIndex + 1} из ${stepsLength}`}
+      open={open}
+      title={title}
+      description={description}
       formsPath={formsMount.embeddedPath}
       formsEntry={formsMount.entry ?? FORMS_MICRO_APP_ENTRY}
       pathError={formsMount.error}
       accessToken={formsAccessToken}
       submitting={submitting}
       error={error}
+      attachDocumentToTaskId={attachDocumentToTaskId}
       onClose={onClose}
       onSaveForm={(data) => {
         savedFormRef.current = data;
@@ -77,4 +76,4 @@ export function LegalFormsColumnStep({
   );
 }
 
-export default LegalFormsColumnStep;
+export default LegalFormsTaskModal;

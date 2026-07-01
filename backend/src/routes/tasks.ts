@@ -9,6 +9,7 @@ import { createAndBroadcastNotification } from '../utils/notifications';
 import { parseCommentMentionUserIds } from '../utils/commentMentions';
 import { getUploadsPath, toPublicUploadPath } from '../uploadsPath';
 import { decodeMultipartFilename } from '../utils/decodeMultipartFilename';
+import { assertWorkspaceMember } from '../utils/documentAccess';
 import { assertUserCanAccessTask } from '../utils/taskAccess';
 import { completeChat } from '../services/groqAssistant';
 import {
@@ -420,6 +421,105 @@ router.get('/board/:boardId', async (req: AuthRequest, res) => {
   }
 });
 
+router.get('/my', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId || !req.userId) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
+    const workspaceId =
+      typeof req.query.workspaceId === 'string' ? req.query.workspaceId.trim() : '';
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Укажите workspaceId' });
+    }
+
+    const member = await assertWorkspaceMember(prisma, workspaceId, req.userId, req.userRole);
+    if (!member) {
+      return res.status(403).json({ error: 'Нет доступа к этому пространству' });
+    }
+
+    const scopeRaw =
+      typeof req.query.scope === 'string' ? req.query.scope.trim().toLowerCase() : 'assigned';
+    const scope =
+      scopeRaw === 'created' || scopeRaw === 'all' ? scopeRaw : ('assigned' as const);
+
+    const userFilter =
+      scope === 'assigned'
+        ? { assigneeId: req.userId }
+        : scope === 'created'
+          ? { createdBy: req.userId }
+          : { OR: [{ assigneeId: req.userId }, { createdBy: req.userId }] };
+
+    const tasks = await prisma.task.findMany({
+      where: {
+        ...NOT_ARCHIVED,
+        ...userFilter,
+        board: { workspaceId, ...NOT_ARCHIVED },
+      },
+      include: {
+        type: true,
+        assignee: {
+          select: { id: true, name: true, email: true, avatar: true },
+        },
+        creator: {
+          select: { id: true, name: true, email: true },
+        },
+        board: { select: { id: true, code: true, name: true } },
+        column: { select: { id: true, name: true } },
+        _count: { select: { boardPlacements: true } },
+        boardPlacements: {
+          where: { isPrimary: true },
+          take: 1,
+          include: {
+            type: true,
+            board: { select: { id: true, code: true, name: true } },
+            column: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const payload = tasks.map((t) => {
+      const primary = t.boardPlacements[0];
+      const unified = unifyTaskRow(t as Record<string, unknown>);
+      const placementBoard = primary?.board ?? t.board;
+      const placementColumn = primary?.column ?? t.column;
+      const shaped = primary
+        ? applyPlacementToTaskRow(
+            enrichTaskWithKey(unified, t.board.code),
+            {
+              boardId: primary.boardId,
+              columnId: primary.columnId,
+              typeId: primary.typeId,
+              position: primary.position,
+              isPrimary: primary.isPrimary,
+              type: primary.type,
+            },
+            {
+              boardCode: placementBoard.code,
+              primaryBoardCode: t.board.code,
+              taskNumber: t.number,
+              boardPlacementsCount: t._count.boardPlacements,
+            },
+          )
+        : enrichTaskWithKey(unified, t.board.code);
+
+      return {
+        ...shaped,
+        boardName: placementBoard.name,
+        columnName: placementColumn?.name ?? '—',
+        displayBoardId: primary?.boardId ?? t.boardId,
+      };
+    });
+
+    res.json(payload);
+  } catch (error) {
+    console.error('Get my tasks error:', error);
+    res.status(500).json({ error: 'Ошибка получения задач' });
+  }
+});
+
 router.post('/:id/attachments', taskUpload.single('file'), async (req: AuthRequest, res) => {
   try {
     if (!req.file) {
@@ -472,6 +572,66 @@ router.post('/:id/attachments', taskUpload.single('file'), async (req: AuthReque
   } catch (error) {
     console.error('Upload task attachment error:', error);
     return res.status(500).json({ error: 'Ошибка загрузки вложения' });
+  }
+});
+
+router.post('/:id/attachments/link', async (req: AuthRequest, res) => {
+  try {
+    if (req.lexClientId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Требуется авторизация' });
+    }
+
+    const taskId = taskIdParam(req);
+    const gate = await assertUserCanAccessTask(prisma, taskId, accessCtx(req));
+    if (!gate.ok) {
+      return res.status(404).json({ error: 'Задача не найдена или нет доступа' });
+    }
+
+    const rawUrl = (req.body as { url?: unknown })?.url;
+    const rawName = (req.body as { name?: unknown })?.name;
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+      return res.status(400).json({ error: 'Укажите url' });
+    }
+    const url = rawUrl.trim();
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return res.status(400).json({ error: 'Некорректный URL' });
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return res.status(400).json({ error: 'URL должен начинаться с http:// или https://' });
+    }
+
+    const name =
+      typeof rawName === 'string' && rawName.trim()
+        ? rawName.trim().slice(0, 255)
+        : 'Документ LF';
+
+    const att = await prisma.taskAttachment.create({
+      data: {
+        taskId,
+        name,
+        type: 'application/link',
+        size: 0,
+        path: url,
+        uploadedBy: req.userId,
+        uploadedByLexClientId: null,
+        purpose: 'general',
+      },
+      include: {
+        uploader: { select: { id: true, name: true, email: true, avatar: true } },
+        lexUploader: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    return res.json(unifyAttachmentRow(att as Record<string, unknown>));
+  } catch (error) {
+    console.error('Link task attachment error:', error);
+    return res.status(500).json({ error: 'Ошибка добавления ссылки' });
   }
 });
 

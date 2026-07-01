@@ -15,5 +15,7 @@ export function normalizeStoragePath(raw: string | undefined): string | undefine
 
 export function filePublicUrl(baseUrl: string, path: string | undefined): string | undefined {
   if (!path) return undefined;
+  const trimmed = String(path).trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return `${baseUrl}${normalizeStoragePath(path)}`;
 }

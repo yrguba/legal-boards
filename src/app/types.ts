@@ -106,6 +106,11 @@ export interface QuickCreateTaskPreset {
   boardName: string;
   columnId: string;
   columnName: string;
+  typeId?: string;
+  typeName?: string;
+  legalFormsEnabled: boolean;
+  legalFormsPath?: string;
+  legalFormsAccessToken?: string;
   position: number;
   enabled: boolean;
 }

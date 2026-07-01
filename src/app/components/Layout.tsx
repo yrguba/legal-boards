@@ -21,6 +21,7 @@ import {
   Video,
   Plus,
   MessageSquarePlus,
+  ListTodo,
   ClipboardList,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -133,6 +134,7 @@ export function Layout() {
   const navItems = useMemo(() => {
     const items: { to: string; end?: boolean; label: string; icon: typeof LayoutDashboard }[] = [
       { to: '/', end: true, label: 'Доски', icon: LayoutDashboard },
+      { to: '/my-tasks', label: 'Мои задачи', icon: ListTodo },
       { to: '/employees', label: 'Сотрудники', icon: Users },
     ];
     if (documents) items.push({ to: '/documents', label: 'Документы', icon: FileText });
